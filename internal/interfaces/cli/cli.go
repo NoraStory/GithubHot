@@ -33,13 +33,17 @@ func build(cfg *config.Config) (application.Deps, *sqlite.DB, error) {
 	}
 	var gateway application.LLMGateway
 	if cfg.LLMAPIKey != "" && cfg.LLMBaseURL != "" && cfg.LLMModelA != "" {
+		opts := []llm.Option{}
+		if cfg.Thinking != "" {
+			opts = append(opts, llm.WithThinking(cfg.Thinking))
+		}
 		g, lerr := llm.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModelA, cfg.LLMModelB, llm.EmbedConfig{
 			BaseURL:    cfg.EmbedBaseURL,
 			APIKey:     cfg.EmbedAPIKey,
 			Model:      cfg.LLMEmbed,
 			Dimensions: cfg.EmbedDims,
 			Style:      llm.EmbedStyle(cfg.EmbedStyle),
-		})
+		}, opts...)
 		if lerr != nil {
 			db.Close()
 			return application.Deps{}, nil, lerr

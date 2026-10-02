@@ -33,8 +33,9 @@ const (
 )
 
 // SelectAndWrite 精选用例（LLM 必选）：预筛 → 同一标准独立两次评分 →
-// 过门槛者中文写作。三个阶段都写回条目的 Selection，可断点续跑：
-// 已处理过的条目（非 new 阶段）自动跳过。
+// 过门槛者中文写作。三个阶段各自以条目状态为断点，可中断续跑：
+// 预筛处理 new，评分处理 filtered，写作处理 scored——任何阶段中断，
+// 下次运行从未完成的阶段继续。
 func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, error) {
 	var stats SelectWriteStats
 	if d.LLM == nil {
@@ -44,17 +45,12 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 		limit = 120
 	}
 
+	// ---------- 阶段 1：预筛（new → filtered/dropped，批量） ----------
 	pending, err := d.Items.ByStage(ctx, []item.Stage{item.StageNew}, limit)
 	if err != nil {
-		return stats, fmt.Errorf("读取待精选条目: %w", err)
-	}
-	if len(pending) == 0 {
-		return stats, nil
+		return stats, fmt.Errorf("读取待预筛条目: %w", err)
 	}
 	stats.Candidates = len(pending)
-
-	// ---------- 阶段 1：预筛（批量） ----------
-	passed := make([]item.Item, 0, len(pending))
 	for start := 0; start < len(pending); start += prefilterBatch {
 		end := min(start+prefilterBatch, len(pending))
 		batch := pending[start:end]
@@ -74,7 +70,6 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 				sel := item.Selection{Stage: item.StageFiltered, Pass: true, Reason: r.Reason}
 				_ = d.Items.UpdateSelection(ctx, it.ID, sel)
 				it.Selection = sel
-				passed = append(passed, it)
 			} else if r, ok := results[it.ID]; ok {
 				stats.Dropped++
 				markDropped(ctx, d, it, r.Reason)
@@ -85,18 +80,22 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 		}
 	}
 
-	// ---------- 阶段 2：双评分（逐条，两次独立调用） ----------
+	// ---------- 阶段 2：双评分（filtered → scored/rejected，逐条两次独立调用） ----------
+	filtered, err := d.Items.ByStage(ctx, []item.Stage{item.StageFiltered}, limit)
+	if err != nil {
+		return stats, fmt.Errorf("读取待评分条目: %w", err)
+	}
 	type scoredItem struct {
 		it   item.Item
 		a, b float64
 	}
-	scored := make([]scoredItem, 0, len(passed))
+	scored := make([]scoredItem, 0, len(filtered))
 	var (
 		mu  sync.Mutex
 		wg  sync.WaitGroup
 		sem = make(chan struct{}, llmWorkers)
 	)
-	for _, it := range passed {
+	for _, it := range filtered {
 		wg.Add(1)
 		go func(it item.Item) {
 			defer wg.Done()
@@ -109,8 +108,7 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 			if err != nil {
 				stats.LLMErrors++
 				log.Printf("[select] 评分失败 %s: %v", it.ID, err)
-				stats.Rejected++
-				return
+				return // 保持 filtered，下次运行重试
 			}
 			threshold := source.Tier(it.SourceTier).ScoreThreshold()
 			avg := (a + b) / 2
@@ -128,24 +126,25 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 	wg.Wait()
 	stats.Scored = len(scored)
 
-	// ---------- 阶段 3：中文写作（逐条，限流） ----------
-	for i, sc := range scored {
-		if i >= writeLimit {
-			break
-		}
-		w, err := writeChinese(ctx, d, sc.it)
+	// ---------- 阶段 3：中文写作（scored → written，限流） ----------
+	toWrite, err := d.Items.ByStage(ctx, []item.Stage{item.StageScored}, writeLimit)
+	if err != nil {
+		return stats, fmt.Errorf("读取待写作条目: %w", err)
+	}
+	for _, it := range toWrite {
+		w, err := writeChinese(ctx, d, it)
 		if err != nil {
 			stats.LLMErrors++
-			log.Printf("[select] 写作失败 %s: %v", sc.it.ID, err)
+			log.Printf("[select] 写作失败 %s: %v", it.ID, err)
 			continue
 		}
 		sel := item.Selection{
 			Stage: item.StageWritten, Pass: true,
-			ScoreA: sc.a, ScoreB: sc.b,
+			ScoreA: it.Selection.ScoreA, ScoreB: it.Selection.ScoreB,
 			TitleZh: w.TitleZh, SummaryZh: w.SummaryZh, ReasonZh: w.ReasonZh, Tags: w.Tags,
 		}
-		if uerr := d.Items.UpdateSelection(ctx, sc.it.ID, sel); uerr != nil {
-			log.Printf("[select] 写回失败 %s: %v", sc.it.ID, uerr)
+		if uerr := d.Items.UpdateSelection(ctx, it.ID, sel); uerr != nil {
+			log.Printf("[select] 写回失败 %s: %v", it.ID, uerr)
 			continue
 		}
 		stats.Written++

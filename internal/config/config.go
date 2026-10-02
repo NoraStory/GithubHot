@@ -21,6 +21,7 @@ type Config struct {
 	EmbedAPIKey  string // 向量 Key；留空复用 LLMAPIKey
 	EmbedDims    int    // 输出维度；0 = 服务商默认（Qwen3-Embedding-8B 最大 4096）
 	EmbedStyle   string // openai（默认）| ark-multimodal（豆包 vision 向量）
+	Thinking     string // LLM_THINKING: disabled/enabled（方舟 seed 推理模型提速开关）
 	GitHubToken  string
 	CronSpec     string // serve 模式内置调度（cron 表达式，本地时区）
 }
@@ -48,6 +49,7 @@ func Load() (*Config, error) {
 		EmbedAPIKey:  getEnv("LLM_EMBED_API_KEY", ""),
 		EmbedDims:    getEnvInt("LLM_EMBED_DIMENSIONS", 0),
 		EmbedStyle:   getEnv("LLM_EMBED_STYLE", ""),
+		Thinking:     getEnv("LLM_THINKING", ""),
 		GitHubToken:  getEnv("GITHUB_TOKEN", ""),
 		CronSpec:     getEnv("HOT_CRON", "30 7 * * *"),
 	}

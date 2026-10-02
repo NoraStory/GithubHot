@@ -49,13 +49,25 @@ const embedBatchSize = 16
 type OpenAI struct {
 	BaseURL string
 	APIKey  string
-	modelA  string
-	modelB  string
-	embed   EmbedConfig
+	// Thinking 思考模式开关（火山方舟 doubao-seed 系列）：
+	// "disabled" 关闭深度思考（快约 5 倍，适合结构化判定任务），
+	// "enabled" 强制开启，空 = 服务商默认。
+	Thinking string
+	modelA   string
+	modelB   string
+	embed    EmbedConfig
+}
+
+// Option 网关可选参数。
+type Option func(*OpenAI)
+
+// WithThinking 设置思考模式（LLM_THINKING: disabled / enabled）。
+func WithThinking(mode string) Option {
+	return func(o *OpenAI) { o.Thinking = mode }
 }
 
 // New 构造；modelB 为空时复用 modelA（以温度差异近似"独立第二次评分"）。
-func New(baseURL, apiKey, modelA, modelB string, embed EmbedConfig) (*OpenAI, error) {
+func New(baseURL, apiKey, modelA, modelB string, embed EmbedConfig, opts ...Option) (*OpenAI, error) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		return nil, errors.New("LLM_BASE_URL 不能为空")
@@ -94,7 +106,11 @@ func New(baseURL, apiKey, modelA, modelB string, embed EmbedConfig) (*OpenAI, er
 	if e.Style == "" {
 		e.Style = EmbedStyleOpenAI
 	}
-	return &OpenAI{BaseURL: baseURL, APIKey: apiKey, modelA: modelA, modelB: modelB, embed: e}, nil
+	o := &OpenAI{BaseURL: baseURL, APIKey: apiKey, modelA: modelA, modelB: modelB, embed: e}
+	for _, opt := range opts {
+		opt(o)
+	}
+	return o, nil
 }
 
 // ModelA 主模型。
@@ -110,6 +126,9 @@ type chatRequest struct {
 	ResponseFormat *struct {
 		Type string `json:"type"`
 	} `json:"response_format,omitempty"`
+	Thinking *struct {
+		Type string `json:"type"`
+	} `json:"thinking,omitempty"`
 }
 
 type chatMessage struct {
@@ -136,6 +155,12 @@ func (o *OpenAI) ChatJSON(ctx context.Context, system, user, model string, tempe
 	req.ResponseFormat = &struct {
 		Type string `json:"type"`
 	}{Type: "json_object"}
+	switch o.Thinking {
+	case "disabled", "enabled":
+		req.Thinking = &struct {
+			Type string `json:"type"`
+		}{Type: o.Thinking}
+	}
 
 	payload, err := json.Marshal(req)
 	if err != nil {

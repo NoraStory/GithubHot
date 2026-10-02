@@ -15,8 +15,9 @@ import (
 	"time"
 )
 
-// DefaultTimeout 单次请求默认超时。
-const DefaultTimeout = 30 * time.Second
+// DefaultTimeout 单次请求默认超时。LLM 批量判定调用即使关闭思考
+// 也可能超过 30s，取宽裕值；RSS/GitHub 正常请求远低于此。
+const DefaultTimeout = 90 * time.Second
 
 // UserAgent 出站请求标识。
 const UserAgent = "GithubHot/0.1 (+https://github.com/NoraStory/GithubHot)"
