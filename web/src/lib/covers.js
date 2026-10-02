@@ -46,10 +46,11 @@ export function repoCover(fullName = '') {
   return gradientSvg(name, initial)
 }
 
-// GitHub 仓库所有者真实头像
+// GitHub 仓库所有者真实头像：走本服务端代理（访客无需直连 github.com），
+// 服务端拉取失败时返回 1x1 透明 PNG，由调用方 onerror 回退到字标封面。
 export function repoAvatar(fullName = '') {
   const owner = String(fullName || '').split('/')[0]
-  return owner ? `https://github.com/${owner}.png?size=96` : ''
+  return owner ? `/api/v1/gh/avatar/${encodeURIComponent(owner)}.png` : ''
 }
 
 // 期刊封面：📰 + 期号

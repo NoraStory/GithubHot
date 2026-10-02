@@ -1,6 +1,11 @@
 // Package githubapi 实现 GitHub 双轨数据网关：
 // 轨道 A：官方 Search API（近 N 天创建、按 star 排序的新项目）；
 // 轨道 B：github.com/trending 每日榜（社区口径，无官方 API，HTML 解析）。
+//
+// 国内服务器直连 github.com 可能失败，提供两层缓解：
+//  1. GITHUB_PROXY 环境变量：把 github.com / api.github.com 请求改写为
+//     「镜像前缀 + 原地址」形式（如 https://gh-proxy.com/https://github.com/...）；
+//  2. 对 GitHub 请求自动重试（网络错误 / 5xx / 429，最多 3 次，退避 2s/4s）。
 package githubapi
 
 import (
@@ -15,12 +20,53 @@ import (
 )
 
 // Client GitHub 网关实现。Token 可选（未配置时限额 60 次/小时）。
+// Proxy 可选（GITHUB_PROXY，镜像前缀，国内服务器直连失败时使用）。
 type Client struct {
 	Token string
+	Proxy string
 }
 
 // New 构造。
-func New(token string) *Client { return &Client{Token: token} }
+func New(token, proxy string) *Client { return &Client{Token: token, Proxy: proxy} }
+
+// url 把原始 GitHub 地址按镜像前缀改写（未配置代理时原样返回）。
+func (c *Client) url(raw string) string {
+	p := strings.TrimRight(strings.TrimSpace(c.Proxy), "/")
+	if p == "" {
+		return raw
+	}
+	if !strings.HasPrefix(p, "https://") && !strings.HasPrefix(p, "http://") {
+		return raw
+	}
+	return p + "/" + raw
+}
+
+// fetchGet 带重试的 GET：网络错误 / 5xx / 429 时退避重试（2s、4s），最多 3 次。
+func (c *Client) fetchGet(ctx context.Context, url string, headers map[string]string) ([]byte, int, error) {
+	var body []byte
+	var status int
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, 0, ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
+		}
+		b, st, err := safehttp.Fetch(ctx, c.url(url), headers)
+		if err == nil && st < 500 && st != 429 {
+			return b, st, nil
+		}
+		body, status = b, st
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("HTTP %d", st)
+		}
+	}
+	return body, status, lastErr
+}
 
 func (c *Client) headers() map[string]string {
 	h := map[string]string{
@@ -48,7 +94,7 @@ func (c *Client) SearchNewRising(ctx context.Context, sinceDays, minStars, perPa
 	q := fmt.Sprintf("created:>%s stars:>%d", since, minStars)
 	url := fmt.Sprintf("https://api.github.com/search/repositories?q=%s&sort=stars&order=desc&per_page=%d", urlQueryEscape(q), perPage)
 
-	body, status, err := safehttp.Fetch(ctx, url, c.headers())
+	body, status, err := c.fetchGet(ctx, url, c.headers())
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +141,7 @@ func (c *Client) SearchNewRising(ctx context.Context, sinceDays, minStars, perPa
 // FetchTrending 轨道 B：抓取 trending 每日榜。
 // trending 页不含绝对 star 数，逐仓调用 REST API 补全（热度差分需要绝对值）。
 func (c *Client) FetchTrending(ctx context.Context) ([]application.GitHubRepo, error) {
-	body, status, err := safehttp.Fetch(ctx, "https://github.com/trending?since=daily", map[string]string{
+	body, status, err := c.fetchGet(ctx, "https://github.com/trending?since=daily", map[string]string{
 		"Accept":          "text/html,application/xhtml+xml",
 		"Accept-Language": "en-US,en;q=0.9",
 	})
@@ -134,7 +180,7 @@ func (c *Client) FetchTrending(ctx context.Context) ([]application.GitHubRepo, e
 // fetchRepo 拉取单个仓库元数据。
 func (c *Client) fetchRepo(ctx context.Context, fullName string) (*application.GitHubRepo, error) {
 	url := "https://api.github.com/repos/" + fullName
-	body, status, err := safehttp.Fetch(ctx, url, c.headers())
+	body, status, err := c.fetchGet(ctx, url, c.headers())
 	if err != nil {
 		return nil, err
 	}

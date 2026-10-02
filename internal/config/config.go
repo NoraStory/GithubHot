@@ -30,6 +30,7 @@ type Config struct {
 	NotifyWebhookFormat string  // raw（默认）/ feishu / wecom
 	MusicPlaylist       string  // 背景音乐歌单 JSON（前端播放器）
 	GitHubToken         string
+	GitHubProxy         string // GitHub 镜像前缀（国内服务器直连失败时用，如 https://gh-proxy.com）
 	CronSpec            string // serve 模式内置调度（cron 表达式，本地时区）
 }
 
@@ -64,6 +65,7 @@ func Load() (*Config, error) {
 		NotifyWebhookFormat: getEnv("NOTIFY_WEBHOOK_FORMAT", ""),
 		MusicPlaylist:       getEnv("MUSIC_PLAYLIST", ""),
 		GitHubToken:         getEnv("GITHUB_TOKEN", ""),
+		GitHubProxy:         getEnv("GITHUB_PROXY", ""),
 		CronSpec:            getEnv("HOT_CRON", "30 7 * * *"),
 	}
 	if cfg.LLMBaseURL != "" || cfg.LLMAPIKey != "" || cfg.LLMModelA != "" {

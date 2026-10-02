@@ -75,6 +75,8 @@ go build -o githubhot ./cmd/githubhot
 | `NOTIFY_WEBHOOK_URL` | | 日报/失败告警 webhook；格式 `NOTIFY_WEBHOOK_FORMAT` = raw / feishu / wecom |
 | `ADMIN_TOKEN` | | 设置后信源增删/推送等管理接口需带 `X-Admin-Token` 头 |
 | `GITHUB_TOKEN` | 建议 | 无 token 限 60 次/小时；配置后 5000 次/小时 |
+| `GITHUB_PROXY` | 国内服务器 | 直连 github.com 失败时的镜像前缀（如 `https://gh-proxy.com`），采集请求自动重试（5xx/429/网络错误，最多 3 次） |
+| `HTTPS_PROXY` | 国内服务器 | 系统代理；采集与 LLM 请求均遵循 |
 | `DATA_DIR` | | 数据目录，默认 `./data` |
 | `PORT` | | serve 端口，默认 `8787` |
 | `HOT_CRON` | | serve 内置调度（cron 表达式，本地时区），默认 `30 7 * * *` |

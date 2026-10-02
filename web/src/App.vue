@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { api, setToken, getToken } from './lib/api'
+import { copyText } from './lib/clipboard'
 import SiteFooter from './components/SiteFooter.vue'
 
 const router = useRouter()
@@ -154,7 +155,8 @@ function rmTop() { window.anzhiyu && window.anzhiyu.scrollToDest(0, 500) }
 async function rmCopyText() {
   const sel = window.getSelection().toString()
   if (!sel) { window.anzhiyu && window.anzhiyu.snackbarShow('请先选中文本', false, 1500); return }
-  try { await navigator.clipboard.writeText(sel); window.anzhiyu && window.anzhiyu.snackbarShow('已复制选中文本') } catch (e) { /* 忽略 */ }
+  const ok = await copyText(sel)
+  if (ok) window.anzhiyu && window.anzhiyu.snackbarShow('已复制选中文本')
 }
 async function rmPasteText() {
   try {
@@ -173,7 +175,8 @@ async function rmPasteText() {
 }
 function rmNewWindow() { window.open(location.href, '_blank') }
 async function rmCopyLink(link) {
-  try { await navigator.clipboard.writeText(link || location.href); window.anzhiyu && window.anzhiyu.snackbarShow('已复制链接地址') } catch (e) { /* 忽略 */ }
+  const ok = await copyText(link || location.href)
+  if (ok) window.anzhiyu && window.anzhiyu.snackbarShow('已复制链接地址')
 }
 function rmCopyImage(url) {
   // canvas 转 blob 复制（避免跨域 fetch；同源/data URI 直接成功，失败回退复制链接）
@@ -209,7 +212,7 @@ function rmSearchBaidu() {
 }
 function rmCopyMusicName() {
   const name = window.anzhiyu && window.anzhiyu.musicGetName()
-  if (name) navigator.clipboard.writeText(name).then(() => window.anzhiyu && window.anzhiyu.snackbarShow('已复制歌名'))
+  if (name) copyText(name).then((ok) => { if (ok) window.anzhiyu && window.anzhiyu.snackbarShow('已复制歌名') })
 }
 function rmDarkmode() { toggleTheme() }
 function rmTranslate() { translateToggle() }

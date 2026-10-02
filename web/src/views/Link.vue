@@ -3,6 +3,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import BannerMini from '../components/BannerMini.vue'
+import { copyText } from '../lib/clipboard'
 
 const router = useRouter()
 const applyOpen = ref(false)
@@ -38,16 +39,16 @@ const groups = [
 const applyText = computed(() => '昵称（请勿包含博客等字样）：\n网站地址（要求博客地址，请勿提交个人主页）：\n头像图片url（请提供尽可能清晰的图片）：\n描述：\n站点截图（可选）：')
 const siteInfo = computed(() => '名称：GithubHot\n网址：https://github.com/NoraStory/GithubHot\n描述：GitHub 开源项目热点 × AI 资讯热点 · 自动采集 / LLM 精选 / 双榜日报')
 async function copyApply() {
-  try {
-    await navigator.clipboard.writeText(applyText.value)
-    window.anzhiyu && window.anzhiyu.snackbarShow('申请模板已复制，去 GitHub Issue 提交', false, 2500)
-  } catch (e) { /* 忽略 */ }
+  const ok = await copyText(applyText.value)
+  if (ok) { window.anzhiyu && window.anzhiyu.snackbarShow('申请模板已复制，去 GitHub Issue 提交', false, 2500); return }
+  // 回退：全选弹窗内文本，便于手动 Ctrl+C
+  const ta = document.querySelector('.apply-textarea')
+  if (ta) { ta.focus(); ta.select() }
+  window.anzhiyu && window.anzhiyu.snackbarShow('已选中文本，请按 Ctrl+C 复制', false, 3000)
 }
 async function copySiteInfo() {
-  try {
-    await navigator.clipboard.writeText(siteInfo.value)
-    window.anzhiyu && window.anzhiyu.snackbarShow('本站信息已复制，欢迎互链～', false, 2000)
-  } catch (e) { /* 忽略 */ }
+  const ok = await copyText(siteInfo.value)
+  window.anzhiyu && window.anzhiyu.snackbarShow(ok ? '本站信息已复制，欢迎互链～' : '复制失败，请手动选择文本复制', false, 2000)
 }
 function goSubmit() { applyOpen.value = false; window.open('https://github.com/NoraStory/GithubHot/issues/new', '_blank') }
 </script>
@@ -115,8 +116,8 @@ function goSubmit() { applyOpen.value = false; window.open('https://github.com/N
 .flink h2 { font-size: 1.25rem; margin: 1.6rem 0 .9rem; position: relative; padding-left: 1.35rem; }
 .flink h2::before { content: '✽'; position: absolute; left: 0; color: #fb7061; animation: ccc 1.6s linear infinite; }
 @keyframes ccc { 0% { transform: rotate(0); } to { transform: rotate(-1turn); } }
-.site-card-group { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
-.site-card { background: var(--anzhiyu-card-bg); border-radius: var(--anzhiyu-radius); box-shadow: var(--card-box-shadow); overflow: hidden; transition: box-shadow .3s, transform .3s; display: block; }
+.site-card-group { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; min-width: 0; }
+.site-card { min-width: 0; background: var(--anzhiyu-card-bg); border-radius: var(--anzhiyu-radius); box-shadow: var(--card-box-shadow); overflow: hidden; transition: box-shadow .3s, transform .3s; display: block; }
 .site-card:hover { box-shadow: var(--card-hover-box-shadow); transform: translateY(-3px); }
 .site-card .img { display: flex; align-items: center; justify-content: center; height: 70px; background: var(--anzhiyu-theme-op); font-size: 2rem; }
 .flink-avatar { font-size: 2rem; }

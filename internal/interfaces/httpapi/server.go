@@ -39,6 +39,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/llms.txt", s.llmsTxt)
 		r.Get("/api/v1/site/config", s.siteConfig)
 		r.Get("/api/v1/music/playlist", s.musicPlaylist)
+		r.Get("/api/v1/gh/avatar/{owner}", s.ghAvatar)
 		r.Get("/api/v1/digests", s.digestsAPI)
 	// Vue3 SPA：静态资源 + 历史模式回退
 	r.Get("/", s.spa)
