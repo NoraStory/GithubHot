@@ -37,7 +37,12 @@ onMounted(async () => {
                 <div class="article-categories-original">融合配对</div>
                 <span class="chip">热度 ×1.25</span>
               </div>
-              <a class="article-title" :href="f.project.url" target="_blank" rel="noopener">{{ f.news.titleZh }} × {{ f.project.fullName }}</a>
+              <div class="article-title-line">
+                <router-link v-if="f.news.storyId" class="article-title" :to="`/story/${f.news.storyId}`">{{ f.news.titleZh }}</router-link>
+                <span v-else class="article-title">{{ f.news.titleZh }}</span>
+                <span class="x-mark">×</span>
+                <a class="article-title proj" :href="f.project.url" target="_blank" rel="noopener">{{ f.project.fullName }}</a>
+              </div>
             </div>
             <div class="article-meta-wrap">
               <span class="post-meta-date">
@@ -63,6 +68,11 @@ onMounted(async () => {
 #post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; }
 .post-title { font-size: 1.9rem; font-weight: 700; margin: 10px 0; text-shadow: 0 3px 14px rgba(0,0,0,.3); }
 .post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }
+.article-title-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.article-title { font-weight: 700; color: var(--anzhiyu-blue); }
+.article-title:hover { color: var(--anzhiyu-hover); }
+.article-title.proj { color: var(--anzhiyu-fontcolor); }
+.x-mark { color: var(--anzhiyu-hover); font-weight: 700; font-size: 1.1rem; }
 #post-meta .meta-firstline { opacity: .9; font-size: .85rem; }
 .gain { color: var(--anzhiyu-green); font-weight: 700; }
 .hot { color: var(--anzhiyu-hover); font-weight: 700; }

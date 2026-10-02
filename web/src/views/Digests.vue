@@ -7,6 +7,7 @@ const items = ref([])
 const total = ref(0)
 const page = ref(1)
 const kind = ref('all')
+const q = ref('')
 const pageSize = 8
 const loading = ref(true)
 
@@ -29,9 +30,15 @@ function coverOf(title) {
 async function load() {
   loading.value = true
   const k = kind.value === 'all' ? '' : `&kind=${kind.value}`
-  const d = await api.get(`/api/v1/digests?page=${page.value}&pageSize=${pageSize}${k}`)
-  items.value = d.items || []
-  total.value = d.total || 0
+  let d = await api.get(`/api/v1/digests?page=${1}&pageSize=${500}${k}`)
+  let list = d.items || []
+  if (q.value.trim()) {
+    const kw = q.value.trim().toLowerCase()
+    list = list.filter((x) => x.date.toLowerCase().includes(kw))
+  }
+  total.value = list.length
+  const start = (page.value - 1) * pageSize
+  items.value = list.slice(start, start + pageSize)
   loading.value = false
 }
 function setKind(k) { kind.value = k; page.value = 1; load() }
@@ -56,6 +63,9 @@ onMounted(load)
   <main class="layout" id="content-inner">
     <div id="post">
       <div id="article-container" class="article">
+        <div class="toolbar">
+          <input v-model="q" class="search-input" placeholder="搜索期号…" @input="page = 1">
+        </div>
         <div id="categoryBar">
           <div class="category-bar" id="category-bar">
             <div id="catalog-bar">
@@ -115,6 +125,9 @@ onMounted(load)
 #post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; }
 .post-title { font-size: 1.8rem; font-weight: 700; text-shadow: 0 3px 14px rgba(0,0,0,.3); }
 .post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }
+.toolbar { display: flex; margin-bottom: 12px; }
+.search-input { flex: 1; max-width: 340px; background: var(--anzhiyu-background); border: 1px solid var(--anzhiyu-card-border); border-radius: var(--anzhiyu-radius-full); padding: 8px 18px; font: inherit; font-size: .9rem; color: var(--anzhiyu-fontcolor); outline: none; }
+.search-input:focus { border-color: var(--anzhiyu-theme); }
 #post-meta .meta-firstline { opacity: .9; font-size: .85rem; }
 @media (max-width: 768px) { .post-bg { height: 15rem; } }
 </style>

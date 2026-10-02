@@ -4,6 +4,7 @@ import { ref, onMounted } from 'vue'
 import { api } from '../lib/api'
 
 const usage = ref(null)
+const overview = ref(null)
 const tools = [
   { name: '三榜 JSON', desc: 'GET /api/v1/hot', url: '/api/v1/hot' },
   { name: 'GitHub 项目榜', desc: 'GET /api/v1/hot/github', url: '/api/v1/hot/github' },
@@ -18,6 +19,16 @@ const tools = [
 ]
 
 onMounted(async () => {
+  const [hot, dg, srcs] = await Promise.all([
+    api.get('/api/v1/hot'), api.get('/api/v1/digests?pageSize=500'), api.get('/api/v1/sources')
+  ])
+  overview.value = {
+    projects: (hot.github || []).length,
+    stories: (hot.news || []).length,
+    fusion: (hot.fusion || []).length,
+    digests: (dg.items || []).length,
+    sources: (srcs.items || []).length
+  }
   usage.value = await api.get('/api/v1/admin/usage').catch(() => null)
 })
 
@@ -36,7 +47,16 @@ function maxDay(days) {
   <main class="layout" id="content-inner">
     <div id="post">
       <div id="article-container" class="article">
-        <h2 class="first-title">Token 用量（近 7 日）</h2>
+        <h2 class="first-title">站点概览</h2>
+        <div class="overview" v-if="overview">
+          <div class="ov-card"><div class="v">{{ overview.projects }}</div><div class="k">追踪项目</div></div>
+          <div class="ov-card"><div class="v">{{ overview.stories }}</div><div class="k">活跃事件</div></div>
+          <div class="ov-card"><div class="v">{{ overview.fusion }}</div><div class="k">融合配对</div></div>
+          <div class="ov-card"><div class="v">{{ overview.digests }}</div><div class="k">期刊</div></div>
+          <div class="ov-card"><div class="v">{{ overview.sources }}</div><div class="k">信源</div></div>
+        </div>
+
+        <h2>Token 用量（近 7 日）</h2>
         <div v-if="usage && usage.days && usage.days.length" class="chart">
           <div v-for="d in usage.days" :key="d.day" class="chart-row">
             <span class="chart-day">{{ d.day }}</span>
@@ -68,6 +88,10 @@ function maxDay(days) {
 #post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; }
 .post-title { font-size: 1.8rem; font-weight: 700; text-shadow: 0 3px 14px rgba(0,0,0,.3); }
 .post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }
+.overview { display: flex; gap: 12px; flex-wrap: wrap; }
+.ov-card { flex: 1; min-width: 120px; background: var(--anzhiyu-background); border-radius: var(--anzhiyu-radius); padding: 14px 10px; text-align: center; }
+.ov-card .v { font-weight: 700; font-size: 1.35rem; color: var(--anzhiyu-hover); }
+.ov-card .k { color: var(--anzhiyu-gray); font-size: .78rem; }
 h2 { font-size: 1.2rem; margin: 1.6rem 0 .8rem; position: relative; padding-left: 1.35rem; }
 h2::before { content: '✽'; position: absolute; left: 0; color: #fb7061; animation: ccc 1.6s linear infinite; }
 @keyframes ccc { 0% { transform: rotate(0); } to { transform: rotate(-1turn); } }
