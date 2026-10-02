@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -341,10 +342,11 @@ func (m *memDigests) List(_ context.Context, _ int) ([]digest.Digest, error) { r
 var itemLineRe = regexp.MustCompile(`^\[([a-f0-9]+)\] `)
 
 // fakeLLM 脚本化大模型：按提示特征返回对应 JSON。
-type fakeLLM struct{ chatCalls int }
+// chatCalls 用原子计数——doubleScore 会并发调用，race 检测器会盯这里。
+type fakeLLM struct{ chatCalls atomic.Int64 }
 
 func (f *fakeLLM) ChatJSON(_ context.Context, _, user, _ string, _ float64) (string, error) {
-	f.chatCalls++
+	f.chatCalls.Add(1)
 	switch {
 	case strings.Contains(user, "入选标准"): // 预筛
 		var out strings.Builder
