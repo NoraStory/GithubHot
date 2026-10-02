@@ -830,7 +830,9 @@ html[data-theme="dark"] #nav, html[data-theme="dark"] #page-header #nav { backgr
 .comment-barrage-item { pointer-events: auto; }
 
 /* 分类条与卡片对齐：同左缘、同右缘（卡片在 20px 内容缩进处） */
-#categoryBar { padding: 0 20px; box-sizing: border-box; }
+/* 分类条与卡片对齐：同为 #recent-posts 直接子元素，去除额外水平内边距后左缘自然重合 */
+#categoryBar { box-sizing: border-box; }
+#home_top .swiper_container_card { justify-content: space-between !important; }
 
 /* ===== 子页 UI 统一：内容列宽一致 + 标题样式一致（覆盖各页零散的 ✽ 伪元素样式）===== */
 #content-inner > #post { max-width: 900px; margin: 0 auto; }
@@ -853,6 +855,11 @@ section h2::before { content: none !important; }
 @media (max-width: 991px) {
   #home_top { display: none !important; }
 }
+
+/* ===== 首页顶部对齐：home_top 收进内容列（与期刊栏/卡片/侧栏同宽同缘）=====
+   主题里 #home_top 只有 20px 内边距、全宽铺开，与 1200px 居中的 .layout 错位。
+   收窄到 1192px 居中后：banner 左缘 = 分类条左缘（24+20 对齐），播放器右缘 = 侧栏右缘。 */
+#blog-container > #home_top { max-width: 1192px; margin: 0 auto; }
 
 /* ===== 子页横幅：统一基底 + 光斑装饰 + 每页差异化配色（告别千篇一律）===== */
 .post-bg {

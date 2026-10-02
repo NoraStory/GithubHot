@@ -8,6 +8,7 @@ const playlist = ref([])
 const index = ref(0)
 const rotating = ref(false)
 const status = ref('正在加载...')
+const failed = ref(false)
 const audioEl = ref(null)
 
 const defaultCover = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
@@ -46,9 +47,40 @@ onMounted(async () => {
   const cfg = (window.GLOBAL_CONFIG && window.GLOBAL_CONFIG.musicPlayer) || {}
   const id = /^\d+$/.test(String(cfg.playlistId)) ? String(cfg.playlistId) : '652135520'
   const server = ['netease', 'tencent', 'kugou', 'baidu'].includes(String(cfg.server)) ? String(cfg.server) : 'netease'
+  const load = async () => {
+    try {
+      const r = await fetch(`/api/v1/music/playlist?id=${id}&server=${server}`)
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      const data = await r.json()
+      if (Array.isArray(data) && data.length) {
+        playlist.value = data
+        select(0, false)
+        status.value = ''
+        return true
+      }
+      status.value = '歌单为空'
+    } catch (e) {
+      status.value = '加载失败'
+      playlist.value = []
+    }
+    return false
+  }
+  if (!(await load())) {
+    // 失败自动重试一次（网络/代理抖动），仍失败则给出手动重试按钮
+    setTimeout(async () => {
+      if (!(await load())) failed.value = true
+    }, 1500)
+  }
+})
+
+async function retry() {
+  failed.value = false
+  status.value = '正在加载...'
+  const cfg = (window.GLOBAL_CONFIG && window.GLOBAL_CONFIG.musicPlayer) || {}
+  const id = /^\d+$/.test(String(cfg.playlistId)) ? String(cfg.playlistId) : '652135520'
+  const server = ['netease', 'tencent', 'kugou', 'baidu'].includes(String(cfg.server)) ? String(cfg.server) : 'netease'
   try {
     const r = await fetch(`/api/v1/music/playlist?id=${id}&server=${server}`)
-    if (!r.ok) throw new Error('HTTP ' + r.status)
     const data = await r.json()
     if (Array.isArray(data) && data.length) {
       playlist.value = data
@@ -59,9 +91,9 @@ onMounted(async () => {
     status.value = '歌单为空'
   } catch (e) {
     status.value = '加载失败'
-    playlist.value = []
+    failed.value = true
   }
-})
+}
 </script>
 
 <template>
@@ -87,7 +119,10 @@ onMounted(async () => {
           <span class="anzhiyuCustomPlayer-playlist-item-number">{{ pad(i + 1) }}</span>
           <span class="anzhiyuCustomPlayer-playlist-item-info" :title="`${t.name || '未知歌曲'} - ${t.artist || '未知艺术家'}`">{{ t.name || '未知歌曲' }} - {{ t.artist || '未知艺术家' }}</span>
         </div>
-        <div v-if="!playlist.length" class="anzhiyuCustomPlayer-playlist-item">{{ status }}</div>
+        <div v-if="!playlist.length" class="anzhiyuCustomPlayer-playlist-item">
+          {{ status }}
+          <button v-if="failed" class="anzhiyuCustomPlayer-retry" @click="retry">重试</button>
+        </div>
       </div>
       <div class="anzhiyuCustomPlayer-controls-area">
         <audio ref="audioEl" id="anzhiyuCustomPlayer-audio-element" controls @play="onPlay" @pause="onPause" @ended="next"></audio>
@@ -117,6 +152,8 @@ onMounted(async () => {
 .anzhiyuCustomPlayer-playlist-item-info { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; color: var(--anzhiyu-second-fontcolor, #555); }
 .anzhiyuCustomPlayer-playlist-item-active .anzhiyuCustomPlayer-playlist-item-info { color: var(--anzhiyu-theme, #ff6666); }
 .anzhiyuCustomPlayer-controls-area { margin-top: auto; }
+.anzhiyuCustomPlayer-retry { margin-left: auto; background: var(--anzhiyu-theme, #eabcbd); color: #fff; border: none; border-radius: 12px; padding: 2px 12px; font-size: .8rem; cursor: pointer; }
+.anzhiyuCustomPlayer-retry:hover { background: var(--anzhiyu-hover, #ff7242); }
 #anzhiyuCustomPlayer-audio-element { width: 100%; border-radius: 8px; display: block; }
 #anzhiyuCustomPlayer-audio-element::-webkit-media-controls-panel { background-color: var(--anzhiyu-card-bg, #f0f0f0); border-radius: 8px; }
 #anzhiyuCustomPlayer-audio-element::-webkit-media-controls-play-button { filter: invert(var(--anzhiyu-darkmode-invert-Molar, 0)); }
