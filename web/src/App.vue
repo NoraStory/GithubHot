@@ -230,6 +230,15 @@ watch(searchMask, (v) => {
   }
 })
 
+// 离开音乐馆时彻底还原沉浸层（防止封面背景/沉浸态泄露到其他页面）
+watch(() => route.path, (p) => {
+  if (!p.startsWith('/music')) {
+    document.body.dataset.type = ''
+    const bg = document.getElementById('an_music_bg')
+    if (bg) bg.style.backgroundImage = ''
+  }
+})
+
 // 中控台标签云
 const tagCloud = computed(() => {
   const counts = {}
@@ -956,19 +965,15 @@ html[data-theme="dark"] #web_bg {
 @keyframes gh-twinkle { 0%, 100% { opacity: .25; transform: scale(.8); } 50% { opacity: .9; transform: scale(1.15); } }
 @keyframes gh-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-18px); } }
 
-/* 内容表面毛玻璃化（卡片/侧栏/分类条/工具栏/子页面板） */
+/* 内容表面毛玻璃化（卡片/侧栏/分类条/工具栏/子页面板）
+   注意：大面积 backdrop-filter 会显著增加渲染开销（用户反馈滚动延迟），
+   卡片只保留半透明底，blur 只留给导航/搜索/子页面板这些少量表面 */
 .recent-post-item {
   background: var(--anzhiyu-maskbg) !important;
-  -webkit-backdrop-filter: saturate(180%) blur(16px);
-  backdrop-filter: saturate(180%) blur(16px);
   border: 1px solid var(--anzhiyu-card-border) !important;
 }
-#aside-content .card-widget {
-  background: var(--anzhiyu-maskbg) !important;
-  -webkit-backdrop-filter: saturate(180%) blur(14px);
-  backdrop-filter: saturate(180%) blur(14px);
-}
-#category-bar { background: var(--anzhiyu-maskbg) !important; -webkit-backdrop-filter: saturate(180%) blur(14px); backdrop-filter: saturate(180%) blur(14px); }
+#aside-content .card-widget { background: var(--anzhiyu-maskbg) !important; }
+#category-bar { background: var(--anzhiyu-maskbg) !important; }
 .toolbar .search-input, .toolbar .select { background: var(--anzhiyu-maskbg) !important; }
 /* 子页内容面板：星背景上的毛玻璃（含深色主题适配） */
 div#post {
@@ -980,4 +985,8 @@ div#post {
   backdrop-filter: saturate(160%) blur(16px);
 }
 html[data-theme="dark"] div#post { background: rgba(24, 23, 29, .55) !important; }
+
+/* 音乐馆 × 中控台：主题会在 #console.show 时把 #nav-music 强制显示为巨型
+   播放器面板，与音乐馆沉浸式冲突——音乐馆内始终保持隐藏 */
+body[data-type="music"] #nav-music, body[data-type="music"]:has(#console.show) #nav-music { display: none !important; }
 </style>
