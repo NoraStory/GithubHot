@@ -100,17 +100,14 @@ function maxHot(history) {
 </template>
 
 <style scoped>
-.post-bg { height: 22rem; position: relative; overflow: hidden;
-  background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66,90,239,.38), transparent 62%),
-              radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234,188,189,.5), transparent 60%),
-              linear-gradient(160deg, #66717f 0%, #4c586f 48%, #3d4a63 100%); }
+.post-bg { height: 22rem; position: relative; overflow: hidden; }
 #post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; padding: 0 1.5rem; }
 .post-title { font-size: 1.9rem; font-weight: 700; margin: 12px 0; text-shadow: 0 3px 14px rgba(0,0,0,.3); max-width: 900px; }
 .post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }
 #post-meta .meta-firstline { display: flex; gap: 12px; align-items: center; justify-content: center; opacity: .92; font-size: .88rem; flex-wrap: wrap; }
 .event-overview { margin: 0 0 1.1rem; padding: 0.9rem 1.2rem; background: var(--anzhiyu-theme-op); border-left: 4px solid var(--anzhiyu-hover); border-radius: 0 8px 8px 0; color: var(--anzhiyu-secondary); }
 .hist { display: flex; align-items: flex-end; gap: 5px; height: 90px; padding: 8px 0 24px; }
-.hist .bar { flex: 1; background: linear-gradient(180deg, var(--anzhiyu-theme), #f6d6c3); border-radius: 3px 3px 0 0; min-height: 4px; position: relative; }
+.hist .bar { flex: 1; border-radius: 3px 3px 0 0; min-height: 4px; position: relative; }
 .hist .bar span { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: .66rem; color: var(--anzhiyu-gray); }
 .gain { color: var(--anzhiyu-green); font-weight: 700; }
 .hot { color: var(--anzhiyu-hover); font-weight: 700; }

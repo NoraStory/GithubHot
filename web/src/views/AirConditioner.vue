@@ -12,7 +12,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <header class="post-bg" id="page-header">
+  <header class="post-bg post-bg--sky" id="page-header">
     <div id="post-info">
       <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">站点</router-link></div></div>
       <h1 class="post-title">小空调</h1>
@@ -32,10 +32,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.post-bg { height: 16rem; position: relative; overflow: hidden;
-  background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66,90,239,.35), transparent 62%),
-              radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234,188,189,.5), transparent 60%),
-              linear-gradient(160deg, #66717f 0%, #4c586f 48%, #3d4a63 100%); }
+.post-bg { height: 16rem; position: relative; overflow: hidden; }
 #post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; }
 .post-title { font-size: 1.8rem; font-weight: 700; text-shadow: 0 3px 14px rgba(0,0,0,.3); }
 .post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }

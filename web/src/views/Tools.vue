@@ -39,7 +39,7 @@ const groups = [
 </script>
 
 <template>
-  <BannerMini title="工具库" subtitle="API · Agent · 订阅的全部工具入口" />
+  <BannerMini variant="cyan" title="工具库" subtitle="API · Agent · 订阅的全部工具入口" />
   <main class="layout" id="content-inner">
     <div id="post">
       <div id="article-container" class="article">

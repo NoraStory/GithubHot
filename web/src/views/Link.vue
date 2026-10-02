@@ -53,7 +53,7 @@ function goSubmit() { applyOpen.value = false; window.open('https://github.com/N
 </script>
 
 <template>
-  <BannerMini title="友链与资源" subtitle="本站的全部出口：RSS · Agent · API · 源码" />
+  <BannerMini variant="ocean" title="友链与资源" subtitle="本站的全部出口：RSS · Agent · API · 源码" />
   <main class="layout" id="content-inner">
     <div id="post">
       <div id="article-container" class="article">

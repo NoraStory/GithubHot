@@ -53,7 +53,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
 </script>
 
 <template>
-  <header class="post-bg" id="page-header">
+  <header class="post-bg post-bg--sunset" id="page-header">
     <div id="post-info">
       <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">相册</router-link></div></div>
       <h1 class="post-title">事件画廊</h1>
@@ -96,16 +96,13 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
 
 <style scoped>
 #post { max-width: 100%; margin: 0; }
-.post-bg { height: 18rem; position: relative; overflow: hidden;
-  background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66,90,239,.35), transparent 62%),
-              radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234,188,189,.5), transparent 60%),
-              linear-gradient(160deg, #66717f 0%, #4c586f 48%, #3d4a63 100%); }
+.post-bg { height: 18rem; position: relative; overflow: hidden; }
 #post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; }
 .post-title { font-size: 1.8rem; font-weight: 700; text-shadow: 0 3px 14px rgba(0,0,0,.3); }
 .post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }
 #post-meta .meta-firstline { opacity: .9; font-size: .85rem; }
 .justified-gallery { width: 100%; position: relative; overflow: hidden; }
-.gallery-caption { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(transparent, rgba(0,0,0,.75)); color: #fff; font-size: .78rem; padding: 18px 10px 6px; opacity: 0; transition: opacity .25s; }
+.gallery-caption { position: absolute; left: 0; right: 0; bottom: 0; color: #fff; font-size: .78rem; padding: 18px 10px 6px; opacity: 0; transition: opacity .25s; }
 .gallery-caption a { color: #fff; }
 .gallery-caption a:hover { color: var(--anzhiyu-theme); }
 .justified-gallery > a { position: absolute; overflow: hidden; border-radius: 6px; }

@@ -1,10 +1,11 @@
 <script setup>
 // 子页横幅：与文章页/事件页一致的 post-bg 页头（面包屑药丸 + 标题 + 副标题）
-defineProps({ title: String, subtitle: String })
+// variant：横幅配色变体（post-bg--cyan / post-bg--ocean 等，见全局样式）
+defineProps({ title: String, subtitle: String, variant: { type: String, default: '' } })
 </script>
 
 <template>
-  <header class="post-bg" id="page-header">
+  <header class="post-bg" :class="variant ? `post-bg--${variant}` : ''" id="page-header">
     <div id="post-info">
       <div id="post-firstinfo">
         <div class="meta-firstline"><router-link class="post-meta-original" to="/">{{ title }}</router-link></div>
@@ -18,10 +19,7 @@ defineProps({ title: String, subtitle: String })
 </template>
 
 <style scoped>
-.post-bg { height: 18rem; position: relative; overflow: hidden;
-  background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66,90,239,.35), transparent 62%),
-              radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234,188,189,.5), transparent 60%),
-              linear-gradient(160deg, #66717f 0%, #4c586f 48%, #3d4a63 100%); }
+.post-bg { height: 18rem; position: relative; overflow: hidden; }
 #post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; }
 .post-title { font-size: 1.8rem; font-weight: 700; text-shadow: 0 3px 14px rgba(0,0,0,.3); }
 .post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }

@@ -853,4 +853,64 @@ section h2::before { content: none !important; }
 @media (max-width: 991px) {
   #home_top { display: none !important; }
 }
+
+/* ===== 子页横幅：统一基底 + 光斑装饰 + 每页差异化配色（告别千篇一律）===== */
+.post-bg {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66, 90, 239, .35), transparent 62%),
+    radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .5), transparent 60%),
+    linear-gradient(160deg, #66717f 0%, #4c586f 48%, #3d4a63 100%);
+}
+.post-bg::before, .post-bg::after { content: ""; position: absolute; border-radius: 50%; filter: blur(70px); pointer-events: none; }
+.post-bg::before { width: 460px; height: 460px; right: -140px; top: -160px; background: radial-gradient(circle, rgba(255, 255, 255, .30), transparent 65%); }
+.post-bg::after { width: 560px; height: 560px; left: -180px; bottom: -240px; background: radial-gradient(circle, rgba(9, 12, 22, .28), transparent 65%); }
+.post-bg--emerald { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(52, 211, 153, .30), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .30), transparent 60%), linear-gradient(160deg, #0f3d33 0%, #14594a 48%, #0b2e26 100%); }
+.post-bg--azure { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66, 153, 239, .38), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .32), transparent 60%), linear-gradient(160deg, #123a63 0%, #1a5588 48%, #0e2c4e 100%); }
+.post-bg--blue { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66, 90, 239, .40), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .36), transparent 60%), linear-gradient(160deg, #1e2d63 0%, #2c478f 48%, #16204a 100%); }
+.post-bg--violet { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(139, 92, 246, .34), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .34), transparent 60%), linear-gradient(160deg, #3b2a5f 0%, #5b3d8f 48%, #2a1e44 100%); }
+.post-bg--teal { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(45, 212, 191, .30), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .28), transparent 60%), linear-gradient(160deg, #0e4b4b 0%, #14706e 48%, #093636 100%); }
+.post-bg--warm { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(251, 146, 60, .30), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .34), transparent 60%), linear-gradient(160deg, #6b4a3a 0%, #8f5f45 48%, #4e342a 100%); }
+.post-bg--purple { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(167, 139, 250, .36), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .30), transparent 60%), linear-gradient(160deg, #4a3f7a 0%, #6d5aa8 48%, #332b57 100%); }
+.post-bg--cyan { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(34, 211, 238, .32), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .30), transparent 60%), linear-gradient(160deg, #0e4a5e 0%, #14708d 48%, #093a4a 100%); }
+.post-bg--ocean { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(56, 189, 248, .32), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .28), transparent 60%), linear-gradient(160deg, #0c3d5e 0%, #17638f 48%, #082c44 100%); }
+.post-bg--sunset { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(251, 146, 60, .36), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(244, 114, 182, .34), transparent 60%), linear-gradient(160deg, #7a3b2e 0%, #b0553f 48%, #5c2b22 100%); }
+.post-bg--sky { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(125, 211, 252, .36), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .30), transparent 60%), linear-gradient(160deg, #25607c 0%, #3c84a8 48%, #1a4760 100%); }
+.post-bg--forest { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(74, 222, 128, .26), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .24), transparent 60%), linear-gradient(160deg, #27483a 0%, #3d6b57 48%, #1c352a 100%); }
+.post-bg--indigo { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(99, 102, 241, .40), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .30), transparent 60%), linear-gradient(160deg, #1e2a5e 0%, #31448f 48%, #141d42 100%); }
+.post-bg--pink { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(244, 114, 182, .36), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(251, 191, 36, .22), transparent 60%), linear-gradient(160deg, #7a3a56 0%, #a8577a 48%, #5a2b40 100%); }
+.post-bg--slate { background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(148, 163, 184, .30), transparent 62%), radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234, 188, 189, .26), transparent 60%), linear-gradient(160deg, #333b4a 0%, #4a5568 48%, #252b36 100%); }
+/* 音乐馆：半透明深色渐变，透出封面模糊背景（沉浸式） */
+.post-bg--music { background: linear-gradient(180deg, rgba(20, 21, 30, .62) 0%, rgba(20, 21, 30, .30) 55%, rgba(20, 21, 30, .12) 100%); }
+
+/* ===== 音乐馆沉浸式：封面模糊铺满背景，播放器深色卡片 ===== */
+#an_music_bg { position: fixed; inset: -48px; z-index: -1; background-size: cover; background-position: center; filter: blur(30px) saturate(1.25) brightness(.5); opacity: 0; transition: opacity .8s ease, background-image .8s ease; pointer-events: none; }
+#an_music_bg[style*="background-image"] { opacity: .9; }
+html[data-type="music"] { background: #14151c; }
+body[data-type="music"] { background: transparent !important; }
+body[data-type="music"] #nav { background: rgba(20, 21, 30, .74) !important; border-bottom-color: rgba(255, 255, 255, .08) !important; }
+body[data-type="music"] #nav #site-name .site-name-text,
+body[data-type="music"] #nav .site-page,
+body[data-type="music"] #nav .menus_item > a.site-page,
+body[data-type="music"] #nav #nav-right .nav-button a,
+body[data-type="music"] #nav #blog_name .back-home-button { color: #e8e8ee !important; }
+body[data-type="music"] #post { background: rgba(20, 21, 30, .55) !important; border-radius: 16px; padding: 18px; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+body[data-type="music"] .anMusic-info-name { color: #fff !important; }
+body[data-type="music"] .anMusic-info-meta { color: #c9c9d4 !important; }
+body[data-type="music"] .anMusic-info-tip { color: #9aa0b5 !important; }
+body[data-type="music"] #anMusicBtnGetSong, body[data-type="music"] #anMusicRefreshBtn, body[data-type="music"] #anMusicSwitching { background: rgba(255, 255, 255, .12); color: #fff; }
+body[data-type="music"] #anMusic-page-meting { background: #1b1d26; border: 1px solid rgba(255, 255, 255, .08); box-shadow: 0 12px 40px rgba(0, 0, 0, .45); }
+body[data-type="music"] #anMusic-page-meting .aplayer { color: #e8e8ee; }
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-info .aplayer-music .aplayer-title,
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-info .aplayer-music .aplayer-author { color: #e8e8ee !important; }
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-lrc { color: #a9a9b8; }
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-lrc p.aplayer-lrc-current { color: var(--anzhiyu-main) !important; }
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-list { background: #14151c; }
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-list ol li { border-top: 1px solid rgba(255, 255, 255, .06); color: #c9c9d4; }
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-list ol li:hover { background: #242633; }
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-list ol li.aplayer-list-light { background: #242633; color: var(--anzhiyu-main) !important; }
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-bar { background: #2a2c3a; }
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-bar .aplayer-played { background: var(--anzhiyu-main) !important; }
+body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-bar .aplayer-played .aplayer-thumb { background: #fff !important; }
 </style>
