@@ -59,6 +59,13 @@ func ClusterIntoStories(ctx context.Context, d Deps) (ClusterStats, error) {
 
 	vectors := tryEmbed(ctx, d, written)
 
+	markClustered := func(it item.Item) {
+		it.Selection.Stage = item.StageClustered
+		if uerr := d.Items.UpdateSelection(ctx, it.ID, it.Selection); uerr != nil {
+			log.Printf("[cluster] 推进 clustered 失败 %s: %v", it.ID, uerr)
+		}
+	}
+
 	for _, it := range written {
 		text := it.Selection.TitleZh + " " + it.Selection.SummaryZh
 
@@ -99,6 +106,7 @@ func ClusterIntoStories(ctx context.Context, d Deps) (ClusterStats, error) {
 				continue
 			}
 			stories[ns.ID] = ns
+			markClustered(it)
 			stats.NewStories++
 			continue
 		}
@@ -112,6 +120,7 @@ func ClusterIntoStories(ctx context.Context, d Deps) (ClusterStats, error) {
 			log.Printf("[cluster] 合并保存失败: %v", serr)
 			continue
 		}
+		markClustered(it)
 		stats.Merged++
 	}
 	return stats, nil

@@ -13,12 +13,13 @@ import (
 type Stage string
 
 const (
-	StageNew      Stage = "new"         // 刚采集
-	StageFiltered Stage = "prefiltered" // 预筛通过
-	StageDropped  Stage = "dropped"     // 预筛淘汰
-	StageScored   Stage = "scored"      // 双评分通过
-	StageRejected Stage = "rejected"    // 双评分未过门槛
-	StageWritten  Stage = "written"     // 已完成中文写作
+	StageNew       Stage = "new"         // 刚采集
+	StageFiltered  Stage = "prefiltered" // 预筛通过
+	StageDropped   Stage = "dropped"     // 预筛淘汰
+	StageScored    Stage = "scored"      // 双评分通过
+	StageRejected  Stage = "rejected"    // 双评分未过门槛
+	StageWritten   Stage = "written"     // 已完成中文写作
+	StageClustered Stage = "clustered"   // 已聚入事件（聚簇只处理一次，防重复合并/重复消耗 LLM）
 )
 
 // Selection 精选结果值对象。不可变，只能整体替换。

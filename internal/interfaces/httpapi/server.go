@@ -217,7 +217,7 @@ func (s *Server) searchPage(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 控制台 ----------
 
-var diagStages = []string{"written", "scored", "rejected", "filtered", "prefiltered", "dropped", "new"}
+var diagStages = []string{"written", "clustered", "scored", "rejected", "filtered", "prefiltered", "dropped", "new"}
 
 func (s *Server) consolePage(w http.ResponseWriter, r *http.Request) {
 	v, err := s.buildConsole(r)

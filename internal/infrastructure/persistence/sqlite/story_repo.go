@@ -46,11 +46,12 @@ func (r *StoryRepo) HotnessHistory(ctx context.Context, storyID string, limit in
 	defer rows.Close()
 	var out []story.HotnessPoint
 	for rows.Next() {
-		var p story.HotnessPoint
-		if err := rows.Scan(&p.At, &p.Hotness); err != nil {
+		var at string
+		p := story.HotnessPoint{}
+		if err := rows.Scan(&at, &p.Hotness); err != nil {
 			return nil, err
 		}
-		p.At = parseTime(p.At.Format(time.RFC3339))
+		p.At = parseTime(at)
 		out = append(out, p)
 	}
 	// 反转为升序

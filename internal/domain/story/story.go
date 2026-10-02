@@ -33,18 +33,18 @@ type Member struct {
 //   - 至少有一个成员；
 //   - 热度按独立来源计（同一信源、同一域名多次出现只算一次）。
 type Story struct {
-	ID          string
-	Kind        Kind
-	TitleZh     string
-	SummaryZh   string
-	URL         string // 事件主链接（热度最高成员的 URL）
-	Overview    string // 事件综述（LLM 整合多源报道生成，可选）
-	Manual      bool   // 人工锁定：聚簇不再自动合并/改写（AIHOT 同款保护）
-	Members     []Member
-	Projects    []string // 融合链接的 GitHub 仓库（owner/repo）
-	Hotness     float64
-	FirstSeenAt time.Time
-	UpdatedAt   time.Time
+	ID          string    `json:"id"`
+	Kind        Kind      `json:"kind"`
+	TitleZh     string    `json:"titleZh"`
+	SummaryZh   string    `json:"summaryZh"`
+	URL         string    `json:"url"`                // 事件主链接（热度最高成员的 URL）
+	Overview    string    `json:"overview,omitempty"` // 事件综述（LLM 整合多源报道生成，可选）
+	Manual      bool      `json:"manual"`             // 人工锁定：聚簇不再自动合并/改写（AIHOT 同款保护）
+	Members     []Member  `json:"members"`
+	Projects    []string  `json:"projects"` // 融合链接的 GitHub 仓库（owner/repo）
+	Hotness     float64   `json:"hotness"`
+	FirstSeenAt time.Time `json:"firstSeenAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // NewNews 由一条精选资料构造资讯事件。
@@ -82,7 +82,16 @@ func NewProject(fullName, titleZh, summaryZh, url string, now time.Time) *Story 
 // Merge 吸收另一个事件：成员并集，标题摘要保留展示价值更高的一方。
 // 调用方负责把被吸收方从仓储删除（应用层编排）。
 func (s *Story) Merge(other *Story, now time.Time) {
-	s.Members = append(s.Members, other.Members...)
+	existing := map[string]bool{}
+	for _, m := range s.Members {
+		existing[m.ItemID+"|"+m.URL] = true
+	}
+	for _, m := range other.Members {
+		if !existing[m.ItemID+"|"+m.URL] {
+			s.Members = append(s.Members, m)
+			existing[m.ItemID+"|"+m.URL] = true
+		}
+	}
 	s.Projects = unionStrings(s.Projects, other.Projects)
 	otherBest := bestMember(other.Members)
 	sBest := bestMember(s.Members)

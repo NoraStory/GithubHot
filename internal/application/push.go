@@ -45,10 +45,10 @@ func PushItem(ctx context.Context, d Deps, sourceID, rawURL, title, summary stri
 
 // StoryDetail 事件详情视图（事件页 + API 共用）。
 type StoryDetailView struct {
-	Story    StoryRow
-	Members  []DiagRow
-	Projects []ProjectRow
-	History  []story.HotnessPoint
+	Story    StoryRow             `json:"story"`
+	Members  []DiagRow            `json:"members"`
+	Projects []ProjectRow         `json:"projects"`
+	History  []story.HotnessPoint `json:"history"`
 }
 
 // BuildStoryDetail 事件详情：综述 + 成员资料 + 关联项目 + 热度历史。
