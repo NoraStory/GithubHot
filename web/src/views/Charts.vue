@@ -1,22 +1,23 @@
 <script setup>
-// 统计/工具页（AnZhiYu charts + toolbox 合并）：Token 用量图表 + API 工具箱
-import { ref, onMounted } from 'vue'
+// 统计页（用户侧）：站点概览 + 期刊时间线 + API 工具箱
+// 注意：Token 用量等成本数据属于管理端（/admin/usage），不在用户界面展示
+import { ref, computed, onMounted } from 'vue'
 import { api } from '../lib/api'
 
-const usage = ref(null)
 const overview = ref(null)
+const digestDates = ref([])
 const tools = [
   { name: '三榜 JSON', desc: 'GET /api/v1/hot', url: '/api/v1/hot' },
   { name: 'GitHub 项目榜', desc: 'GET /api/v1/hot/github', url: '/api/v1/hot/github' },
   { name: 'AI 资讯榜', desc: 'GET /api/v1/hot/news', url: '/api/v1/hot/news' },
   { name: '融合配对', desc: 'GET /api/v1/hot/fusion', url: '/api/v1/hot/fusion' },
   { name: '期刊列表', desc: 'GET /api/v1/digests?page=1', url: '/api/v1/digests?page=1&pageSize=10' },
-  { name: '事件详情', desc: 'GET /api/v1/story/{id}', url: '' },
-  { name: '站内搜索', desc: 'GET /api/v1/search?q=', url: '' },
   { name: '日报 Markdown', desc: 'GET /api/v1/digest/latest?format=raw', url: '/api/v1/digest/latest?format=raw' },
   { name: 'Agent 报告', desc: 'GET /api/v1/agent/hot.md', url: '/api/v1/agent/hot.md' },
   { name: 'llms.txt', desc: 'GET /llms.txt', url: '/llms.txt' }
 ]
+
+const latestDigests = computed(() => digestDates.value.slice(0, 10))
 
 onMounted(async () => {
   const [hot, dg, srcs] = await Promise.all([
@@ -29,12 +30,8 @@ onMounted(async () => {
     digests: (dg.items || []).length,
     sources: (srcs.items || []).length
   }
-  usage.value = await api.get('/api/v1/admin/usage').catch(() => null)
+  digestDates.value = (dg.items || []).map((d) => d.date)
 })
-
-function maxDay(days) {
-  return Math.max(...(days || []).map((d) => d.promptTokens + d.completionTokens), 1)
-}
 </script>
 
 <template>
@@ -56,17 +53,16 @@ function maxDay(days) {
           <div class="ov-card"><div class="v">{{ overview.sources }}</div><div class="k">信源</div></div>
         </div>
 
-        <h2>Token 用量（近 7 日）</h2>
-        <div v-if="usage && usage.days && usage.days.length" class="chart">
-          <div v-for="d in usage.days" :key="d.day" class="chart-row">
-            <span class="chart-day">{{ d.day }}</span>
-            <div class="chart-bar">
-              <div class="fill" :style="{ width: ((d.promptTokens + d.completionTokens) / maxDay(usage.days) * 100) + '%' }"></div>
-            </div>
-            <span class="num chart-v">{{ (d.promptTokens + d.completionTokens).toLocaleString() }}</span>
-          </div>
+        <h2>期刊时间线</h2>
+        <div v-if="latestDigests.length" class="digest-timeline">
+          <router-link v-for="d in latestDigests" :key="d" class="digest-row" :to="`/digest/${d}`">
+            <span class="dot"></span>
+            <span class="date">{{ d }}</span>
+            <span class="label">双热点报告</span>
+            <i class="anzhiyufont anzhiyu-icon-angle-right"></i>
+          </router-link>
         </div>
-        <div v-else class="empty">暂无用量数据</div>
+        <div v-else class="empty">暂无期刊</div>
 
         <h2>API 工具箱</h2>
         <div class="toolbox">
@@ -95,12 +91,14 @@ function maxDay(days) {
 h2 { font-size: 1.2rem; margin: 1.6rem 0 .8rem; position: relative; padding-left: 1.35rem; }
 h2::before { content: '✽'; position: absolute; left: 0; color: #fb7061; animation: ccc 1.6s linear infinite; }
 @keyframes ccc { 0% { transform: rotate(0); } to { transform: rotate(-1turn); } }
-.chart-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
-.chart-day { width: 90px; color: var(--anzhiyu-gray); font-size: .84rem; }
-.chart-bar { flex: 1; height: 16px; background: var(--anzhiyu-background); border-radius: 8px; overflow: hidden; }
-.chart-bar .fill { height: 100%; background: linear-gradient(90deg, var(--anzhiyu-theme), var(--anzhiyu-hover)); border-radius: 8px; transition: width .6s; }
-.chart-v { width: 100px; text-align: right; font-size: .84rem; color: var(--anzhiyu-secondary); }
 .num { font-variant-numeric: tabular-nums; }
+.digest-timeline { display: flex; flex-direction: column; }
+.digest-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px; color: var(--anzhiyu-fontcolor); font-size: .92rem; }
+.digest-row:hover { background: var(--anzhiyu-theme-op); }
+.digest-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--anzhiyu-theme); flex-shrink: 0; }
+.digest-row .date { font-weight: 700; }
+.digest-row .label { color: var(--anzhiyu-gray); flex: 1; }
+.digest-row .anzhiyufont { color: var(--anzhiyu-gray); }
 .toolbox { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .tool-item { background: var(--anzhiyu-card-bg); border: 1px solid var(--anzhiyu-card-border); border-radius: var(--anzhiyu-radius); padding: 12px 16px; transition: all .25s; }
 .tool-item:hover { border-color: var(--anzhiyu-theme); transform: translateY(-2px); box-shadow: var(--card-box-shadow); }

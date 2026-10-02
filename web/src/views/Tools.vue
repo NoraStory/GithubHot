@@ -14,8 +14,7 @@ const groups = [
       { name: '期刊列表', desc: 'GET /api/v1/digests', url: '/api/v1/digests?page=1&pageSize=10' },
       { name: '事件详情', desc: 'GET /api/v1/story/{id}', url: '/api/v1/story/story-ac6f3cc6f4' },
       { name: '站内搜索', desc: 'GET /api/v1/search?q=', url: '/api/v1/search?q=agent' },
-      { name: '日报 Markdown', desc: 'GET /api/v1/digest/latest?format=raw', url: '/api/v1/digest/latest?format=raw' },
-      { name: 'Token 用量', desc: 'GET /api/v1/admin/usage', url: '/api/v1/admin/usage' }
+      { name: '日报 Markdown', desc: 'GET /api/v1/digest/latest?format=raw', url: '/api/v1/digest/latest?format=raw' }
     ]
   },
   {

@@ -197,6 +197,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+#post { max-width: 100%; margin: 0; }
 .post-bg { height: 24rem; position: relative; overflow: hidden;
   background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66,90,239,.4), transparent 62%),
               radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234,188,189,.5), transparent 60%),

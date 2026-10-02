@@ -564,7 +564,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
       <div class="console-btn-item" id="consoleRandomPost" title="随机逛逛" @click="toRandom">
         <a href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-dice"></i></a>
       </div>
-      <div class="console-btn-item" id="consoleAdmin" title="管理端">
+      <div class="console-btn-item" id="consoleAdmin" v-if="getToken()" title="管理端">
         <router-link to="/admin/usage"><i class="anzhiyufont anzhiyu-icon-gear"></i></router-link>
       </div>
       <div id="console-naoDark" @click="dark = !dark; applyTheme()">
@@ -817,6 +817,23 @@ html[data-theme="dark"] #nav { background: rgba(24, 23, 29, 0.9); }
 
 /* 分类条与卡片对齐：同左缘、同右缘（卡片在 20px 内容缩进处） */
 #categoryBar { padding: 0 20px; box-sizing: border-box; }
+
+/* ===== 子页 UI 统一：内容列宽一致 + 标题样式一致（覆盖各页零散的 ✽ 伪元素样式）===== */
+#content-inner > #post { max-width: 900px; margin: 0 auto; }
+#post #article-container > h2,
+.flink h2,
+section h2 {
+  font-size: 1.22rem !important;
+  line-height: 1.5 !important;
+  margin: 1.8rem 0 0.9rem !important;
+  padding: 0.6rem 1rem !important;
+  background: var(--anzhiyu-theme-op) !important;
+  border-radius: 8px !important;
+  color: var(--anzhiyu-fontcolor) !important;
+}
+#post #article-container > h2::before,
+.flink h2::before,
+section h2::before { content: none !important; }
 
 /* 窄屏隐藏首页横幅组（参考站行为：banner + 音乐播放器在窄屏放不下） */
 @media (max-width: 991px) {

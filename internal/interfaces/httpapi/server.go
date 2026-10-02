@@ -61,10 +61,13 @@ func (s *Server) Router() http.Handler {
 		r.Get("/agent/hot.md", s.agentMD)
 		r.Get("/story/{id}", s.storyAPI)
 		s.registerAdminRoutes(r)
-		// 控制台数据（APP/运维消费）
-		r.Get("/admin/usage", s.usageAPI)
-		r.Get("/admin/diagnostics", s.diagnosticsAPI)
-		r.Get("/admin/runs", s.runsAPI)
+		// 控制台数据（管理端专属，与变更接口同样受 X-Admin-Token 保护）
+		r.Group(func(r chi.Router) {
+			r.Use(adminAuth)
+			r.Get("/admin/usage", s.usageAPI)
+			r.Get("/admin/diagnostics", s.diagnosticsAPI)
+			r.Get("/admin/runs", s.runsAPI)
+		})
 	})
 	return r
 }
