@@ -168,10 +168,11 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
           <div class="category-bar" id="category-bar">
             <div id="catalog-bar">
               <div id="catalog-list">
-                <div v-for="k in [{ v: 'all', l: '全部' }, { v: 'daily', l: '日报' }, { v: 'weekly', l: '周报' }, { v: 'monthly', l: '月报' }]" :key="k.v" class="catalog-list-item" :id="k.v">
+                <div v-for="k in [{ v: 'all', l: '全部' }, { v: 'daily', l: '日报' }, { v: 'weekly', l: '周报' }, { v: 'monthly', l: '月报' }]" :key="k.v" class="catalog-list-item" :id="k.v" :class="{ selected: filter === k.v }">
                   <a href="javascript:void(0)" @click="filter = k.v; page = 1">{{ k.l }}</a>
                 </div>
               </div>
+              <a class="catalog-more" href="javascript:void(0)" @click="$router.push('/categories')">更多</a>
             </div>
           </div>
         </div>

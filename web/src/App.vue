@@ -452,6 +452,15 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
 .menus_groups .site-page.child:hover { background: var(--anzhiyu-theme-op); color: var(--anzhiyu-hover); }
 .menus_groups .site-page.child.router-link-active { background: var(--anzhiyu-theme-op); font-weight: 600; }
 
+/* 分类条对齐（补全参考站完整结构后的显式约束） */
+#categoryBar { width: 100%; justify-content: flex-start; margin-bottom: 0; }
+#categoryBar .category-bar { width: 100%; justify-content: flex-start; }
+#categoryBar #catalog-bar { justify-content: flex-start; flex: 1; min-width: 0; }
+#categoryBar #catalog-list { display: flex; overflow-x: auto; scrollbar-width: none; }
+#categoryBar #catalog-list::-webkit-scrollbar { display: none; }
+#categoryBar .catalog-more { margin-left: auto; padding: 0 .5rem; }
+#categoryBar .catalog-list-item.selected a { background: var(--anzhiyu-theme); color: var(--anzhiyu-white); }
+
 .page-enter-active, .page-leave-active { transition: opacity 0.3s, transform 0.3s; }
 .page-enter-from { opacity: 0; transform: translateY(12px); }
 .page-leave-to { opacity: 0; transform: translateY(-8px); }
