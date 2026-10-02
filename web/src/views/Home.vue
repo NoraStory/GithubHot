@@ -10,11 +10,22 @@ const filter = ref('all')
 const page = ref(1)
 const pageSize = 8
 
+// 期刊数据从分页接口取（全量 50 条供首页展示与筛选）
 const digests = computed(() =>
-  (view.value.digests || []).filter((d) => filter.value === 'all' || d.kind === filter.value)
+  (digestsAll.value || []).filter((d) => filter.value === 'all' || d.kind === filter.value)
 )
+const digestsAll = ref([])
 const paged = computed(() => digests.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const total = computed(() => digests.value.length)
+
+// 横幅背景（AnZhiYu 由站点配置注入背景图；我们注入深色渐变 + 轮播，主题 :before 自动压暗）
+const slides = [
+  'radial-gradient(ellipse 55% 85% at 12% 8%, rgba(66,90,239,.55), transparent 62%), radial-gradient(ellipse 50% 80% at 88% 12%, rgba(234,188,189,.45), transparent 60%), linear-gradient(160deg, #3d4a63 0%, #2c3850 55%, #1f2a3d 100%)',
+  'radial-gradient(ellipse 60% 80% at 20% 20%, rgba(255,114,66,.45), transparent 60%), radial-gradient(ellipse 55% 75% at 80% 10%, rgba(234,188,189,.4), transparent 62%), linear-gradient(150deg, #4d3f4a 0%, #3a3040 55%, #241f2a 100%)',
+  'radial-gradient(ellipse 55% 70% at 75% 15%, rgba(54,181,98,.35), transparent 60%), radial-gradient(ellipse 60% 85% at 20% 10%, rgba(66,90,239,.5), transparent 62%), linear-gradient(165deg, #2b3d4f 0%, #22303e 55%, #161e2a 100%)'
+]
+const current = ref(0)
+let slideTimer
 
 // 随便逛逛：随机跳一个事件/日报
 const stories = ref([])
@@ -63,17 +74,20 @@ function typeLoop() {
 onMounted(async () => {
   typeLoop()
   quoteTimer = setInterval(() => { qi.value = (qi.value + 1) % quotes.length; typeLoop() }, 6000)
+  slideTimer = setInterval(() => { current.value = (current.value + 1) % slides.length }, 6000)
   view.value = await api.get('/api/v1/hot')
   loading.value = false
   const d = await api.get('/api/v1/hot/news')
   stories.value = d.items || []
+  const dg = await api.get('/api/v1/digests?pageSize=50')
+  digestsAll.value = dg.items || []
 })
-onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(quoteTimer) })
+onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(quoteTimer); clearInterval(slideTimer) })
 </script>
 
 <template>
   <!-- 首页大横幅（full_page：全屏 + 打字机副标题 + 社交图标 + 下滑箭头） -->
-  <header class="full_page" id="page-header">
+  <header class="full_page" id="page-header" :style="{ background: slides[current] }">
     <div id="site-info">
       <h1 id="site-title">GithubHot</h1>
       <div id="site-subtitle"><span id="subtitle">{{ typed }}</span></div>
