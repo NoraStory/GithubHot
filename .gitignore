@@ -17,3 +17,4 @@ data/*.db-wal
 *.exe~
 web/node_modules/
 web/dist/
+.ref/
