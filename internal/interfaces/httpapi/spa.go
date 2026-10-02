@@ -68,10 +68,20 @@ func (s *Server) siteConfig(w http.ResponseWriter, _ *http.Request) {
 			music = []any{}
 		}
 	}
+	homeVideos := strings.TrimSpace(os.Getenv("HOME_VIDEOS"))
+	if homeVideos == "" {
+		// 默认与参考站一致的黑白老电影片单（横屏）
+		homeVideos = strings.Join([]string{
+			"https://pic.lololowe.com/video/x/1.mp4", "https://pic.lololowe.com/video/x/2.mp4",
+			"https://pic.lololowe.com/video/x/3.mp4", "https://pic.lololowe.com/video/x/4.mp4",
+			"https://pic.lololowe.com/video/x/5.mp4", "https://pic.lololowe.com/video/x/6.mp4",
+		}, "|")
+	}
 	writeJSON(w, 200, map[string]any{
-		"music":     music,
-		"siteName":  "GithubHot",
-		"poweredBy": "Go + Vue3",
+		"music":      music,
+		"siteName":   "GithubHot",
+		"poweredBy":  "Go + Vue3",
+		"homeVideos": homeVideos,
 	})
 }
 

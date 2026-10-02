@@ -4,33 +4,85 @@ import { useRouter } from 'vue-router'
 import { api } from '../lib/api'
 
 const router = useRouter()
-const view = ref({ github: [], news: [], fusion: [], digests: [], generatedAt: '' })
+const view = ref({ github: [], news: [], fusion: [] })
 const loading = ref(true)
 const filter = ref('all')
 const page = ref(1)
 const pageSize = 8
 
-// 期刊数据从分页接口取（全量 50 条供首页展示与筛选）
+const digestsAll = ref([])
 const digests = computed(() =>
   (digestsAll.value || []).filter((d) => filter.value === 'all' || d.kind === filter.value)
 )
-const digestsAll = ref([])
 const paged = computed(() => digests.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const total = computed(() => digests.value.length)
 
-// 横幅背景（AnZhiYu 由站点配置注入背景图；我们注入深色渐变 + 轮播，主题 :before 自动压暗）
-const slides = [
-  'radial-gradient(ellipse 55% 85% at 12% 8%, rgba(66,90,239,.55), transparent 62%), radial-gradient(ellipse 50% 80% at 88% 12%, rgba(234,188,189,.45), transparent 60%), linear-gradient(160deg, #3d4a63 0%, #2c3850 55%, #1f2a3d 100%)',
-  'radial-gradient(ellipse 60% 80% at 20% 20%, rgba(255,114,66,.45), transparent 60%), radial-gradient(ellipse 55% 75% at 80% 10%, rgba(234,188,189,.4), transparent 62%), linear-gradient(150deg, #4d3f4a 0%, #3a3040 55%, #241f2a 100%)',
-  'radial-gradient(ellipse 55% 70% at 75% 15%, rgba(54,181,98,.35), transparent 60%), radial-gradient(ellipse 60% 85% at 20% 10%, rgba(66,90,239,.5), transparent 62%), linear-gradient(165deg, #2b3d4f 0%, #22303e 55%, #161e2a 100%)'
-]
-const current = ref(0)
-let slideTimer
+// ===== 横幅背景视频（AnZhiYu #home-media-container 同构：随机选片/竖横屏/视差由 index_media.js 处理）=====
+const LANDSCAPE_VIDEOS = [
+  'https://pic.lololowe.com/video/x/1.mp4', 'https://pic.lololowe.com/video/x/2.mp4',
+  'https://pic.lololowe.com/video/x/3.mp4', 'https://pic.lololowe.com/video/x/4.mp4',
+  'https://pic.lololowe.com/video/x/5.mp4', 'https://pic.lololowe.com/video/x/6.mp4'
+].join('|')
+const videoList = ref(LANDSCAPE_VIDEOS)
 
-// 随便逛逛：随机跳一个事件/日报
+// ===== 古诗词（今日诗词 jinrishici，Typed 循环打字进横幅正中心 #subtitle）=====
+const typed = ref('')
+let poem = '欲穷千里目，更上一层楼。'
+let typeTimer, deleteTimer, quoteTimer
+const poemFallback = [
+  '欲穷千里目，更上一层楼。', '海内存知己，天涯若比邻。',
+  '长风破浪会有时，直挂云帆济沧海。', '路漫漫其修远兮，吾将上下而求索。',
+  '沉舟侧畔千帆过，病树前头万木春。'
+]
+function typeLoop() {
+  const text = poem
+  let i = 0
+  typed.value = ''
+  clearInterval(typeTimer)
+  typeTimer = setInterval(() => {
+    i++
+    typed.value = text.slice(0, i)
+    if (i >= text.length) {
+      clearInterval(typeTimer)
+      setTimeout(() => deleteBack(text), 2600)
+    }
+  }, 130)
+}
+function deleteBack(text) {
+  let i = text.length
+  deleteTimer = setInterval(() => {
+    i--
+    typed.value = text.slice(0, i)
+    if (i <= 0) {
+      clearInterval(deleteTimer)
+      qi.value = (qi.value + 1) % poems.length
+      poem = poems[qi.value]
+      typeLoop()
+    }
+  }, 45)
+}
+const poems = [...poemFallback]
+const qi = ref(0)
+
+// 从今日诗词 API 拉一首（失败用内置）
+function loadPoem() {
+  try {
+    if (window.jinrishici) {
+      window.jinrishici.load((result) => {
+        if (result && result.data && result.data.content) {
+          poem = result.data.content
+          qi.value = 0
+          typeLoop()
+        }
+      })
+    }
+  } catch { /* 静默 */ }
+}
+
+// 随便逛逛
 const stories = ref([])
 function toRandom() {
-  const pool = stories.value.length ? stories.value.map((s) => `/story/${s.storyId}`) : (view.value.digests || []).map((d) => `/digest/${d.date}`)
+  const pool = stories.value.length ? stories.value.map((s) => `/story/${s.storyId}`) : (digestsAll.value || []).map((d) => `/digest/${d.date}`)
   if (pool.length) router.push(pool[Math.floor(Math.random() * pool.length)])
 }
 function scrollDown() {
@@ -38,59 +90,42 @@ function scrollDown() {
   if (el) el.scrollIntoView({ behavior: 'smooth' })
 }
 
-// 封面：按标题哈希取主题色渐变（内联 SVG，像素级复刻封面占位）
 function coverOf(title) {
   let h = 0
   for (const c of title) h = (h * 31 + c.charCodeAt(0)) % 360
   const a = `hsl(${h}, 42%, 62%)`
   const b = `hsl(${(h + 40) % 360}, 48%, 44%)`
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='600' height='336'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${a}'/><stop offset='1' stop-color='${b}'/></linearGradient></defs><rect width='600' height='336' fill='url(#g)'/><circle cx='500' cy='70' r='110' fill='rgba(255,255,255,0.12)'/><circle cx='90' cy='290' r='70' fill='rgba(255,255,255,0.09)'/></svg>`
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='600' height='336'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${a}'/><stop offset='1' stop-color='${b}'/></linearGradient></defs><rect width='600' height='336' fill='url(#g)'/><circle cx='500' cy='70' r='110' fill='rgba(255,255,255,0.12)'/></svg>`
   return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
-}
-
-// 一言打字机
-const typed = ref('')
-const quotes = [
-  '把信源换成你的，把精选标准换成你的 KnowHow。',
-  '热度按独立来源算——一家媒体发十篇也只算一次。',
-  '300 star 的新项目，比静态 30 万 star 的老项目更热。',
-  '两个世界同时说一件事，可信度更高。',
-  '48 小时窗口，24 小时减半。'
-]
-const qi = ref(0)
-let typeTimer, quoteTimer
-function typeLoop() {
-  const text = quotes[qi.value]
-  let i = 0
-  typed.value = ''
-  clearInterval(typeTimer)
-  typeTimer = setInterval(() => {
-    i++
-    typed.value = text.slice(0, i)
-    if (i >= text.length) clearInterval(typeTimer)
-  }, 70)
 }
 
 onMounted(async () => {
   typeLoop()
-  quoteTimer = setInterval(() => { qi.value = (qi.value + 1) % quotes.length; typeLoop() }, 6000)
-  slideTimer = setInterval(() => { current.value = (current.value + 1) % slides.length }, 6000)
+  loadPoem()
   view.value = await api.get('/api/v1/hot')
   loading.value = false
   const d = await api.get('/api/v1/hot/news')
   stories.value = d.items || []
   const dg = await api.get('/api/v1/digests?pageSize=50')
   digestsAll.value = dg.items || []
+  const cfg = await api.get('/api/v1/site/config').catch(() => null)
+  if (cfg && cfg.homeVideos) videoList.value = cfg.homeVideos
 })
-onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(quoteTimer); clearInterval(slideTimer) })
+onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); clearInterval(quoteTimer) })
 </script>
 
 <template>
-  <!-- 首页大横幅（full_page：全屏 + 打字机副标题 + 社交图标 + 下滑箭头） -->
-  <header class="full_page" id="page-header" :style="{ background: slides[current] }">
+  <!-- 首页大横幅（full_page：视频背景黑白老电影 + 古诗词打字机 + 下滑箭头） -->
+  <header class="full_page" id="page-header">
+    <!-- AnZhiYu 媒体容器：index_media.js 随机选片播放 -->
+    <div
+      id="home-media-container"
+      :data-landscape-video="videoList"
+      :data-portrait-video="videoList"
+    ></div>
     <div id="site-info">
       <h1 id="site-title">GithubHot</h1>
-      <div id="site-subtitle"><span id="subtitle">{{ typed }}</span></div>
+      <div id="site-subtitle"><span id="subtitle">{{ typed }}<span class="typed-cursor">|</span></span></div>
       <div id="site_social_icons">
         <a class="social-icon faa-parent animated-hover" href="https://github.com/NoraStory/GithubHot" target="_blank" title="Github">
           <i class="anzhiyufont anzhiyu-icon-github"></i>
@@ -103,7 +138,7 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(quoteTimer); cle
     <div id="scroll-down"><i class="anzhiyufont anzhiyu-icon-angle-down scroll-down-effects" @click="scrollDown"></i></div>
   </header>
 
-  <!-- home_top：随便逛逛 + 分类三按钮（AnZhiYu bannerGroup 同构） -->
+  <!-- home_top：随便逛逛 + 分类三按钮 -->
   <main id="blog-container">
     <div id="home_top">
       <div id="bannerGroup">
@@ -127,7 +162,6 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(quoteTimer); cle
       </div>
     </div>
 
-    <!-- recent-posts：期刊文章卡（cover + tips + title + meta） -->
     <div class="layout" id="content-inner">
       <div class="recent-posts" id="recent-posts">
         <div id="categoryBar">
@@ -147,7 +181,7 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(quoteTimer); cle
 
         <div v-for="d in paged" :key="d.date" class="recent-post-item fade-up" @click="router.push(`/digest/${d.date}`)">
           <div class="post_cover left">
-            <a :href="`/digest/${d.date}`" :title="`${d.kind === 'weekly' ? '周报' : d.kind === 'monthly' ? '月报' : '日报'} ${d.date}`">
+            <a :href="`/digest/${d.date}`" :title="d.date">
               <img class="post_bg" :src="coverOf(d.date)" alt="cover" style="pointer-events: none">
             </a>
           </div>
@@ -175,7 +209,7 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(quoteTimer); cle
         <div id="pagination">
           <div class="pagination">
             <span class="page-item" :class="{ disabled: page === 1 }" @click="page > 1 && page--">‹</span>
-            <span v-for="p in Math.max(1, Math.ceil(total / pageSize))" :key="p" class="page-item" :class="{ active: p === page }" @click="p !== page && (page = p)">{{ p }}</span>
+            <span v-for="pn in Math.max(1, Math.ceil(total / pageSize))" :key="pn" class="page-item" :class="{ active: pn === page }" @click="pn !== page && (page = pn)">{{ pn }}</span>
             <span class="page-item" :class="{ disabled: page >= Math.ceil(total / pageSize) }" @click="page < Math.ceil(total / pageSize) && page++">›</span>
           </div>
         </div>

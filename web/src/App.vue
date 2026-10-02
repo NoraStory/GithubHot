@@ -55,8 +55,17 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
               <div class="back-menu-list-title">期刊</div>
               <div class="back-menu-list">
                 <a class="back-menu-item" href="/digests"><span class="back-menu-item-text">全部期刊</span></a>
-                <a class="back-menu-item" href="/about"><span class="back-menu-item-text">关于本站</span></a>
+                <a class="back-menu-item" href="/archives"><span class="back-menu-item-text">归档</span></a>
                 <a class="back-menu-item" href="/llms.txt" target="_blank"><span class="back-menu-item-text">llms.txt</span></a>
+              </div>
+            </div>
+            <div class="back-menu-list-group">
+              <div class="back-menu-list-title">发现</div>
+              <div class="back-menu-list">
+                <a class="back-menu-item" href="/categories"><span class="back-menu-item-text">分类</span></a>
+                <a class="back-menu-item" href="/tags"><span class="back-menu-item-text">标签</span></a>
+                <a class="back-menu-item" href="/charts"><span class="back-menu-item-text">统计</span></a>
+                <a class="back-menu-item" href="/link"><span class="back-menu-item-text">资源</span></a>
               </div>
             </div>
           </div>
@@ -75,7 +84,17 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
           <a class="site-page" href="javascript:void(0);"><span> 期刊</span></a>
           <ul class="menus_item_child">
             <li><router-link class="site-page child faa-parent animated-hover" to="/digests"><i class="anzhiyufont anzhiyu-icon-box-archive faa-tada" style="font-size: 0.9em;"></i><span> 全部期刊</span></router-link></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/archives"><i class="anzhiyufont anzhiyu-icon-clock-rotate-left faa-tada" style="font-size: 0.9em;"></i><span> 归档</span></router-link></li>
             <li><a class="site-page child faa-parent animated-hover" href="/feed/digest.xml" target="_blank"><i class="anzhiyufont anzhiyu-icon-rss faa-tada" style="font-size: 0.9em;"></i><span> RSS 订阅</span></a></li>
+          </ul>
+        </div>
+        <div class="menus_item">
+          <a class="site-page" href="javascript:void(0);"><span> 发现</span></a>
+          <ul class="menus_item_child">
+            <li><router-link class="site-page child faa-parent animated-hover" to="/categories"><i class="anzhiyufont anzhiyu-icon-shapes faa-tada" style="font-size: 0.9em;"></i><span> 分类</span></router-link></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/tags"><i class="anzhiyufont anzhiyu-icon-tags faa-tada" style="font-size: 0.9em;"></i><span> 标签</span></router-link></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/charts"><i class="fa-solid fa-chart-line faa-tada" style="font-size: 0.9em;"></i><span> 统计</span></router-link></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/link"><i class="anzhiyufont anzhiyu-icon-link faa-tada" style="font-size: 0.9em;"></i><span> 资源</span></router-link></li>
           </ul>
         </div>
         <div class="menus_item">

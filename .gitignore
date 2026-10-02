@@ -18,3 +18,8 @@ data/*.db-wal
 web/node_modules/
 web/dist/
 .ref/
+web/public/anzhiyu/js/main.js
+web/public/anzhiyu/js/utils.js
+web/public/anzhiyu/js/waterfall.js
+web/public/anzhiyu/js/welcome.js
+web/public/anzhiyu/js/countdown.js
