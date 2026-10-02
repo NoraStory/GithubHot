@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>控制台 · GithubHot</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#21262d; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --hot:#f78166; --tag:#1f6feb; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--fg); font:15px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:1060px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:22px; padding:16px 0 4px; }
+  h1 a { color:var(--accent); text-decoration:none; }
+  h2 { font-size:17px; margin:26px 0 10px; color:var(--accent); }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:8px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px 16px; margin-bottom:14px; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; color:var(--muted); font-weight:500; font-size:12px; padding:10px 8px; border-bottom:1px solid var(--border); }
+  td { padding:9px 8px; border-bottom:1px solid var(--border); vertical-align:top; font-size:14px; }
+  tr:last-child td { border-bottom:none; }
+  .num { font-variant-numeric:tabular-nums; }
+  .hot { color:var(--hot); font-weight:600; }
+  .badge { display:inline-block; background:#238636; color:#fff; font-size:11px; border-radius:10px; padding:1px 8px; }
+  .topic { display:inline-block; background:var(--tag); color:#fff; border-radius:4px; padding:0 6px; font-size:11px; }
+  .desc { color:var(--muted); font-size:12px; margin-top:2px; }
+  .empty { color:var(--muted); text-align:center; padding:24px 0; }
+  .budgetbar { height:8px; background:#21262d; border-radius:4px; overflow:hidden; margin:10px 0; }
+  .budgetbar div { height:100%; background:linear-gradient(90deg,#3fb950,#f78166); }
+  select, input[type=text] { background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:6px 10px; }
+  a { color:var(--accent); }
+  form.stageform { margin:10px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><a href="/">GithubHot</a> · 控制台</h1>
+  <div class="sub">Token 用量与预算 · 内容诊断 · 运行历史 · 信源 · 期刊</div>
+
+  <h2>💰 Token 用量（近 24h） {{BUDGET_STATE}}</h2>
+  <div class="card">
+    <table>
+      <tr><td>输入 tokens</td><td class="num">{{USAGE_PROMPT}}</td><td>输出 tokens</td><td class="num">{{USAGE_COMPLETION}}</td><td>合计</td><td class="num hot">{{USAGE_TOTAL}}</td><td>估算成本 ¥</td><td class="num">{{USAGE_COST}}</td></tr>
+    </table>
+    <div class="budgetbar"><div style="width:{{BUDGET_PCT}}%"></div></div>
+    <div class="sub">每日预算 {{USAGE_BUDGET}} tokens（0 = 不熔断），已用 {{BUDGET_PCT}}%</div>
+    <table>
+      <thead><tr><th>阶段</th><th>调用次数</th><th>输入</th><th>输出</th></tr></thead>
+      <tbody>{{USAGE_PHASES}}</tbody>
+    </table>
+  </div>
+
+  <h2>📅 近 7 日用量</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>日期(UTC)</th><th>输入</th><th>输出</th><th>合计</th></tr></thead>
+      <tbody>{{USAGE_DAYS}}</tbody>
+    </table>
+  </div>
+
+  <h2>🩺 内容诊断</h2>
+  <form class="stageform" method="get" action="/console">
+    <select name="stage">
+      {{STAGE_OPTIONS}}
+    </select>
+    <button class="topic" style="padding:6px 14px;border:none;cursor:pointer">查看</button>
+  </form>
+  <div class="card">
+    <table>
+      <thead><tr><th>阶段</th><th>标题 / 来源</th><th>评分 A/B</th><th>理由</th></tr></thead>
+      <tbody>{{DIAGNOSTICS}}</tbody>
+    </table>
+  </div>
+
+  <h2>🖥 运行历史</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>开始时间(UTC)</th><th>状态</th><th>耗时</th><th>采集</th><th>写作</th><th>事件</th></tr></thead>
+      <tbody>{{RUNS}}</tbody>
+    </table>
+  </div>
+
+  <h2>📰 期刊</h2>
+  <div class="card">
+    <table>
+      <tbody>{{DIGESTS}}</tbody>
+    </table>
+  </div>
+
+  <h2>📡 信源（{{SOURCES_COUNT}}）</h2>
+  <div class="card">
+    <table>
+      <tbody>{{SOURCES}}</tbody>
+    </table>
+  </div>
+
+  <footer style="text-align:center;color:var(--muted);font-size:12px;margin-top:30px">
+    <a href="/">← 返回双榜</a> · RSS：<a href="/feed/news.xml">资讯</a> / <a href="/feed/github.xml">项目</a> / <a href="/feed/digest.xml">期刊</a>
+  </footer>
+</div>
+</body>
+</html>

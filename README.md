@@ -63,6 +63,9 @@ go build -o githubhot ./cmd/githubhot
 | `LLM_EMBED_API_KEY` | | 向量接口 Key；留空复用 `LLM_API_KEY` |
 | `LLM_EMBED_DIMENSIONS` | | 向量输出维度（MRL）；0 = 服务商默认。Qwen3-Embedding-8B 最大 4096 |
 | `LLM_EMBED_STYLE` | | 向量接口风格：`openai`（默认）/ `ark-multimodal`（火山方舟 doubao-embedding-vision 系列） |
+| `LLM_THINKING` | | `disabled` 关闭推理模型深度思考（提速约 5 倍） |
+| `LLM_BUDGET_TOKENS_PER_DAY` | | 每日 Token 预算，超限自动熔断 LLM 阶段（0=不熔断） |
+| `LLM_PRICE_IN_PER_M` / `LLM_PRICE_OUT_PER_M` | | 每百万 token 单价，仅用于成本估算展示 |
 | `GITHUB_TOKEN` | 建议 | 无 token 限 60 次/小时；配置后 5000 次/小时 |
 | `DATA_DIR` | | 数据目录，默认 `./data` |
 | `PORT` | | serve 端口，默认 `8787` |

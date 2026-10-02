@@ -16,22 +16,32 @@ type Markdown struct{}
 // NewMarkdown 构造。
 func NewMarkdown() *Markdown { return &Markdown{} }
 
-// Render 生成 Markdown 日报。
+// Render 生成 Markdown 日报/周报/月报。
 func (Markdown) Render(_ context.Context, v application.DigestView) (string, error) {
+	title := map[string]string{"weekly": "周报", "monthly": "月报"}[v.Kind]
+	if title == "" {
+		title = "日报"
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# GithubHot 双热点日报 · %s\n\n", v.Date)
+	fmt.Fprintf(&b, "# GithubHot 双热点%s · %s\n\n", title, v.PeriodLabel)
 	fmt.Fprintf(&b, "> 生成于 %s · 模型 %s", v.Generated.Format("2006-01-02 15:04 MST"), v.Stats.ModelA)
 	if v.Stats.ModelB != "" && v.Stats.ModelB != v.Stats.ModelA {
 		b.WriteString(" / " + v.Stats.ModelB)
 	}
-	fmt.Fprintf(&b, " · 今日采集 %d 条 · 耗时 %.0fs\n\n", v.Stats.Collected, v.Stats.Duration)
+	fmt.Fprintf(&b, " · 本期采集 %d 条 · 耗时 %.0fs\n\n", v.Stats.Collected, v.Stats.Duration)
 
 	// ---------- GitHub 项目榜 ----------
-	b.WriteString("## 🔥 GitHub 项目热点 Top 10\n\n")
+	window := "24h"
+	if v.Kind == "weekly" {
+		window = "7d"
+	} else if v.Kind == "monthly" {
+		window = "30d"
+	}
+	fmt.Fprintf(&b, "## 🔥 GitHub 项目热点 Top 10（%s 增长口径）\n\n", window)
 	if len(v.GitHub) == 0 {
-		b.WriteString("（本轮无数据）\n\n")
+		b.WriteString("（本期无数据）\n\n")
 	} else {
-		b.WriteString("| # | 项目 | 语言 | 24h★ | 热度 | 说明 |\n|---|------|------|------|------|------|\n")
+		fmt.Fprintf(&b, "| # | 项目 | 语言 | %s★ | 热度 | 说明 |\n|---|------|------|------|------|------|\n", window)
 		for _, p := range v.GitHub {
 			badges := strings.Join(p.Badges, " ")
 			if badges != "" {

@@ -15,9 +15,20 @@ type Stats struct {
 	Duration    float64 `json:"durationSeconds"`
 }
 
-// Digest 日报聚合根。Date（东八区自然日）是身份标识，一天一份。
+// Kind 日报种类。
+type Kind string
+
+const (
+	KindDaily   Kind = "daily"
+	KindWeekly  Kind = "weekly"
+	KindMonthly Kind = "monthly"
+)
+
+// Digest 日报聚合根。Date 是期号身份：daily=YYYY-MM-DD（东八区自然日），
+// weekly=w-YYYY-Www（ISO 周），monthly=m-YYYY-MM。一天/周/月一份。
 type Digest struct {
 	Date      string
+	Kind      Kind
 	Markdown  string
 	Stats     Stats
 	CreatedAt time.Time

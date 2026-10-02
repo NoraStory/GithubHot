@@ -2,12 +2,18 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
+
+	"github.com/NoraStory/GithubHot/internal/domain/digest"
 )
 
 // PipelineResult 一次完整流水线的产物。
 type PipelineResult struct {
 	DigestDate  string           `json:"digestDate"`
+	WeeklyDate  string           `json:"weeklyDate,omitempty"`
+	MonthlyDate string           `json:"monthlyDate,omitempty"`
 	DigestMD    string           `json:"-"`
 	SiteHTML    string           `json:"-"`
 	View        HotView          `json:"-"`
@@ -54,18 +60,44 @@ func RunPipeline(ctx context.Context, d Deps) (*PipelineResult, error) {
 	if d.LLM == nil {
 		return res, fmt.Errorf("LLM 必选：请配置 LLM_API_KEY / LLM_BASE_URL（OpenAI 兼容）后重试；本次采集与发现结果已入库，重跑不会浪费")
 	}
+	setPhase := func(phase string) {
+		if ps, ok := d.LLM.(PhaseSetter); ok {
+			ps.SetPhase(phase)
+		}
+	}
+	budgetHit := func(stage string) bool {
+		if bc, ok := d.LLM.(BudgetChecker); ok && bc.BudgetExceeded() {
+			fmt.Printf("[pipeline] 预算熔断：跳过 %s 阶段（已有数据照常出榜出日报）\n", stage)
+			return true
+		}
+		return false
+	}
+
+	setPhase("prefilter")
 	ss, err := SelectAndWrite(ctx, d, 120)
 	if err != nil {
-		return res, fmt.Errorf("精选写作: %w", err)
+		if errors.Is(err, ErrBudgetExceeded) {
+			fmt.Printf("[pipeline] 预算熔断：精选中止，已有数据照常出榜出日报\n")
+		} else {
+			return res, fmt.Errorf("精选写作: %w", err)
+		}
 	}
 	res.Select = ss
 
+	if budgetHit("聚簇") {
+		return finishPipeline(ctx, d, res, started)
+	}
+	setPhase("cluster")
 	cl, err := ClusterIntoStories(ctx, d)
 	if err != nil {
 		return res, fmt.Errorf("聚簇: %w", err)
 	}
 	res.Cluster = cl
 
+	if budgetHit("融合") {
+		return finishPipeline(ctx, d, res, started)
+	}
+	setPhase("fusion")
 	fu, err := LinkFusion(ctx, d, 15, 15)
 	if err != nil {
 		// 融合是增强环节，失败不阻断日报
@@ -79,19 +111,35 @@ func RunPipeline(ctx context.Context, d Deps) (*PipelineResult, error) {
 	}
 	res.Rank = rs
 
-	view, err := BuildHotView(ctx, d)
+	if !budgetHit("事件综述") {
+		setPhase("overview")
+		if n, err := SynthesizeOverviews(ctx, d, 10); err != nil {
+			if !errors.Is(err, ErrBudgetExceeded) {
+				fmt.Printf("[pipeline] 事件综述失败（跳过）: %v\n", err)
+			}
+		} else if n > 0 {
+			fmt.Printf("[pipeline] 生成事件综述 %d 篇\n", n)
+		}
+	}
+	return finishPipeline(ctx, d, res, started)
+}
+
+// finishPipeline 排名后的收尾：视图 → 日报 → 周报/月报 → 站点。
+func finishPipeline(ctx context.Context, d Deps, res *PipelineResult, started time.Time) (*PipelineResult, error) {
+	now := d.Clock.Now()
+	view, err := BuildHotView(ctx, d, digest.KindDaily)
 	if err != nil {
 		return res, fmt.Errorf("榜单视图: %w", err)
 	}
 	res.View = view
 
 	stats := DigestStats{
-		Sources:   cs.DueSources,
-		Collected: cs.Inserted,
+		Sources:   res.Collect.DueSources,
+		Collected: res.Collect.Inserted,
 		ModelA:    d.LLM.ModelA(),
 		ModelB:    d.LLM.ModelB(),
 	}
-	dig, err := BuildDigest(ctx, d, d.Clock.Now(), stats)
+	dig, err := BuildDigest(ctx, d, digest.KindDaily, now, stats)
 	if err != nil {
 		return res, fmt.Errorf("日报: %w", err)
 	}
@@ -99,6 +147,22 @@ func RunPipeline(ctx context.Context, d Deps) (*PipelineResult, error) {
 	res.DigestMD = dig.Markdown
 	res.ModelA = d.LLM.ModelA()
 	res.ModelB = d.LLM.ModelB()
+
+	// 周报（周一）/ 月报（每月 1 日）：与日报同轮生成
+	loc := shanghaiLoc()
+	local := now.In(loc)
+	if local.Weekday() == time.Monday {
+		if wd, werr := BuildDigest(ctx, d, digest.KindWeekly, now, stats); werr == nil {
+			res.WeeklyDate = wd.Date
+			fmt.Printf("[pipeline] 周报已生成：%s\n", wd.Date)
+		}
+	}
+	if local.Day() == 1 {
+		if md, merr := BuildDigest(ctx, d, digest.KindMonthly, now, stats); merr == nil {
+			res.MonthlyDate = md.Date
+			fmt.Printf("[pipeline] 月报已生成：%s\n", md.Date)
+		}
+	}
 
 	if d.SiteRenderer != nil {
 		html, serr := d.SiteRenderer.RenderIndex(ctx, view)

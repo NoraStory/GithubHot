@@ -13,6 +13,16 @@ type HotnessInput struct {
 	Tiers         map[string]source.Tier // sourceID -> 分级（缺失按 T2）
 	HasFusionLink bool                   // 是否已融合链接到 GitHub 项目
 	Now           time.Time
+	// WindowHours 热度时间窗（小时）。0 = 默认 48（周报/月报可传 168/720）。
+	WindowHours float64
+}
+
+// WindowHours 取有效窗口值。
+func (in HotnessInput) effectiveWindow() float64 {
+	if in.WindowHours <= 0 {
+		return HotnessWindowHours
+	}
+	return in.WindowHours
 }
 
 // 热度公式参数（与 docs/architecture.md 保持一致）。
@@ -27,6 +37,9 @@ const (
 	SourceWeight = 10.0
 )
 
+// srcKey 独立来源判重的键：同一信源 + 同一域名只算一次。
+type srcKey struct{ source, domain string }
+
 // Hotness 计算资讯事件热度：
 //
 //	H = Σ(每个独立来源 w(tier) × 0.5^(年龄h/24)) × 10 × fusion
@@ -35,7 +48,7 @@ const (
 // 48h 窗口外的成员不参与；来源分级 T1=1.0、T2=0.6；
 // 与 GitHub 项目建立融合链接的事件 ×1.25。
 func Hotness(in HotnessInput) float64 {
-	type srcKey struct{ source, domain string }
+	window := in.effectiveWindow()
 	seen := map[srcKey]bool{}
 	h := 0.0
 	for _, m := range in.Members {
@@ -47,7 +60,7 @@ func Hotness(in HotnessInput) float64 {
 			seen[key] = true
 		}
 		age := ageOf(m, in.Now)
-		if age < 0 || age > HotnessWindowHours {
+		if age < 0 || age > window {
 			continue
 		}
 		w := source.TierMedia.Weight()
@@ -59,7 +72,7 @@ func Hotness(in HotnessInput) float64 {
 	}
 	if h == 0 && len(in.Members) > 0 {
 		// 全部成员超出窗口时保底为一条，避免事件从榜单上凭空消失
-		h = source.TierMedia.Weight() * math.Pow(0.5, HotnessWindowHours/HalfLifeHours)
+		h = source.TierMedia.Weight() * math.Pow(0.5, window/HalfLifeHours)
 	}
 	h *= SourceWeight
 	if in.HasFusionLink {

@@ -24,23 +24,29 @@ func (r *StoryRepo) Save(ctx context.Context, s *story.Story) error {
 	}
 	projects, _ := json.Marshal(s.Projects)
 	_, err = r.db.ExecContext(ctx,
-		"INSERT INTO stories (id, kind, title_zh, summary_zh, url, members, projects, hotness, first_seen_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, title_zh = excluded.title_zh, summary_zh = excluded.summary_zh, url = excluded.url, members = excluded.members, projects = excluded.projects, hotness = excluded.hotness, updated_at = excluded.updated_at",
-		s.ID, string(s.Kind), s.TitleZh, s.SummaryZh, s.URL, string(members), string(projects), s.Hotness, rfc(s.FirstSeenAt), rfc(s.UpdatedAt),
+		"INSERT INTO stories (id, kind, title_zh, summary_zh, url, overview, members, projects, hotness, first_seen_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, title_zh = excluded.title_zh, summary_zh = excluded.summary_zh, url = excluded.url, overview = excluded.overview, members = excluded.members, projects = excluded.projects, hotness = excluded.hotness, updated_at = excluded.updated_at",
+		s.ID, string(s.Kind), s.TitleZh, s.SummaryZh, s.URL, s.Overview, string(members), string(projects), s.Hotness, rfc(s.FirstSeenAt), rfc(s.UpdatedAt),
 	)
+	return err
+}
+
+// SaveOverview 写入事件综述。
+func (r *StoryRepo) SaveOverview(ctx context.Context, storyID string, overview string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE stories SET overview = ? WHERE id = ?", overview, storyID)
 	return err
 }
 
 // FindByID 按ID查事件。
 func (r *StoryRepo) FindByID(ctx context.Context, id string) (*story.Story, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, kind, title_zh, summary_zh, url, members, projects, hotness, first_seen_at, updated_at FROM stories WHERE id = ?", id)
+		"SELECT id, kind, title_zh, summary_zh, url, COALESCE(overview, ''), members, projects, hotness, first_seen_at, updated_at FROM stories WHERE id = ?", id)
 	return scanStory(row)
 }
 
 // Active 指定时间之后仍有活跃成员的事件（粗过滤，精确窗口在领域服务里算）。
 func (r *StoryRepo) Active(ctx context.Context, since time.Time) ([]*story.Story, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, kind, title_zh, summary_zh, url, members, projects, hotness, first_seen_at, updated_at FROM stories WHERE updated_at >= ? OR first_seen_at >= ? ORDER BY hotness DESC",
+		"SELECT id, kind, title_zh, summary_zh, url, COALESCE(overview, ''), members, projects, hotness, first_seen_at, updated_at FROM stories WHERE updated_at >= ? OR first_seen_at >= ? ORDER BY hotness DESC",
 		rfc(since), rfc(since))
 	if err != nil {
 		return nil, err
@@ -112,7 +118,7 @@ func scanStory(rs rowScanner) (*story.Story, error) {
 	var s story.Story
 	var kind, members, projects string
 	var first, updated string
-	if err := rs.Scan(&s.ID, &kind, &s.TitleZh, &s.SummaryZh, &s.URL, &members, &projects, &s.Hotness, &first, &updated); err != nil {
+	if err := rs.Scan(&s.ID, &kind, &s.TitleZh, &s.SummaryZh, &s.URL, &s.Overview, &members, &projects, &s.Hotness, &first, &updated); err != nil {
 		return nil, err
 	}
 	s.Kind = story.Kind(kind)

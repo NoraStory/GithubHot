@@ -22,8 +22,12 @@ type Config struct {
 	EmbedDims    int    // 输出维度；0 = 服务商默认（Qwen3-Embedding-8B 最大 4096）
 	EmbedStyle   string // openai（默认）| ark-multimodal（豆包 vision 向量）
 	Thinking     string // LLM_THINKING: disabled/enabled（方舟 seed 推理模型提速开关）
-	GitHubToken  string
-	CronSpec     string // serve 模式内置调度（cron 表达式，本地时区）
+	// 预算熔断与成本估算
+	BudgetTokensPerDay int     // 每日 Token 上限，0 = 不熔断
+	PriceInPerM        float64 // 输入单价（每百万 token），仅用于成本展示
+	PriceOutPerM       float64 // 输出单价（每百万 token），仅用于成本展示
+	GitHubToken        string
+	CronSpec           string // serve 模式内置调度（cron 表达式，本地时区）
 }
 
 // Load 读取配置。工作目录存在 .env 时先加载（环境变量优先于 .env）。
@@ -38,20 +42,23 @@ func Load() (*Config, error) {
 		dataDir = filepath.Join(wd, dataDir)
 	}
 	cfg := &Config{
-		DataDir:      dataDir,
-		Port:         getEnv("PORT", "8787"),
-		LLMBaseURL:   getEnv("LLM_BASE_URL", ""),
-		LLMAPIKey:    getEnv("LLM_API_KEY", ""),
-		LLMModelA:    getEnv("LLM_MODEL", ""),
-		LLMModelB:    getEnv("LLM_MODEL_B", ""),
-		LLMEmbed:     getEnv("LLM_EMBED_MODEL", ""),
-		EmbedBaseURL: getEnv("LLM_EMBED_BASE_URL", ""),
-		EmbedAPIKey:  getEnv("LLM_EMBED_API_KEY", ""),
-		EmbedDims:    getEnvInt("LLM_EMBED_DIMENSIONS", 0),
-		EmbedStyle:   getEnv("LLM_EMBED_STYLE", ""),
-		Thinking:     getEnv("LLM_THINKING", ""),
-		GitHubToken:  getEnv("GITHUB_TOKEN", ""),
-		CronSpec:     getEnv("HOT_CRON", "30 7 * * *"),
+		DataDir:            dataDir,
+		Port:               getEnv("PORT", "8787"),
+		LLMBaseURL:         getEnv("LLM_BASE_URL", ""),
+		LLMAPIKey:          getEnv("LLM_API_KEY", ""),
+		LLMModelA:          getEnv("LLM_MODEL", ""),
+		LLMModelB:          getEnv("LLM_MODEL_B", ""),
+		LLMEmbed:           getEnv("LLM_EMBED_MODEL", ""),
+		EmbedBaseURL:       getEnv("LLM_EMBED_BASE_URL", ""),
+		EmbedAPIKey:        getEnv("LLM_EMBED_API_KEY", ""),
+		EmbedDims:          getEnvInt("LLM_EMBED_DIMENSIONS", 0),
+		EmbedStyle:         getEnv("LLM_EMBED_STYLE", ""),
+		Thinking:           getEnv("LLM_THINKING", ""),
+		BudgetTokensPerDay: getEnvInt("LLM_BUDGET_TOKENS_PER_DAY", 0),
+		PriceInPerM:        getEnvFloat("LLM_PRICE_IN_PER_M", 0),
+		PriceOutPerM:       getEnvFloat("LLM_PRICE_OUT_PER_M", 0),
+		GitHubToken:        getEnv("GITHUB_TOKEN", ""),
+		CronSpec:           getEnv("HOT_CRON", "30 7 * * *"),
 	}
 	if cfg.LLMBaseURL != "" || cfg.LLMAPIKey != "" || cfg.LLMModelA != "" {
 		if cfg.LLMBaseURL == "" || cfg.LLMAPIKey == "" || cfg.LLMModelA == "" {
@@ -79,6 +86,17 @@ func getEnvInt(key string, fallback int) int {
 		var n int
 		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n >= 0 {
 			return n
+		}
+	}
+	return fallback
+}
+
+// getEnvFloat 浮点环境变量；非法或负值回退默认。
+func getEnvFloat(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		var f float64
+		if _, err := fmt.Sscanf(v, "%g", &f); err == nil && f >= 0 {
+			return f
 		}
 	}
 	return fallback

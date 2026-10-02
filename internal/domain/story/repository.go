@@ -18,4 +18,6 @@ type Repository interface {
 	HistoryNear(ctx context.Context, storyID string, at time.Time, lookBack time.Duration) (float64, bool, error)
 	// LinkProjects 建立事件与 GitHub 项目的融合链接。
 	LinkProjects(ctx context.Context, storyID string, fullNames []string) error
+	// SaveOverview 写入事件综述。
+	SaveOverview(ctx context.Context, storyID string, overview string) error
 }

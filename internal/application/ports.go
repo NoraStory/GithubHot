@@ -88,16 +88,82 @@ type DigestRenderer interface {
 // SiteRenderer 双榜网页渲染端口。
 type SiteRenderer interface {
 	RenderIndex(ctx context.Context, v HotView) (string, error)
+	// RenderConsole 控制台页（用量/诊断/运行/信源）。
+	RenderConsole(ctx context.Context, v ConsoleView) (string, error)
+	// RenderSearch 搜索结果页。
+	RenderSearch(ctx context.Context, v SearchView) (string, error)
+}
+
+// RunRow 一次流水线运行记录（展示行）。
+type RunRow struct {
+	StartedAt string  `json:"startedAt"`
+	Status    string  `json:"status"`
+	Duration  float64 `json:"durationSeconds"`
+	Collected int     `json:"collected"`
+	Written   int     `json:"written"`
+	Stories   int     `json:"stories"`
+}
+
+// DiagRow 内容诊断行：一条资料走完精选流水线的全程痕迹。
+type DiagRow struct {
+	ID         string  `json:"id"`
+	Stage      string  `json:"stage"`
+	SourceName string  `json:"sourceName"`
+	Title      string  `json:"title"`
+	TitleZh    string  `json:"titleZh"`
+	URL        string  `json:"url"`
+	Reason     string  `json:"reason"`
+	ScoreA     float64 `json:"scoreA"`
+	ScoreB     float64 `json:"scoreB"`
+	Published  string  `json:"publishedAt"`
+}
+
+// SourceInfo 信源信息（控制台展示行）。
+type SourceInfo struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Kind    string   `json:"kind"`
+	Tier    string   `json:"tier"`
+	Tags    []string `json:"tags"`
+	Enabled bool     `json:"enabled"`
+	Adapter string   `json:"adapter"`
+}
+
+// ConsoleView 控制台视图。
+type ConsoleView struct {
+	Usage        UsageSummary
+	Runs         []RunRow
+	Diagnostics  []DiagRow
+	Stage        string
+	Stages       []string
+	Sources      []SourceInfo
+	SourcesCount int
+	Digests      []DigestMeta
+}
+
+// DigestMeta 期号元信息。
+type DigestMeta struct {
+	Date string `json:"date"`
+	Kind string `json:"kind"`
+}
+
+// SearchView 搜索结果页视图。
+type SearchView struct {
+	Query   string
+	Results []SearchResult
+	Took    string
 }
 
 // DigestView 日报渲染的视图模型（接口层数据契约，含未来 APP 复用的 JSON 形状）。
 type DigestView struct {
-	Date      string
-	GitHub    []ProjectRow
-	News      []StoryRow
-	Fusion    []FusionRow
-	Stats     DigestStats
-	Generated time.Time
+	Kind        string // daily / weekly / monthly
+	Date        string // 期号
+	PeriodLabel string // 展示用周期描述
+	GitHub      []ProjectRow
+	News        []StoryRow
+	Fusion      []FusionRow
+	Stats       DigestStats
+	Generated   time.Time
 }
 
 // DigestStats 日报统计。
@@ -131,6 +197,7 @@ type StoryRow struct {
 	StoryID     string   `json:"storyId"`
 	TitleZh     string   `json:"titleZh"`
 	SummaryZh   string   `json:"summaryZh"`
+	Overview    string   `json:"overview,omitempty"`
 	ReasonZh    string   `json:"reasonZh"`
 	URL         string   `json:"url"`
 	Tags        []string `json:"tags"`
@@ -163,6 +230,8 @@ type Deps struct {
 	Projects       github.Repository
 	Stories        story.Repository
 	Digests        digest.Repository
+	Usage          UsageRepo
+	Budget         BudgetConfig
 	LLM            LLMGateway
 	GitHub         GitHubGateway
 	Fetchers       FetcherRegistry

@@ -82,10 +82,12 @@ func newsRowsHTML(rows []application.StoryRow) string {
 		fmt.Fprintf(&b, `<div class="story">
 <div class="story-head"><span class="rank">%d</span> <a href="%s" target="_blank" rel="noopener">%s</a>%s</div>
 <div class="summary">%s</div>
+<div class="overview">%s</div>
 <div class="meta">来源 %s · 评分 %.1f · 热度 %.1f · %s</div>
 </div>`+"\n",
 			s.Rank, html.EscapeString(url), html.EscapeString(s.TitleZh), badges,
 			html.EscapeString(s.SummaryZh),
+			html.EscapeString(s.Overview),
 			html.EscapeString(strings.Join(s.SourceNames, "、")), s.Score, s.Hotness,
 			html.EscapeString(strings.Join(s.Tags, " / ")))
 	}

@@ -139,14 +139,17 @@ func TestEmbedStyleValidation(t *testing.T) {
 }
 
 func TestParseArkEmbedResponse(t *testing.T) {
-	vec, err := parseArkEmbedResponse([]byte(`{"data":{"embedding":[0.1,0.2,0.3]},"usage":{"total_tokens":29}}`))
+	vec, pt, err := parseArkEmbedResponse([]byte(`{"data":{"embedding":[0.1,0.2,0.3]},"usage":{"prompt_tokens":29}}`))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if pt != 29 {
+		t.Fatalf("usage prompt_tokens 应为 29，得到 %d", pt)
 	}
 	if len(vec) != 3 || vec[2] != 0.3 {
 		t.Fatalf("解析错误: %v", vec)
 	}
-	if _, err := parseArkEmbedResponse([]byte(`{"error":{"message":"boom"}}`)); err == nil {
+	if _, _, err := parseArkEmbedResponse([]byte(`{"error":{"message":"boom"}}`)); err == nil {
 		t.Fatal("错误体应报错")
 	}
 }
@@ -154,7 +157,7 @@ func TestParseArkEmbedResponse(t *testing.T) {
 func TestParseEmbedResponse(t *testing.T) {
 	// 正常响应：按 index 对齐
 	okBody := []byte(`{"data":[{"embedding":[1,0],"index":1},{"embedding":[0,1],"index":0}]}`)
-	part, err := parseEmbedResponse(okBody, 2)
+	part, _, err := parseEmbedResponse(okBody, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,15 +166,15 @@ func TestParseEmbedResponse(t *testing.T) {
 	}
 	// "HTTP 200 + 错误体"（服务商限流/冷启动风格）必须报错而非静默空向量
 	errBody := []byte(`{"code":20015,"message":"The parameter is invalid","data":null}`)
-	if _, err := parseEmbedResponse(errBody, 1); err == nil {
+	if _, _, err := parseEmbedResponse(errBody, 1); err == nil {
 		t.Fatal("错误体应报错")
 	}
 	// 条数不符
-	if _, err := parseEmbedResponse([]byte(`{"data":[{"embedding":[1],"index":0}]}`), 3); err == nil {
+	if _, _, err := parseEmbedResponse([]byte(`{"data":[{"embedding":[1],"index":0}]}`), 3); err == nil {
 		t.Fatal("条数不符应报错")
 	}
 	// 空向量
-	if _, err := parseEmbedResponse([]byte(`{"data":[{"embedding":[],"index":0}]}`), 1); err == nil {
+	if _, _, err := parseEmbedResponse([]byte(`{"data":[{"embedding":[],"index":0}]}`), 1); err == nil {
 		t.Fatal("空向量应报错")
 	}
 }

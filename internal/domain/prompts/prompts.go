@@ -94,6 +94,20 @@ GitHub 项目：
 输出 JSON（没有配对就输出空数组）：
 {"links":[{"storyId":"...","fullName":"owner/repo","confidence":0.0到1.0}]}`
 
+// Overview 事件综述：把同一事件的多条报道整合成一段综述。
+const Overview = `下面是同一个科技事件的多条中文报道。把它们整合成一段事件综述。
+
+要求：
+1. 2-3 句中文，信息密度优先：发生了什么、关键数字/版本/主体（仅限材料中出现的）。
+2. 不同来源的报道互相补充，不要逐条复述，也不要重复同一信息。
+3. 材料中没有的信息一个字都不能编。
+
+报道列表：
+{{ITEMS}}
+
+输出 JSON：
+{"overview":"..."}`
+
 // RenderPrompt 用值替换 {{PLACEHOLDER}} 占位符。
 func RenderPrompt(tpl, placeholder, value string) string {
 	return strings.ReplaceAll(tpl, "{{"+placeholder+"}}", value)

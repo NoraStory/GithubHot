@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>搜索：{{QUERY}} · GithubHot</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#21262d; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --hot:#f78166; --tag:#1f6feb; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--fg); font:15px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:860px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:22px; padding:12px 0 4px; }
+  h1 a { color:var(--accent); text-decoration:none; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:14px; }
+  form { margin:14px 0; display:flex; gap:8px; }
+  input[type=text] { flex:1; background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:15px; }
+  button { background:var(--tag); color:#fff; border:none; border-radius:8px; padding:10px 22px; cursor:pointer; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px 16px; margin-bottom:14px; }
+  .story { padding:13px 4px; border-bottom:1px solid var(--border); }
+  .story:last-child { border-bottom:none; }
+  .story-head a { color:var(--accent); text-decoration:none; font-weight:600; }
+  .summary { color:var(--fg); opacity:.85; margin-top:5px; font-size:14px; }
+  .meta { color:var(--muted); font-size:12px; margin-top:5px; }
+  .topic { display:inline-block; background:var(--tag); color:#fff; border-radius:4px; padding:0 6px; font-size:11px; margin-right:6px; }
+  .empty { color:var(--muted); text-align:center; padding:30px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><a href="/">GithubHot</a> · 搜索</h1>
+  <div class="sub">检索已精选写作的资讯与事件 · 耗时 {{TOOK}}</div>
+  <form method="get" action="/search">
+    <input type="text" name="q" value="{{QUERY}}" placeholder="搜索标题 / 摘要，如：Claude、agent、向量数据库">
+    <button>搜索</button>
+  </form>
+  <div class="card">{{RESULTS}}</div>
+</div>
+</body>
+</html>

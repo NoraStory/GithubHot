@@ -38,6 +38,7 @@ type Story struct {
 	TitleZh     string
 	SummaryZh   string
 	URL         string // 事件主链接（热度最高成员的 URL）
+	Overview    string // 事件综述（LLM 整合多源报道生成，可选）
 	Members     []Member
 	Projects    []string // 融合链接的 GitHub 仓库（owner/repo）
 	Hotness     float64

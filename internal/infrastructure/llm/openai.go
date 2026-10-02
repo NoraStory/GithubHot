@@ -56,6 +56,7 @@ type OpenAI struct {
 	modelA   string
 	modelB   string
 	embed    EmbedConfig
+	onUsage  UsageFunc
 }
 
 // Option 网关可选参数。
@@ -136,10 +137,35 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
+// Usage 一次调用的 token 用量。
+type Usage struct {
+	Kind             string // chat / embed
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+}
+
+// UsageFunc 用量回调（预算熔断与计量在应用层实现，网关只上报）。
+type UsageFunc func(u Usage)
+
+// WithUsageRecorder 注册用量回调。
+func WithUsageRecorder(fn UsageFunc) Option {
+	return func(o *OpenAI) { o.onUsage = fn }
+}
+
+// SetUsageRecorder 组合根在包装网关后设置用量回调。
+func (o *OpenAI) SetUsageRecorder(fn UsageFunc) { o.onUsage = fn }
+
+type chatUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}
+
 type chatResponse struct {
 	Choices []struct {
 		Message chatMessage `json:"message"`
 	} `json:"choices"`
+	Usage chatUsage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -203,6 +229,10 @@ func (o *OpenAI) ChatJSON(ctx context.Context, system, user, model string, tempe
 		if len(resp.Choices) == 0 {
 			return "", errors.New("LLM 返回空 choices")
 		}
+		if o.onUsage != nil {
+			o.onUsage(Usage{Kind: "chat", Model: model,
+				PromptTokens: resp.Usage.PromptTokens, CompletionTokens: resp.Usage.CompletionTokens})
+		}
 		return extractJSON(resp.Choices[0].Message.Content), nil
 	}
 	return "", fmt.Errorf("LLM 调用重试耗尽: %w", lastErr)
@@ -250,9 +280,12 @@ func (o *OpenAI) embedOpenAI(ctx context.Context, texts []string) ([][]float32, 
 		if err != nil {
 			return nil, err
 		}
-		part, err := parseEmbedResponse(body, len(chunk))
+		part, promptTokens, err := parseEmbedResponse(body, len(chunk))
 		if err != nil {
 			return nil, err
+		}
+		if o.onUsage != nil && promptTokens > 0 {
+			o.onUsage(Usage{Kind: "embed", Model: o.embed.Model, PromptTokens: promptTokens})
 		}
 		out = append(out, part...)
 	}
@@ -284,9 +317,12 @@ func (o *OpenAI) embedArkMultimodal(ctx context.Context, texts []string) ([][]fl
 		if err != nil {
 			return nil, err
 		}
-		vec, err := parseArkEmbedResponse(body)
+		vec, promptTokens, err := parseArkEmbedResponse(body)
 		if err != nil {
 			return nil, err
+		}
+		if o.onUsage != nil && promptTokens > 0 {
+			o.onUsage(Usage{Kind: "embed", Model: o.embed.Model, PromptTokens: promptTokens})
 		}
 		out = append(out, vec)
 	}
@@ -331,18 +367,20 @@ func postWithRetry(ctx context.Context, endpoint string, headers map[string]stri
 
 // parseEmbedResponse 解析并校验一批向量：条数必须与请求一致，
 // 拒绝"HTTP 200 + 错误体"（如 {"code":20015,...}）被静默当成空向量。
-func parseEmbedResponse(body []byte, want int) ([][]float32, error) {
+// 返回对齐后的向量与该批输入 token 数。
+func parseEmbedResponse(body []byte, want int) ([][]float32, int, error) {
 	var resp struct {
 		Data []struct {
 			Embedding []float32 `json:"embedding"`
 			Index     int       `json:"index"`
 		} `json:"data"`
+		Usage chatUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("解析 embeddings 响应: %w", err)
+		return nil, 0, fmt.Errorf("解析 embeddings 响应: %w", err)
 	}
 	if len(resp.Data) != want {
-		return nil, fmt.Errorf("embeddings 响应条数不符（期望 %d 得到 %d）: %s", want, len(resp.Data), safeSnippet(body))
+		return nil, 0, fmt.Errorf("embeddings 响应条数不符（期望 %d 得到 %d）: %s", want, len(resp.Data), safeSnippet(body))
 	}
 	// 按 index 对齐，容忍服务商乱序返回
 	part := make([][]float32, want)
@@ -353,10 +391,10 @@ func parseEmbedResponse(body []byte, want int) ([][]float32, error) {
 	}
 	for i, v := range part {
 		if len(v) == 0 {
-			return nil, fmt.Errorf("embeddings 响应第 %d 条向量为空: %s", i, safeSnippet(body))
+			return nil, 0, fmt.Errorf("embeddings 响应第 %d 条向量为空: %s", i, safeSnippet(body))
 		}
 	}
-	return part, nil
+	return part, resp.Usage.PromptTokens, nil
 }
 
 // chunkStrings 按每批 n 条切分输入（n<=0 时视为 1）。
@@ -383,20 +421,22 @@ func (o *OpenAI) embedEndpoint() string {
 	return strings.TrimSuffix(o.embed.BaseURL, "/") + "/embeddings"
 }
 
-// parseArkEmbedResponse 解析方舟多模态向量：data 为单对象（data.embedding）。
-func parseArkEmbedResponse(body []byte) ([]float32, error) {
+// parseArkEmbedResponse 解析方舟多模态向量：data 为单对象（data.embedding），
+// 同时返回 usage 的输入 token 数。
+func parseArkEmbedResponse(body []byte) (vec []float32, promptTokens int, err error) {
 	var resp struct {
 		Data struct {
 			Embedding []float32 `json:"embedding"`
 		} `json:"data"`
+		Usage chatUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("解析方舟多模态向量响应: %w", err)
+		return nil, 0, fmt.Errorf("解析方舟多模态向量响应: %w", err)
 	}
 	if len(resp.Data.Embedding) == 0 {
-		return nil, fmt.Errorf("方舟多模态向量响应为空: %s", safeSnippet(body))
+		return nil, 0, fmt.Errorf("方舟多模态向量响应为空: %s", safeSnippet(body))
 	}
-	return resp.Data.Embedding, nil
+	return resp.Data.Embedding, resp.Usage.PromptTokens, nil
 }
 
 // extractJSON 从回复中提取 JSON（容忍 markdown 代码块包裹）。

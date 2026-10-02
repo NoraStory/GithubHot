@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/NoraStory/GithubHot/internal/domain/digest"
 	"github.com/NoraStory/GithubHot/internal/domain/github"
 	"github.com/NoraStory/GithubHot/internal/domain/story"
 )
@@ -16,13 +17,15 @@ const (
 )
 
 // BuildHotView 构建双榜视图模型（API、网页、日报共用同一份事实来源）。
+// kind 决定窗口：日报 48h/24h，周报 7d，月报 30d。
 // 徽章规则："新"= 24h 内首次发现；"上升"= 比约 6h 前热度高 15%+。
-func BuildHotView(ctx context.Context, d Deps) (HotView, error) {
+func BuildHotView(ctx context.Context, d Deps, kind digest.Kind) (HotView, error) {
+	spec := digestKindSpec(kind)
 	view := HotView{Generated: d.Clock.Now()}
 	now := view.Generated
 
 	// ---------- GitHub 项目榜 ----------
-	board, err := ProjectBoard(ctx, d, boardSize)
+	board, err := ProjectBoard(ctx, d, spec.projWindow, boardSize)
 	if err != nil {
 		return view, fmt.Errorf("构建项目榜: %w", err)
 	}
@@ -36,7 +39,7 @@ func BuildHotView(ctx context.Context, d Deps) (HotView, error) {
 			Language:     row.Project.Language,
 			Topics:       row.Project.Topics,
 			Stars:        row.Project.Stars,
-			StarsGained:  github.StarsGainedIn(row.Snaps, now, 24*time.Hour),
+			StarsGained:  github.StarsGainedIn(row.Snaps, now, spec.projWindow),
 			TrendingRank: row.Project.TrendingRank,
 			Hotness:      row.Hotness,
 			Badges:       badges,
@@ -44,7 +47,7 @@ func BuildHotView(ctx context.Context, d Deps) (HotView, error) {
 	}
 
 	// ---------- AI 资讯榜 ----------
-	stories, err := d.Stories.Active(ctx, now.Add(-48*time.Hour))
+	stories, err := d.Stories.Active(ctx, now.Add(-spec.storyWindow))
 	if err != nil {
 		return view, err
 	}
@@ -122,13 +125,14 @@ func projectBadges(row ProjectBoardRow, now time.Time) []string {
 	return badges
 }
 
-// buildStoryRow 组装资讯榜单行（含评分、徽章、来源名）。
+// buildStoryRow 组装资讯榜单行（含评分、徽章、来源名、事件综述）。
 func buildStoryRow(ctx context.Context, d Deps, s *story.Story, rank int, sourceNames map[string]string, now time.Time) StoryRow {
 	row := StoryRow{
 		Rank:      rank,
 		StoryID:   s.ID,
 		TitleZh:   s.TitleZh,
 		SummaryZh: s.SummaryZh,
+		Overview:  s.Overview,
 		URL:       s.URL,
 		Hotness:   s.Hotness,
 		Projects:  s.Projects,

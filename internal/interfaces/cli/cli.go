@@ -31,7 +31,26 @@ func build(cfg *config.Config) (application.Deps, *sqlite.DB, error) {
 	if err != nil {
 		return application.Deps{}, nil, err
 	}
-	var gateway application.LLMGateway
+	usageRepo := sqlite.NewUsageRepo(db)
+	budget := application.BudgetConfig{
+		DailyTokens:  cfg.BudgetTokensPerDay,
+		PriceInPerM:  cfg.PriceInPerM,
+		PriceOutPerM: cfg.PriceOutPerM,
+	}
+	deps := application.Deps{
+		Sources:        sqlite.NewSourceRepo(db),
+		Items:          sqlite.NewItemRepo(db),
+		Projects:       sqlite.NewProjectRepo(db),
+		Stories:        sqlite.NewStoryRepo(db),
+		Digests:        sqlite.NewDigestRepo(db),
+		Usage:          usageRepo,
+		Budget:         budget,
+		GitHub:         githubapi.New(cfg.GitHubToken),
+		Fetchers:       fetcher.NewRegistry(),
+		DigestRenderer: render.NewMarkdown(),
+		SiteRenderer:   render.NewSite(),
+		Clock:          shared.SystemClock{},
+	}
 	if cfg.LLMAPIKey != "" && cfg.LLMBaseURL != "" && cfg.LLMModelA != "" {
 		opts := []llm.Option{}
 		if cfg.Thinking != "" {
@@ -48,20 +67,12 @@ func build(cfg *config.Config) (application.Deps, *sqlite.DB, error) {
 			db.Close()
 			return application.Deps{}, nil, lerr
 		}
-		gateway = g
-	}
-	deps := application.Deps{
-		Sources:        sqlite.NewSourceRepo(db),
-		Items:          sqlite.NewItemRepo(db),
-		Projects:       sqlite.NewProjectRepo(db),
-		Stories:        sqlite.NewStoryRepo(db),
-		Digests:        sqlite.NewDigestRepo(db),
-		LLM:            gateway,
-		GitHub:         githubapi.New(cfg.GitHubToken),
-		Fetchers:       fetcher.NewRegistry(),
-		DigestRenderer: render.NewMarkdown(),
-		SiteRenderer:   render.NewSite(),
-		Clock:          shared.SystemClock{},
+		// 预算装饰器：按阶段记账 + 熔断，透明实现 LLMGateway
+		guard := application.NewBudgetGuard(g, usageRepo, budget, shared.SystemClock{})
+		g.SetUsageRecorder(func(u llm.Usage) {
+			guard.RecordUsage(u.Kind, u.Model, u.PromptTokens, u.CompletionTokens)
+		})
+		deps.LLM = guard
 	}
 	return deps, db, nil
 }
@@ -122,7 +133,7 @@ func Serve(cfg *config.Config) error {
 	}
 	defer db.Close()
 
-	srv := &httpapi.Server{Deps: deps, Version: Version}
+	srv := &httpapi.Server{Deps: deps, Runs: runsRepo{db}, Version: Version}
 	addr := "0.0.0.0:" + cfg.Port
 	fmt.Printf("GithubHot %s · API+双榜页监听 http://localhost:%s\n", Version, cfg.Port)
 	fmt.Printf("APP/前端契约：/api/v1/hot/github · /api/v1/hot/news · /api/v1/hot/fusion · /api/v1/digest/latest\n")
@@ -147,6 +158,25 @@ func Serve(cfg *config.Config) error {
 
 func signalCtx() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
+// runsRepo 适配 sqlite 运行记录到应用层端口。
+type runsRepo struct{ db *sqlite.DB }
+
+func (r runsRepo) List(ctx context.Context, limit int) ([]application.RunRow, error) {
+	rows, err := r.db.ListRuns(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]application.RunRow, 0, len(rows))
+	for _, rr := range rows {
+		c, w, s := application.DecodeRunStats(rr.Stats)
+		out = append(out, application.RunRow{
+			StartedAt: rr.StartedAt, Status: rr.Status, Duration: rr.Duration,
+			Collected: c, Written: w, Stories: s,
+		})
+	}
+	return out, nil
 }
 
 func printResult(res *application.PipelineResult, digestPath string) {

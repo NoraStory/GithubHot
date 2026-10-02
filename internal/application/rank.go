@@ -71,14 +71,15 @@ type ProjectBoardRow struct {
 }
 
 // ProjectBoard 计算项目榜单：全部项目按领域热度服务排序取前 limit。
-// 热度每次现算而非落库——快照在，随时可重放任意时刻的榜单。
-func ProjectBoard(ctx context.Context, d Deps, limit int) ([]ProjectBoardRow, error) {
+// window 决定增长口径（日报 24h、周报 7d、月报 30d）——快照在，随时可重放。
+// 热度每次现算而非落库。
+func ProjectBoard(ctx context.Context, d Deps, window time.Duration, limit int) ([]ProjectBoardRow, error) {
 	all, err := d.Projects.All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("读取项目: %w", err)
 	}
 	now := d.Clock.Now()
-	snapAll, err := d.Projects.AllSnapshotsSince(ctx, now.Add(-72*time.Hour))
+	snapAll, err := d.Projects.AllSnapshotsSince(ctx, now.Add(-window-time.Hour))
 	if err != nil {
 		return nil, fmt.Errorf("读取快照: %w", err)
 	}
@@ -89,7 +90,7 @@ func ProjectBoard(ctx context.Context, d Deps, limit int) ([]ProjectBoardRow, er
 		rows = append(rows, ProjectBoardRow{
 			Project: p,
 			Snaps:   snaps,
-			Hotness: github.Hotness(github.HotnessInput{Snapshots: snaps, Now: now}),
+			Hotness: github.Hotness(github.HotnessInput{Snapshots: snaps, Now: now, Window: window}),
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Hotness > rows[j].Hotness })

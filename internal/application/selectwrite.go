@@ -3,10 +3,12 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/NoraStory/GithubHot/internal/domain/item"
 	"github.com/NoraStory/GithubHot/internal/domain/prompts"
@@ -51,10 +53,15 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 		return stats, fmt.Errorf("读取待预筛条目: %w", err)
 	}
 	stats.Candidates = len(pending)
+	var budgetStop atomic.Bool
 	for start := 0; start < len(pending); start += prefilterBatch {
 		end := min(start+prefilterBatch, len(pending))
 		batch := pending[start:end]
 		results, err := prefilterBatchCall(ctx, d, batch)
+		if errors.Is(err, ErrBudgetExceeded) {
+			budgetStop.Store(true)
+			break // 预算熔断：未处理的条目留给下次
+		}
 		if err != nil {
 			stats.LLMErrors++
 			log.Printf("[select] 预筛批次失败，整批按淘汰处理: %v", err)
@@ -96,6 +103,9 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 		sem = make(chan struct{}, llmWorkers)
 	)
 	for _, it := range filtered {
+		if budgetStop.Load() {
+			break
+		}
 		wg.Add(1)
 		go func(it item.Item) {
 			defer wg.Done()
@@ -105,6 +115,10 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 			a, b, err := doubleScore(ctx, d, it)
 			mu.Lock()
 			defer mu.Unlock()
+			if errors.Is(err, ErrBudgetExceeded) {
+				budgetStop.Store(true)
+				return // 保持 filtered，下次运行重试
+			}
 			if err != nil {
 				stats.LLMErrors++
 				log.Printf("[select] 评分失败 %s: %v", it.ID, err)
@@ -113,6 +127,10 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 			threshold := source.Tier(it.SourceTier).ScoreThreshold()
 			avg := (a + b) / 2
 			if avg >= threshold && a >= 4 && b >= 4 {
+				// 持久化 scored 状态，写作阶段（可能在下一次运行）从仓储读取
+				_ = d.Items.UpdateSelection(ctx, it.ID, item.Selection{
+					Stage: item.StageScored, Pass: true, ScoreA: a, ScoreB: b,
+				})
 				scored = append(scored, scoredItem{it: it, a: a, b: b})
 			} else {
 				stats.Rejected++
@@ -132,7 +150,14 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 		return stats, fmt.Errorf("读取待写作条目: %w", err)
 	}
 	for _, it := range toWrite {
+		if budgetStop.Load() {
+			break
+		}
 		w, err := writeChinese(ctx, d, it)
+		if errors.Is(err, ErrBudgetExceeded) {
+			budgetStop.Store(true)
+			break
+		}
 		if err != nil {
 			stats.LLMErrors++
 			log.Printf("[select] 写作失败 %s: %v", it.ID, err)
@@ -148,6 +173,9 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 			continue
 		}
 		stats.Written++
+	}
+	if budgetStop.Load() {
+		return stats, ErrBudgetExceeded
 	}
 	return stats, nil
 }

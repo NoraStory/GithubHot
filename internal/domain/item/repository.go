@@ -19,4 +19,6 @@ type Repository interface {
 	UpdateSelection(ctx context.Context, id string, sel Selection) error
 	// FindByIDs 批量取条目。
 	FindByIDs(ctx context.Context, ids []string) ([]Item, error)
+	// Search 在已写作条目中按关键词检索（中文标题/摘要/原标题）。
+	Search(ctx context.Context, q string, limit int) ([]Item, error)
 }

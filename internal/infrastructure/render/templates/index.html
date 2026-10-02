@@ -12,10 +12,26 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--fg); font: 15px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
   .wrap { max-width: 1060px; margin: 0 auto; padding: 24px 16px 64px; }
-  header { text-align: center; padding: 28px 0 8px; }
-  header h1 { font-size: 28px; letter-spacing: 1px; }
-  header h1 span { color: var(--accent); }
-  header .sub { color: var(--muted); margin-top: 6px; font-size: 13px; }
+  header { position: relative; overflow: hidden; text-align: center; padding: 44px 16px 36px; border-radius: 14px; border: 1px solid var(--border); margin-bottom: 18px;
+    background:
+      radial-gradient(ellipse 60% 90% at 15% 0%, rgba(88,166,255,.16), transparent 60%),
+      radial-gradient(ellipse 60% 90% at 85% 0%, rgba(247,129,102,.14), transparent 60%),
+      repeating-linear-gradient(90deg, rgba(230,237,243,.03) 0 1px, transparent 1px 48px),
+      repeating-linear-gradient(0deg, rgba(230,237,243,.03) 0 1px, transparent 1px 48px),
+      linear-gradient(180deg, #10161f, var(--panel));
+  }
+  header .glow { position:absolute; top:-40px; left:50%; transform:translateX(-50%); width:420px; height:120px;
+    background: radial-gradient(ellipse at center, rgba(88,166,255,.25), transparent 70%); filter: blur(6px); pointer-events:none; }
+  header h1 { font-size: 38px; letter-spacing: 2px; line-height:1.2; }
+  header h1 .gh { color: var(--accent); }
+  header h1 .fire { color: var(--hot); }
+  header .tagline { color: var(--fg); opacity:.9; margin-top: 10px; font-size: 15px; }
+  header .tagline .x { color: var(--hot); font-weight:700; padding: 0 6px; }
+  header .stats { color: var(--muted); margin-top: 10px; font-size: 12.5px; }
+  .searchform { display:flex; gap:8px; max-width:520px; margin: 18px auto 0; }
+  .searchform input { flex:1; background:var(--bg); color:var(--fg); border:1px solid var(--border); border-radius:20px; padding:9px 18px; font-size:14px; outline:none; }
+  .searchform input:focus { border-color: var(--accent); }
+  .searchform button { background: var(--tag); color:#fff; border:none; border-radius:20px; padding:0 22px; cursor:pointer; font-size:13.5px; }
   .tabs { display: flex; gap: 8px; justify-content: center; margin: 22px 0 18px; flex-wrap: wrap; }
   .tab { padding: 8px 20px; border-radius: 20px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; font-size: 14px; }
   .tab.active { color: var(--fg); border-color: var(--accent); background: #12233b; }
@@ -40,6 +56,8 @@
   .story-head a { color: var(--accent); text-decoration: none; font-weight: 600; font-size: 16px; }
   .story-head a:hover { text-decoration: underline; }
   .summary { color: var(--fg); opacity: .85; margin-top: 6px; font-size: 14px; }
+  .overview { color: var(--muted); margin-top: 6px; font-size: 13px; border-left: 2px solid var(--hot); padding-left: 10px; }
+  .overview:empty { display: none; }
   .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
   .fusion { padding: 12px 4px; border-bottom: 1px solid var(--border); }
   .fusion:last-child { border-bottom: none; }
@@ -55,8 +73,14 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Github<span>Hot</span></h1>
-    <div class="sub">GitHub 开源项目热点 × AI 资讯热点 —— 双热度追踪 · 生成于 {{GENERATED}}</div>
+    <div class="glow"></div>
+    <h1><span class="gh">Github</span><span class="fire">Hot</span></h1>
+    <div class="tagline">GitHub 开源项目热点<span class="x">×</span>AI 资讯热点 —— 双热度追踪</div>
+    <div class="stats">生成于 {{GENERATED}} · 独立来源热度 × 快照差分增长 × 事件融合</div>
+    <form class="searchform" action="/search" method="get">
+      <input type="text" name="q" placeholder="搜索已精选的资讯与事件，如：Claude、agent、向量数据库">
+      <button>搜索</button>
+    </form>
   </header>
   <div class="tabs">
     <button class="tab active" data-t="gh">🔥 GitHub 项目榜</button>
@@ -75,7 +99,12 @@
   <section id="fx">
     <div class="card">{{FUSION_ROWS}}</div>
   </section>
-  <footer>数据由本地流水线自动采集与 LLM 精选 · <a href="https://github.com/NoraStory/GithubHot" target="_blank" rel="noopener">GithubHot</a> · REST API: <code>/api/v1/hot/github</code></footer>
+  <footer style="text-align:center;color:var(--muted);font-size:12px;margin-top:30px">
+    数据由本地流水线自动采集与 LLM 精选 · <a href="https://github.com/NoraStory/GithubHot" target="_blank" rel="noopener">GithubHot</a>
+    · <a href="/console">控制台</a>
+    · RSS：<a href="/feed/news.xml">资讯</a> / <a href="/feed/github.xml">项目</a> / <a href="/feed/digest.xml">期刊</a>
+    · APP/Agent：<code>/api/v1/hot</code>
+  </footer>
 </div>
 <script>
 document.querySelectorAll('.tab').forEach(function (t) {

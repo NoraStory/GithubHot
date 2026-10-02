@@ -4,6 +4,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -89,6 +90,15 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, finished_at TEXT NOT NULL, status TEXT NOT NULL, stats TEXT NOT NULL)"); err != nil {
 		return fmt.Errorf("建表 runs: %w", err)
 	}
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS llm_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, phase TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, prompt_tokens INTEGER NOT NULL, completion_tokens INTEGER NOT NULL, created_at TEXT NOT NULL)"); err != nil {
+		return fmt.Errorf("建表 llm_usage: %w", err)
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_usage_created ON llm_usage(created_at)"); err != nil {
+		return fmt.Errorf("建索引 usage: %w", err)
+	}
+	// 旧库增量迁移：列已存在时报错属预期，忽略
+	_, _ = db.Exec("ALTER TABLE digests ADD COLUMN kind TEXT NOT NULL DEFAULT 'daily'")
+	_, _ = db.Exec("ALTER TABLE stories ADD COLUMN overview TEXT NOT NULL DEFAULT ''")
 	return nil
 }
 
@@ -99,4 +109,37 @@ func (db *DB) RecordRun(started, finished time.Time, status, statsJSON string) e
 		started.UTC().Format(time.RFC3339), finished.UTC().Format(time.RFC3339), status, statsJSON,
 	)
 	return err
+}
+
+// RunRecord 运行记录行。
+type RunRecord struct {
+	StartedAt string
+	Status    string
+	Duration  float64
+	Stats     string
+}
+
+// ListRuns 最近 N 次运行记录（新在前）。
+func (db *DB) ListRuns(ctx context.Context, limit int) ([]RunRecord, error) {
+	rows, err := db.QueryContext(ctx,
+		"SELECT started_at, finished_at, status, stats FROM runs ORDER BY id DESC LIMIT ?", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RunRecord
+	for rows.Next() {
+		var r RunRecord
+		var finished string
+		if err := rows.Scan(&r.StartedAt, &finished, &r.Status, &r.Stats); err != nil {
+			return nil, err
+		}
+		st, err0 := time.Parse(time.RFC3339, r.StartedAt)
+		ft, err1 := time.Parse(time.RFC3339, finished)
+		if err0 == nil && err1 == nil {
+			r.Duration = ft.Sub(st).Seconds()
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

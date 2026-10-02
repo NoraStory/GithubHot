@@ -103,6 +103,19 @@ func (r *ItemRepo) FindByIDs(ctx context.Context, ids []string) ([]item.Item, er
 	return scanItems(rows)
 }
 
+// Search 在已写作条目中按关键词检索（中文标题/摘要/原标题 LIKE 匹配）。
+func (r *ItemRepo) Search(ctx context.Context, q string, limit int) ([]item.Item, error) {
+	pattern := "%" + q + "%"
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT "+itemCols+" FROM items WHERE state = 'written' AND (title_zh LIKE ? OR summary_zh LIKE ? OR title LIKE ?) ORDER BY published_at DESC LIMIT ?",
+		pattern, pattern, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanItems(rows)
+}
+
 const itemCols = "id, source_id, source_tier, url, title, summary, content, author, published_at, fetched_at, state, accepted, reason, score_a, score_b, title_zh, summary_zh, reason_zh, tags"
 
 func scanItems(rows *sql.Rows) ([]item.Item, error) {

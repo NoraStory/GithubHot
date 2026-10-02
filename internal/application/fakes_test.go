@@ -138,6 +138,22 @@ func (m *memItems) UpdateSelection(_ context.Context, id string, sel item.Select
 	return nil
 }
 
+func (m *memItems) Search(_ context.Context, q string, limit int) ([]item.Item, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []item.Item
+	for _, it := range m.m {
+		if it.Selection.Stage == item.StageWritten &&
+			(strings.Contains(it.Selection.TitleZh, q) || strings.Contains(it.Title, q)) {
+			out = append(out, it)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 func (m *memItems) FindByIDs(_ context.Context, ids []string) ([]item.Item, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -299,6 +315,15 @@ func (m *memStories) HistoryNear(_ context.Context, storyID string, at time.Time
 	return 0, false, nil
 }
 
+func (m *memStories) SaveOverview(_ context.Context, storyID string, overview string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s, ok := m.m[storyID]; ok {
+		s.Overview = overview
+	}
+	return nil
+}
+
 func (m *memStories) LinkProjects(_ context.Context, storyID string, fullNames []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -323,10 +348,13 @@ func (m *memDigests) FindByDate(_ context.Context, date string) (*digest.Digest,
 	return nil, nil
 }
 
-func (m *memDigests) Latest(_ context.Context) (*digest.Digest, error) {
+func (m *memDigests) Latest(_ context.Context, kind digest.Kind) (*digest.Digest, error) {
 	var best *digest.Digest
 	for k := range m.m {
 		d := m.m[k]
+		if d.Kind != kind {
+			continue
+		}
 		if best == nil || d.Date > best.Date {
 			cp := d
 			best = &cp
@@ -335,7 +363,19 @@ func (m *memDigests) Latest(_ context.Context) (*digest.Digest, error) {
 	return best, nil
 }
 
-func (m *memDigests) List(_ context.Context, _ int) ([]digest.Digest, error) { return nil, nil }
+func (m *memDigests) List(_ context.Context, kind digest.Kind, limit int) ([]digest.Digest, error) {
+	var out []digest.Digest
+	for k := range m.m {
+		d := m.m[k]
+		if d.Kind == kind {
+			out = append(out, d)
+		}
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
 
 // ---------- 假网关 ----------
 
@@ -392,6 +432,9 @@ func (f *fakeLLM) ChatJSON(_ context.Context, _, user, _ string, _ float64) (str
 			same = true
 		}
 		return fmt.Sprintf(`{"sameEvent":%t,"followUp":false,"confidence":0.95}`, same), nil
+
+	case strings.Contains(user, "整合成一段事件综述"): // 事件综述
+		return `{"overview":"多源报道整合的事件综述。"}`, nil
 
 	case strings.Contains(user, "GitHub 热门项目"): // 融合链接
 		// 从提示中取第一条 story 与第一个项目
@@ -487,6 +530,14 @@ type fakeSiteRenderer struct{}
 
 func (fakeSiteRenderer) RenderIndex(_ context.Context, _ HotView) (string, error) {
 	return "<html>site</html>", nil
+}
+
+func (fakeSiteRenderer) RenderConsole(_ context.Context, _ ConsoleView) (string, error) {
+	return "<html>console</html>", nil
+}
+
+func (fakeSiteRenderer) RenderSearch(_ context.Context, _ SearchView) (string, error) {
+	return "<html>search</html>", nil
 }
 
 type fixedClock struct{ t time.Time }

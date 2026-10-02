@@ -117,11 +117,13 @@ func growthBaseline(snaps []Snapshot, now time.Time, window time.Duration) (base
 type HotnessInput struct {
 	Snapshots []Snapshot // 任意顺序
 	Now       time.Time
+	// Window 增长统计窗口（日报 24h / 周报 7d / 月报 30d）。0 = 24h。
+	Window time.Duration
 }
 
 // Hotness 计算项目热度（0-100 量级）：
 //
-//	gained = 最近 24h 内的 star 增量（快照差分，重复抓取不虚增）
+//	gained = 窗口内（默认 24h）star 增量（快照差分，重复抓取不虚增）
 //	base   = 10 × log2(1 + gained)           —— 对数抑制头部碾压
 //	trend  = trending 排名加成（1-3 名 +6，4-10 +3，11-25 +1）
 //	novel  = 首次发现不足 24h 且有增长 +5     —— "新爆"信号
@@ -130,7 +132,11 @@ func Hotness(in HotnessInput) float64 {
 	if len(in.Snapshots) == 0 {
 		return 0
 	}
-	base, latest := growthBaseline(in.Snapshots, in.Now, 24*time.Hour)
+	window := in.Window
+	if window <= 0 {
+		window = 24 * time.Hour
+	}
+	base, latest := growthBaseline(in.Snapshots, in.Now, window)
 	gained := latest.Stars - base.Stars
 	if gained < 0 {
 		gained = 0
