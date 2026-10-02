@@ -14,10 +14,10 @@ import (
 
 // FusionStats 融合链接统计。
 type FusionStats struct {
-	NewsConsidered int      `json:"newsConsidered"`
-	ProjectsConsidered int  `json:"projectsConsidered"`
-	Links          int      `json:"links"`
-	LLMErrors      int      `json:"llmErrors"`
+	NewsConsidered     int `json:"newsConsidered"`
+	ProjectsConsidered int `json:"projectsConsidered"`
+	Links              int `json:"links"`
+	LLMErrors          int `json:"llmErrors"`
 }
 
 // fusionMinConfidence 低于该置信度的链接不建立。

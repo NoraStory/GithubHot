@@ -20,6 +20,7 @@ type Config struct {
 	EmbedBaseURL string // 向量端点；留空复用 LLMBaseURL
 	EmbedAPIKey  string // 向量 Key；留空复用 LLMAPIKey
 	EmbedDims    int    // 输出维度；0 = 服务商默认（Qwen3-Embedding-8B 最大 4096）
+	EmbedStyle   string // openai（默认）| ark-multimodal（豆包 vision 向量）
 	GitHubToken  string
 	CronSpec     string // serve 模式内置调度（cron 表达式，本地时区）
 }
@@ -46,6 +47,7 @@ func Load() (*Config, error) {
 		EmbedBaseURL: getEnv("LLM_EMBED_BASE_URL", ""),
 		EmbedAPIKey:  getEnv("LLM_EMBED_API_KEY", ""),
 		EmbedDims:    getEnvInt("LLM_EMBED_DIMENSIONS", 0),
+		EmbedStyle:   getEnv("LLM_EMBED_STYLE", ""),
 		GitHubToken:  getEnv("GITHUB_TOKEN", ""),
 		CronSpec:     getEnv("HOT_CRON", "30 7 * * *"),
 	}
@@ -80,7 +82,8 @@ func getEnvInt(key string, fallback int) int {
 	return fallback
 }
 
-// loadDotenv 极简 .env 解析：KEY=VALUE，# 注释，不做引号展开之外的转义。
+// loadDotenv 极简 .env 解析：KEY=VALUE，# 注释，支持 ${VAR} 引用环境变量
+// （密钥可以只存在于环境变量中，.env 仅做引用，不落字面量）。
 func loadDotenv(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -100,6 +103,14 @@ func loadDotenv(path string) {
 		value = strings.Trim(value, `"'`)
 		if key == "" {
 			continue
+		}
+		if strings.HasPrefix(value, "${") && strings.HasSuffix(value, "}") {
+			ref := value[2 : len(value)-1]
+			resolved := os.Getenv(ref)
+			if resolved == "" {
+				continue // 引用的环境变量不存在：不覆盖，让配置校验去报错
+			}
+			value = resolved
 		}
 		if _, exists := os.LookupEnv(key); !exists {
 			_ = os.Setenv(key, value)

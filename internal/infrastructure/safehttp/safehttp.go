@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -31,7 +32,7 @@ var (
 
 // forbiddenHostNames 主机名禁用名单（含常见云元数据端点）。
 var forbiddenHostNames = map[string]bool{
-	"localhost": true,
+	"localhost":                true,
 	"metadata.google.internal": true,
 	"metadata.goog":            true,
 	"instance-data":            true,
@@ -139,9 +140,18 @@ func Fetch(ctx context.Context, rawURL string, headers map[string]string) ([]byt
 }
 
 // Do 经过 SSRF 校验的任意方法请求。
+// 直连模式（默认）：scheme/host 字面量 + DNS 解析结果全为公网地址才放行。
+// 代理模式（设置了 HTTPS_PROXY/HTTP_PROXY）：跳过 DNS 预解析、由代理负责
+// 出口解析——Clash TUN/fake-ip 等环境解析出的 198.18/15 是代理伪 IP 而非
+// 真实目标；主机名禁用名单与 IP 字面量校验保持不变。
 func Do(ctx context.Context, method, rawURL string, headers map[string]string, body io.Reader) ([]byte, int, error) {
-	if _, err := ValidateAndResolve(ctx, rawURL); err != nil {
+	if _, err := ValidateURL(rawURL); err != nil {
 		return nil, 0, err
+	}
+	if !UsingProxy() {
+		if _, err := ValidateAndResolve(ctx, rawURL); err != nil {
+			return nil, 0, err
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {
@@ -162,4 +172,14 @@ func Do(ctx context.Context, method, rawURL string, headers map[string]string, b
 		return nil, resp.StatusCode, fmt.Errorf("读取响应: %w", err)
 	}
 	return data, resp.StatusCode, nil
+}
+
+// UsingProxy 报告是否配置了代理环境变量（Go 默认传输层会遵循它们）。
+func UsingProxy() bool {
+	for _, k := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
+		if os.Getenv(k) != "" {
+			return true
+		}
+	}
+	return false
 }

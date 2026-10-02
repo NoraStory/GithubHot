@@ -11,8 +11,8 @@ import (
 
 // 榜单规模：页面与 API 展示量；日报各取前 10。
 const (
-	boardSize        = 20
-	historyLookBack  = 6 * time.Hour
+	boardSize       = 20
+	historyLookBack = 6 * time.Hour
 )
 
 // BuildHotView 构建双榜视图模型（API、网页、日报共用同一份事实来源）。
@@ -125,13 +125,13 @@ func projectBadges(row ProjectBoardRow, now time.Time) []string {
 // buildStoryRow 组装资讯榜单行（含评分、徽章、来源名）。
 func buildStoryRow(ctx context.Context, d Deps, s *story.Story, rank int, sourceNames map[string]string, now time.Time) StoryRow {
 	row := StoryRow{
-		Rank:     rank,
-		StoryID:  s.ID,
-		TitleZh:  s.TitleZh,
+		Rank:      rank,
+		StoryID:   s.ID,
+		TitleZh:   s.TitleZh,
 		SummaryZh: s.SummaryZh,
-		URL:      s.URL,
-		Hotness:  s.Hotness,
-		Projects: s.Projects,
+		URL:       s.URL,
+		Hotness:   s.Hotness,
+		Projects:  s.Projects,
 	}
 	seenSrc := map[string]bool{}
 	for _, m := range s.Members {

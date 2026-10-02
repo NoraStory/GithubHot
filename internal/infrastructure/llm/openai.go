@@ -16,6 +16,18 @@ import (
 	"github.com/NoraStory/GithubHot/internal/infrastructure/safehttp"
 )
 
+// EmbedStyle 向量接口风格。
+type EmbedStyle string
+
+const (
+	// EmbedStyleOpenAI 标准 OpenAI /embeddings：批量输入、支持 dimensions。
+	EmbedStyleOpenAI EmbedStyle = "openai"
+	// EmbedStyleArkMultimodal 火山方舟多模态 /embeddings/multimodal：
+	// 单条输入（input 为 type/text 块数组）、固定维度（不支持 dimensions）。
+	// 用于 doubao-embedding-vision 系列。
+	EmbedStyleArkMultimodal EmbedStyle = "ark-multimodal"
+)
+
 // EmbedConfig 向量端点配置。BaseURL / APIKey 留空时复用对话端点的值——
 // 同一家服务商零额外配置；混搭（如 DeepSeek 对话 + 智谱向量）时显式指定。
 type EmbedConfig struct {
@@ -23,8 +35,10 @@ type EmbedConfig struct {
 	APIKey  string
 	Model   string // 留空 = 不启用向量，聚簇退化为词面相似度
 	// Dimensions 输出维度（MRL 可调表示）。Qwen3-Embedding-8B 最大 4096；
-	// 0 = 使用服务商默认值。
+	// 0 = 使用服务商默认值。ark-multimodal 风格忽略（固定维度）。
 	Dimensions int
+	// Style 接口风格，见 EmbedStyle 常量；空 = openai。
+	Style EmbedStyle
 }
 
 // embedBatchSize 每次 embeddings 请求的最大输入条数。
@@ -56,9 +70,11 @@ func New(baseURL, apiKey, modelA, modelB string, embed EmbedConfig) (*OpenAI, er
 		modelB = modelA
 	}
 	e := EmbedConfig{
-		BaseURL: strings.TrimRight(strings.TrimSpace(embed.BaseURL), "/"),
-		APIKey:  embed.APIKey,
-		Model:   strings.TrimSpace(embed.Model),
+		BaseURL:    strings.TrimRight(strings.TrimSpace(embed.BaseURL), "/"),
+		APIKey:     embed.APIKey,
+		Model:      strings.TrimSpace(embed.Model),
+		Dimensions: embed.Dimensions,
+		Style:      embed.Style,
 	}
 	if e.BaseURL == "" {
 		e.BaseURL = baseURL
@@ -68,6 +84,15 @@ func New(baseURL, apiKey, modelA, modelB string, embed EmbedConfig) (*OpenAI, er
 	}
 	if !strings.HasPrefix(e.BaseURL, "http://") && !strings.HasPrefix(e.BaseURL, "https://") {
 		return nil, fmt.Errorf("LLM_EMBED_BASE_URL 仅允许 http/https: %s", e.BaseURL)
+	}
+	switch e.Style {
+	case "", EmbedStyleOpenAI, EmbedStyleArkMultimodal:
+		// 合法
+	default:
+		return nil, fmt.Errorf("LLM_EMBED_STYLE 非法: %q（支持 openai / ark-multimodal）", e.Style)
+	}
+	if e.Style == "" {
+		e.Style = EmbedStyleOpenAI
 	}
 	return &OpenAI{BaseURL: baseURL, APIKey: apiKey, modelA: modelA, modelB: modelB, embed: e}, nil
 }
@@ -169,18 +194,22 @@ type embedRequest struct {
 }
 
 // Embed 批量语义向量；未配置向量模型返回 ErrEmbeddingsUnsupported。
-// 端点与 Key 独立于对话端点（EmbedConfig），支持跨服务商混搭；
-// 输入按 embedBatchSize 分批，规避服务商批量上限；
-// 每批最多重试两次（向量模型冷启动/限流常见瞬时错误）。
+// 端点与 Key 独立于对话端点（EmbedConfig），支持跨服务商混搭与两种接口风格。
 func (o *OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if o.embed.Model == "" {
 		return nil, application.ErrEmbeddingsUnsupported
 	}
-	endpoint := o.embedEndpoint()
-	headers := map[string]string{
-		"Content-Type":  "application/json",
-		"Authorization": "Bearer " + o.embed.APIKey,
+	if o.embed.Style == EmbedStyleArkMultimodal {
+		return o.embedArkMultimodal(ctx, texts)
 	}
+	return o.embedOpenAI(ctx, texts)
+}
+
+// embedOpenAI 标准 OpenAI 风格：批量输入按 embedBatchSize 分批，
+// 每批最多重试两次（向量模型冷启动/限流常见瞬时错误）。
+func (o *OpenAI) embedOpenAI(ctx context.Context, texts []string) ([][]float32, error) {
+	endpoint := o.embedEndpoint()
+	headers := o.embedHeaders()
 	out := make([][]float32, 0, len(texts))
 	for _, chunk := range chunkStrings(texts, embedBatchSize) {
 		payload, err := json.Marshal(embedRequest{
@@ -192,22 +221,9 @@ func (o *OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error)
 		if err != nil {
 			return nil, err
 		}
-		var body []byte
-		for attempt := 0; attempt < 3; attempt++ {
-			if attempt > 0 {
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				case <-time.After(time.Duration(1<<uint(attempt-1)) * 2 * time.Second):
-				}
-			}
-			body, _, err = safehttp.Do(ctx, "POST", endpoint, headers, bytes.NewReader(payload))
-			if err == nil {
-				break
-			}
-		}
+		body, err := postWithRetry(ctx, endpoint, headers, payload)
 		if err != nil {
-			return nil, fmt.Errorf("embeddings 请求重试耗尽: %w", err)
+			return nil, err
 		}
 		part, err := parseEmbedResponse(body, len(chunk))
 		if err != nil {
@@ -216,6 +232,76 @@ func (o *OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error)
 		out = append(out, part...)
 	}
 	return out, nil
+}
+
+// arkInput 方舟多模态输入块。
+type arkInput struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+// embedArkMultimodal 火山方舟多模态风格：该接口每次只产出一条向量
+// （多条文本块会被合并编码），因此逐条请求；日常数百条 × 约 300ms
+// 在日更流水线里可接受。doubao-embedding-vision 系列固定维度。
+func (o *OpenAI) embedArkMultimodal(ctx context.Context, texts []string) ([][]float32, error) {
+	endpoint := strings.TrimSuffix(o.embed.BaseURL, "/") + "/embeddings/multimodal"
+	headers := o.embedHeaders()
+	out := make([][]float32, 0, len(texts))
+	for _, text := range texts {
+		payload, err := json.Marshal(struct {
+			Model string     `json:"model"`
+			Input []arkInput `json:"input"`
+		}{Model: o.embed.Model, Input: []arkInput{{Type: "text", Text: text}}})
+		if err != nil {
+			return nil, err
+		}
+		body, err := postWithRetry(ctx, endpoint, headers, payload)
+		if err != nil {
+			return nil, err
+		}
+		vec, err := parseArkEmbedResponse(body)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, vec)
+	}
+	return out, nil
+}
+
+// embedHeaders 向量请求头（Key 独立于对话端点）。
+func (o *OpenAI) embedHeaders() map[string]string {
+	return map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer " + o.embed.APIKey,
+	}
+}
+
+// postWithRetry POST JSON：传输错误与 429/5xx 指数退避重试（共 3 次尝试）。
+func postWithRetry(ctx context.Context, endpoint string, headers map[string]string, payload []byte) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(1<<uint(attempt-1)) * 2 * time.Second):
+			}
+		}
+		body, status, err := safehttp.Do(ctx, "POST", endpoint, headers, bytes.NewReader(payload))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if status == 429 || status >= 500 {
+			lastErr = fmt.Errorf("端点返回 %d: %s", status, safeSnippet(body))
+			continue
+		}
+		if status != 200 {
+			return nil, fmt.Errorf("端点返回 %d: %s", status, safeSnippet(body))
+		}
+		return body, nil
+	}
+	return nil, fmt.Errorf("请求重试耗尽: %w", lastErr)
 }
 
 // parseEmbedResponse 解析并校验一批向量：条数必须与请求一致，
@@ -264,9 +350,28 @@ func chunkStrings(xs []string, n int) [][]string {
 	return out
 }
 
-// embedEndpoint 向量端点地址（独立于对话端点，可测试）。
+// embedEndpoint 向量端点地址（按风格路由，独立于对话端点，可测试）。
 func (o *OpenAI) embedEndpoint() string {
+	if o.embed.Style == EmbedStyleArkMultimodal {
+		return strings.TrimSuffix(o.embed.BaseURL, "/") + "/embeddings/multimodal"
+	}
 	return strings.TrimSuffix(o.embed.BaseURL, "/") + "/embeddings"
+}
+
+// parseArkEmbedResponse 解析方舟多模态向量：data 为单对象（data.embedding）。
+func parseArkEmbedResponse(body []byte) ([]float32, error) {
+	var resp struct {
+		Data struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("解析方舟多模态向量响应: %w", err)
+	}
+	if len(resp.Data.Embedding) == 0 {
+		return nil, fmt.Errorf("方舟多模态向量响应为空: %s", safeSnippet(body))
+	}
+	return resp.Data.Embedding, nil
 }
 
 // extractJSON 从回复中提取 JSON（容忍 markdown 代码块包裹）。

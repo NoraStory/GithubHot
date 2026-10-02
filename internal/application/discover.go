@@ -12,10 +12,10 @@ import (
 
 // DiscoverStats GitHub 双轨发现统计。
 type DiscoverStats struct {
-	SearchRepos  int `json:"searchRepos"`
+	SearchRepos   int `json:"searchRepos"`
 	TrendingRepos int `json:"trendingRepos"`
-	NewProjects  int `json:"newProjects"`
-	Merged       int `json:"merged"`
+	NewProjects   int `json:"newProjects"`
+	Merged        int `json:"merged"`
 }
 
 // DiscoverProjects GitHub 热点双轨发现用例：

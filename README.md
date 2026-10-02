@@ -62,6 +62,7 @@ go build -o githubhot ./cmd/githubhot
 | `LLM_EMBED_BASE_URL` | | 向量接口地址；留空复用 `LLM_BASE_URL`（混搭服务商时指定） |
 | `LLM_EMBED_API_KEY` | | 向量接口 Key；留空复用 `LLM_API_KEY` |
 | `LLM_EMBED_DIMENSIONS` | | 向量输出维度（MRL）；0 = 服务商默认。Qwen3-Embedding-8B 最大 4096 |
+| `LLM_EMBED_STYLE` | | 向量接口风格：`openai`（默认）/ `ark-multimodal`（火山方舟 doubao-embedding-vision 系列） |
 | `GITHUB_TOKEN` | 建议 | 无 token 限 60 次/小时；配置后 5000 次/小时 |
 | `DATA_DIR` | | 数据目录，默认 `./data` |
 | `PORT` | | serve 端口，默认 `8787` |
@@ -70,6 +71,10 @@ go build -o githubhot ./cmd/githubhot
 
 > 安全设计：所有出站请求（含 LLM 端点）经过 SSRF 防护——仅允许 http/https，
 > 拒绝 localhost、环回、私有与保留地址。因此自建内网推理端点不可用，请用公网服务。
+>
+> 代理环境（Clash TUN/fake-ip 等）：设置 `HTTPS_PROXY` 后，DNS 级校验由代理负责，
+> 主机名与 IP 字面量校验仍然生效——否则 fake-ip 返回的 198.18/15 伪地址会被
+> SSRF 防护当作保留地址拒绝。
 
 ## 架构（DDD）
 

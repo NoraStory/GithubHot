@@ -20,7 +20,7 @@ const (
 
 // Member 事件的成员：一条精选资料或一个 GitHub 项目。
 type Member struct {
-	ItemID      string    // news 成员的资料 ID
+	ItemID      string // news 成员的资料 ID
 	URL         string
 	TitleZh     string
 	SummaryZh   string
@@ -33,16 +33,16 @@ type Member struct {
 //   - 至少有一个成员；
 //   - 热度按独立来源计（同一信源、同一域名多次出现只算一次）。
 type Story struct {
-	ID            string
-	Kind          Kind
-	TitleZh       string
-	SummaryZh     string
-	URL           string // 事件主链接（热度最高成员的 URL）
-	Members       []Member
-	Projects      []string // 融合链接的 GitHub 仓库（owner/repo）
-	Hotness       float64
-	FirstSeenAt   time.Time
-	UpdatedAt     time.Time
+	ID          string
+	Kind        Kind
+	TitleZh     string
+	SummaryZh   string
+	URL         string // 事件主链接（热度最高成员的 URL）
+	Members     []Member
+	Projects    []string // 融合链接的 GitHub 仓库（owner/repo）
+	Hotness     float64
+	FirstSeenAt time.Time
+	UpdatedAt   time.Time
 }
 
 // NewNews 由一条精选资料构造资讯事件。

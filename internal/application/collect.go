@@ -14,11 +14,11 @@ import (
 
 // CollectStats 采集统计。
 type CollectStats struct {
-	DueSources int            `json:"dueSources"`
-	Inserted   int            `json:"inserted"`
-	Duplicates int            `json:"duplicates"`
+	DueSources int              `json:"dueSources"`
+	Inserted   int              `json:"inserted"`
+	Duplicates int              `json:"duplicates"`
 	Errors     map[string]error `json:"-"`
-	ErrorCount int            `json:"errors"`
+	ErrorCount int              `json:"errors"`
 }
 
 // CollectSources 采集用例：找出到期的信源，并发抓取（worker pool 控制并发度，

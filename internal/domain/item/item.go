@@ -13,7 +13,7 @@ import (
 type Stage string
 
 const (
-	StageNew      Stage = "new"        // 刚采集
+	StageNew      Stage = "new"         // 刚采集
 	StageFiltered Stage = "prefiltered" // 预筛通过
 	StageDropped  Stage = "dropped"     // 预筛淘汰
 	StageScored   Stage = "scored"      // 双评分通过
@@ -23,15 +23,15 @@ const (
 
 // Selection 精选结果值对象。不可变，只能整体替换。
 type Selection struct {
-	Stage    Stage
-	Pass     bool
-	Reason   string   // 预筛理由
-	ScoreA   float64  // 第一次独立评分 0-10
-	ScoreB   float64  // 第二次独立评分 0-10
-	TitleZh  string
+	Stage     Stage
+	Pass      bool
+	Reason    string  // 预筛理由
+	ScoreA    float64 // 第一次独立评分 0-10
+	ScoreB    float64 // 第二次独立评分 0-10
+	TitleZh   string
 	SummaryZh string
-	ReasonZh string
-	Tags     []string
+	ReasonZh  string
+	Tags      []string
 }
 
 // Item 原始资料实体。ID 是 URL 归一化后的判重键，天然防重复入库。

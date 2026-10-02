@@ -38,6 +38,7 @@ func build(cfg *config.Config) (application.Deps, *sqlite.DB, error) {
 			APIKey:     cfg.EmbedAPIKey,
 			Model:      cfg.LLMEmbed,
 			Dimensions: cfg.EmbedDims,
+			Style:      llm.EmbedStyle(cfg.EmbedStyle),
 		})
 		if lerr != nil {
 			db.Close()

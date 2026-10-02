@@ -31,8 +31,8 @@ func BuildDigest(ctx context.Context, d Deps, digestTime time.Time, stats Digest
 		return zero, fmt.Errorf("渲染日报: %w", err)
 	}
 	dig := digest.Digest{
-		Date:      dv.Date,
-		Markdown:  md,
+		Date:     dv.Date,
+		Markdown: md,
 		Stats: digest.Stats{
 			GitHubItems: len(dv.GitHub),
 			NewsItems:   len(dv.News),

@@ -15,21 +15,21 @@ import (
 
 // SelectWriteStats 精选写作统计。
 type SelectWriteStats struct {
-	Candidates int `json:"candidates"` // 进入预筛的条数
+	Candidates  int `json:"candidates"` // 进入预筛的条数
 	Prefiltered int `json:"prefiltered"`
-	Dropped    int `json:"dropped"`
-	Scored     int `json:"scored"`
-	Rejected   int `json:"rejected"`
-	Written    int `json:"written"`
-	LLMErrors  int `json:"llmErrors"`
+	Dropped     int `json:"dropped"`
+	Scored      int `json:"scored"`
+	Rejected    int `json:"rejected"`
+	Written     int `json:"written"`
+	LLMErrors   int `json:"llmErrors"`
 }
 
 // 选型流程参数。
 const (
-	prefilterBatch   = 15 // 预筛每批条数
-	writeLimit       = 60 // 单轮写作上限，控制 token 成本
-	llmWorkers       = 3  // LLM 并发度
-	maxContentChars  = 4000
+	prefilterBatch  = 15 // 预筛每批条数
+	writeLimit      = 60 // 单轮写作上限，控制 token 成本
+	llmWorkers      = 3  // LLM 并发度
+	maxContentChars = 4000
 )
 
 // SelectAndWrite 精选用例（LLM 必选）：预筛 → 同一标准独立两次评分 →

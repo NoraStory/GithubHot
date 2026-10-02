@@ -24,7 +24,7 @@ func New(token string) *Client { return &Client{Token: token} }
 
 func (c *Client) headers() map[string]string {
 	h := map[string]string{
-		"Accept":     "application/vnd.github+json",
+		"Accept":               "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",
 	}
 	if c.Token != "" {

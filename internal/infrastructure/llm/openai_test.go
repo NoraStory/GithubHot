@@ -118,6 +118,39 @@ func TestChunkStrings(t *testing.T) {
 	}
 }
 
+func TestEmbedStyleValidation(t *testing.T) {
+	// 合法风格
+	for _, s := range []EmbedStyle{"", EmbedStyleOpenAI, EmbedStyleArkMultimodal} {
+		if _, err := New("https://x.com/v1", "k", "m", "", EmbedConfig{Style: s}); err != nil {
+			t.Fatalf("风格 %q 应合法: %v", s, err)
+		}
+	}
+	// 非法风格
+	if _, err := New("https://x.com/v1", "k", "m", "", EmbedConfig{Style: "bogus"}); err == nil {
+		t.Fatal("非法风格应报错")
+	}
+	// 方舟风格路由到 multimodal 端点
+	o, _ := New("https://ark.cn-beijing.volces.com/api/v3", "k", "m", "", EmbedConfig{
+		Style: EmbedStyleArkMultimodal, Model: "doubao-embedding-vision-251215",
+	})
+	if o.embedEndpoint() != "https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal" {
+		t.Fatalf("方舟风格端点错误: %s", o.embedEndpoint())
+	}
+}
+
+func TestParseArkEmbedResponse(t *testing.T) {
+	vec, err := parseArkEmbedResponse([]byte(`{"data":{"embedding":[0.1,0.2,0.3]},"usage":{"total_tokens":29}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vec) != 3 || vec[2] != 0.3 {
+		t.Fatalf("解析错误: %v", vec)
+	}
+	if _, err := parseArkEmbedResponse([]byte(`{"error":{"message":"boom"}}`)); err == nil {
+		t.Fatal("错误体应报错")
+	}
+}
+
 func TestParseEmbedResponse(t *testing.T) {
 	// 正常响应：按 index 对齐
 	okBody := []byte(`{"data":[{"embedding":[1,0],"index":1},{"embedding":[0,1],"index":0}]}`)

@@ -7,19 +7,19 @@ import (
 
 // PipelineResult 一次完整流水线的产物。
 type PipelineResult struct {
-	DigestDate   string   `json:"digestDate"`
-	DigestMD     string   `json:"-"`
-	SiteHTML     string   `json:"-"`
-	View         HotView  `json:"-"`
-	Collect      CollectStats `json:"collect"`
-	Discover     DiscoverStats `json:"discover"`
-	Select       SelectWriteStats `json:"select"`
-	Cluster      ClusterStats  `json:"cluster"`
-	Fusion       FusionStats   `json:"fusion"`
-	Rank         RankStats     `json:"rank"`
-	DurationSec  float64       `json:"durationSeconds"`
-	ModelA       string        `json:"modelA"`
-	ModelB       string        `json:"modelB"`
+	DigestDate  string           `json:"digestDate"`
+	DigestMD    string           `json:"-"`
+	SiteHTML    string           `json:"-"`
+	View        HotView          `json:"-"`
+	Collect     CollectStats     `json:"collect"`
+	Discover    DiscoverStats    `json:"discover"`
+	Select      SelectWriteStats `json:"select"`
+	Cluster     ClusterStats     `json:"cluster"`
+	Fusion      FusionStats      `json:"fusion"`
+	Rank        RankStats        `json:"rank"`
+	DurationSec float64          `json:"durationSeconds"`
+	ModelA      string           `json:"modelA"`
+	ModelB      string           `json:"modelB"`
 }
 
 // RunPipeline 完整流水线：种子信源 → 采集 → GitHub 双轨发现 → 精选写作 →
