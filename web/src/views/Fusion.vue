@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { api } from '../lib/api'
+import { repoAvatar, repoCover } from '../lib/covers'
 
 const view = ref({ fusion: [], generatedAt: '' })
 const loading = ref(true)
@@ -30,7 +31,7 @@ onMounted(async () => {
         <div v-for="(f, i) in view.fusion" :key="i" class="recent-post-item fade-up">
           <div class="post_cover left">
             <a :href="f.project.url" target="_blank" rel="noopener">
-              <img class="post_bg" :src="'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='600' height='336'><rect width='600' height='336' fill='%23232832'/><text x='50%25' y='50%25' fill='%23eabcbd' font-size='34' text-anchor='middle' font-family='monospace'>${'{ AI × GH }'}</text></svg>`)" alt="cover">
+              <img class="post_bg" :src="repoAvatar(f.project.fullName)" :alt="f.project.fullName" @error="e => e.target.src = repoCover(f.project.fullName)">
             </a>
           </div>
           <div class="recent-post-info">

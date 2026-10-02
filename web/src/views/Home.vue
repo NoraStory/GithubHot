@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../lib/api'
 import CustomMusicPlayer from '../components/CustomMusicPlayer.vue'
+import { repoAvatar, repoCover, digestCover, newsCover } from '../lib/covers'
 
 const router = useRouter()
 const view = ref({ github: [], news: [], fusion: [] })
@@ -262,7 +263,7 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
             </div>
             <div v-if="!filteredDigests.length" class="empty">暂无期刊</div>
             <router-link v-for="d in filteredDigests" :key="d.date" class="col-item digest-item" :to="`/digest/${d.date}`" :title="d.date">
-              <img class="col-item-cover" :src="coverOf(d.date)" alt="cover">
+              <img class="col-item-cover" :src="digestCover(d.date)" alt="cover">
               <div class="col-item-body">
                 <div class="col-item-kind">{{ d.kind === 'weekly' ? '周报' : d.kind === 'monthly' ? '月报' : '日报' }}</div>
                 <div class="col-item-title">{{ d.date }} 双热点报告</div>
@@ -283,6 +284,7 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
             </div>
             <div v-if="!topGithub.length" class="empty">暂无项目</div>
             <a v-for="(p, i) in topGithub" :key="p.fullName" class="col-item rank-item" :href="p.url" target="_blank" rel="noopener" :title="p.fullName">
+              <img class="col-avatar" :src="repoAvatar(p.fullName)" :alt="p.fullName" @error="e => e.target.src = repoCover(p.fullName)">
               <span class="rank-num" :class="{ top: i < 3 }">{{ i + 1 }}</span>
               <div class="col-item-body">
                 <div class="col-item-title">{{ p.fullName }}</div>
@@ -303,6 +305,7 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
             </div>
             <div v-if="!topNews.length" class="empty">暂无资讯</div>
             <router-link v-for="(n, i) in topNews" :key="n.storyId" class="col-item rank-item" :to="`/story/${n.storyId}`" :title="n.titleZh">
+              <img class="col-avatar" :src="newsCover(n.titleZh, n.tags)" :alt="n.titleZh">
               <span class="rank-num" :class="{ top: i < 3 }">{{ i + 1 }}</span>
               <div class="col-item-body">
                 <div class="col-item-title">{{ n.titleZh }}</div>
@@ -404,6 +407,7 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
 .col-item-meta { display: flex; gap: 10px; align-items: center; margin-top: 3px; font-size: .76rem; color: var(--anzhiyu-gray); flex-wrap: wrap; }
 .col-item-meta .hot { color: var(--anzhiyu-hover); font-weight: 700; }
 .col-item-date { margin-left: auto; }
+.col-avatar { width: 40px; height: 40px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: var(--anzhiyu-background); }
 .rank-num { width: 24px; height: 24px; border-radius: 7px; background: var(--anzhiyu-background); color: var(--anzhiyu-gray); display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 700; flex-shrink: 0; }
 .rank-num.top { background: var(--anzhiyu-theme); color: #fff; }
 .rank-item:nth-child(2) .rank-num.top { background: #ff7242; }

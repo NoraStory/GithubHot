@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../lib/api'
+import { repoAvatar, repoCover } from '../lib/covers'
 
 const route = useRoute()
 const detail = ref(null)
@@ -75,7 +76,7 @@ function maxHot(history) {
         <h2>关联 GitHub 项目</h2>
         <div v-if="!detail.projects.length" class="empty">未关联项目</div>
         <div v-for="p in detail.projects" :key="p.fullName" class="recent-post-item fade-up">
-          <div class="post_cover left"><a :href="p.url" target="_blank" rel="noopener"><img class="post_bg" :src="'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='600' height='336'><rect width='600' height='336' fill='%2324292e'/><text x='50%25' y='52%25' fill='%2358a6ff' font-size='40' text-anchor='middle' font-family='monospace'>${'{ }'}</text></svg>`)" alt="cover"></a></div>
+          <div class="post_cover left"><a :href="p.url" target="_blank" rel="noopener"><img class="post_bg" :src="repoAvatar(p.fullName)" :alt="p.fullName" @error="e => e.target.src = repoCover(p.fullName)"></a></div>
           <div class="recent-post-info">
             <div class="recent-post-info-top">
               <div class="recent-post-info-top-tips"><div class="article-categories-original">GitHub 项目</div></div>

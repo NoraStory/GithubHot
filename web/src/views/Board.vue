@@ -2,6 +2,7 @@
 // 榜单页：搜索 / 筛选 / 排序 / 分页（数据全量拉取后客户端处理）
 import { ref, computed, onMounted } from 'vue'
 import { api } from '../lib/api'
+import { newsCover, repoAvatar, repoCover } from '../lib/covers'
 
 const props = defineProps({ board: { type: String, default: 'github' } })
 const view = ref({ github: [], news: [], generatedAt: '' })
@@ -59,14 +60,6 @@ const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / p
 
 function resetPage() { page.value = 1 }
 
-function coverOf(title) {
-  let h = 0
-  for (const c of title) h = (h * 31 + c.charCodeAt(0)) % 360
-  const a = `hsl(${h}, 42%, 62%)`
-  const b = `hsl(${(h + 40) % 360}, 48%, 44%)`
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='600' height='336'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${a}'/><stop offset='1' stop-color='${b}'/></linearGradient></defs><rect width='600' height='336' fill='url(#g)'/><circle cx='500' cy='70' r='110' fill='rgba(255,255,255,0.12)'/></svg>`
-  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
-}
 
 onMounted(async () => {
   view.value = await api.get('/api/v1/hot')
@@ -139,48 +132,41 @@ onMounted(async () => {
 
         <div v-if="loading" class="loading">加载中 </div>
         <div v-else-if="!filtered.length" class="empty">没有匹配的内容</div>
-        <div v-for="p in paged" :key="p.fullName || p.storyId" class="recent-post-item fade-up">
-          <div class="post_cover left">
-            <router-link v-if="board === 'news' && p.storyId" :to="`/story/${p.storyId}`">
-              <img class="post_bg" :src="coverOf(p.titleZh)" alt="cover" style="pointer-events: none">
-            </router-link>
-            <a v-else :href="p.url" target="_blank" rel="noopener" :title="p.fullName">
-              <img class="post_bg" :src="coverOf(p.fullName || p.titleZh)" alt="cover" style="pointer-events: none">
-            </a>
-          </div>
-          <div class="recent-post-info">
-            <div class="recent-post-info-top">
-              <div class="recent-post-info-top-tips">
-                <div class="article-categories-original">{{ board === 'github' ? '开源项目' : 'AI 资讯' }}</div>
+
+        <!-- 紧凑行式列表：小封面 + 标题 + 摘要两行，长列表阅读友好 -->
+        <div class="feed-list">
+          <div v-for="(p, i) in paged" :key="p.fullName || p.storyId" class="feed-row fade-up">
+            <img
+              class="row-cover"
+              :src="board === 'github' ? repoAvatar(p.fullName) : newsCover(p.titleZh, p.tags)"
+              :alt="p.fullName || p.titleZh"
+              @error="e => { e.target.src = board === 'github' ? repoCover(p.fullName) : newsCover(p.titleZh, p.tags) }"
+            >
+            <div class="row-body">
+              <div class="row-top">
+                <span class="row-rank">{{ (page - 1) * pageSize + i + 1 }}</span>
+                <router-link v-if="board === 'news' && p.storyId" class="row-title" :to="`/story/${p.storyId}`">{{ p.titleZh }}</router-link>
+                <a v-else class="row-title" :href="p.url" target="_blank" rel="noopener" :title="p.fullName || p.titleZh">{{ board === 'github' ? p.fullName : p.titleZh }}</a>
                 <span v-for="b in p.badges" :key="b" class="badge" :class="{ new: b === '新', rise: b === '上升', gh: b.startsWith('trending') || b === 'GitHub关联' }">{{ b }}</span>
               </div>
-              <router-link v-if="board === 'news' && p.storyId" class="article-title" :to="`/story/${p.storyId}`">{{ p.titleZh }}</router-link>
-              <a v-else class="article-title" :href="p.url" target="_blank" rel="noopener" :title="p.fullName || p.titleZh">
-                {{ board === 'github' ? p.fullName : p.titleZh }}
-              </a>
+              <div class="row-meta">
+                <template v-if="board === 'github'">
+                  <span class="hot">+{{ p.starsGained }} ★</span>
+                  <span class="desc">热度 {{ p.hotness.toFixed(1) }}</span>
+                  <span class="desc">总计 {{ p.stars.toLocaleString() }} ★</span>
+                  <span v-if="p.language" class="lang-chip">{{ p.language }}</span>
+                  <span v-for="t in (p.topics || []).slice(0, 3)" :key="t" class="row-tag">{{ t }}</span>
+                </template>
+                <template v-else>
+                  <span class="hot">热度 {{ p.hotness.toFixed(1) }}</span>
+                  <span class="desc">评分 {{ p.score.toFixed(1) }}</span>
+                  <span class="desc">{{ p.sourceCount }} 个来源</span>
+                  <span v-for="t in (p.tags || []).slice(0, 3)" :key="t" class="row-tag">{{ t }}</span>
+                </template>
+              </div>
+              <div class="row-desc" v-if="p.descriptionZh || p.summaryZh || p.description">{{ p.descriptionZh || p.summaryZh || p.description }}</div>
+              <div class="row-desc secondary" v-if="p.descriptionZh && p.description">{{ p.description }}</div>
             </div>
-            <div class="article-meta-wrap">
-              <span class="post-meta-date" v-if="board === 'github'">
-                <span class="article-meta-label">24h</span>
-                <time class="gain">+{{ p.starsGained }} ★</time>
-                <span class="article-meta-separator">·</span>
-                <span class="hot">热度 {{ p.hotness.toFixed(1) }}</span>
-                <span class="article-meta-separator">·</span>
-                <span class="desc">总计 {{ p.stars.toLocaleString() }} ★</span>
-              </span>
-              <span class="post-meta-date" v-else>
-                <span class="hot">热度 {{ p.hotness.toFixed(1) }}</span>
-                <span class="article-meta-separator">·</span>
-                <span class="desc">评分 {{ p.score.toFixed(1) }}</span>
-                <span class="article-meta-separator">·</span>
-                <span class="desc">{{ p.sourceCount }} 个来源</span>
-              </span>
-              <span class="article-meta tags">
-                <span v-for="t in (p.topics || p.tags || []).slice(0, 3)" :key="t" class="article-meta__tags">{{ t }}</span>
-              </span>
-            </div>
-            <div class="recent-post-desc" v-if="p.descriptionZh || p.summaryZh || p.overview">{{ p.descriptionZh || p.summaryZh || p.overview }}</div>
-            <div class="recent-post-desc secondary" v-if="p.descriptionZh && p.description">{{ p.description }}</div>
           </div>
         </div>
 
@@ -218,4 +204,25 @@ onMounted(async () => {
 .hot { color: var(--anzhiyu-hover); font-weight: 700; }
 .desc { color: var(--anzhiyu-gray); font-size: .8rem; }
 @media (max-width: 768px) { .post-bg { height: 19rem; } .post-title { font-size: 1.5rem; } }
+
+/* ===== 紧凑行式列表（阅读优先）===== */
+.feed-list { display: flex; flex-direction: column; gap: 10px; }
+.feed-row { display: flex; gap: 14px; align-items: flex-start; background: var(--anzhiyu-maskbg); border: 1px solid var(--anzhiyu-card-border); border-radius: 12px; padding: 14px 16px; transition: border-color .2s, transform .2s; }
+.feed-row:hover { border-color: var(--anzhiyu-theme); transform: translateY(-1px); }
+.row-cover { width: 76px; height: 76px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: var(--anzhiyu-background); }
+.row-body { flex: 1; min-width: 0; }
+.row-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.row-rank { font-weight: 800; color: var(--anzhiyu-gray); font-size: .88rem; min-width: 20px; }
+.row-title { font-weight: 700; font-size: 1.02rem; line-height: 1.5; color: var(--anzhiyu-fontcolor); }
+.row-title:hover { color: var(--anzhiyu-hover); }
+.row-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; font-size: .8rem; color: var(--anzhiyu-gray); }
+.row-meta .hot { color: var(--anzhiyu-hover); font-weight: 700; }
+.row-tag { background: var(--anzhiyu-theme-op); color: #a8766f; border-radius: 6px; padding: 0 7px; font-size: .72rem; }
+.lang-chip { background: var(--anzhiyu-background); border-radius: 6px; padding: 0 7px; font-size: .72rem; }
+.row-desc { margin-top: 6px; color: var(--anzhiyu-secondary); font-size: .88rem; line-height: 1.75; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.row-desc.secondary { color: var(--anzhiyu-gray); font-size: .8rem; -webkit-line-clamp: 1; margin-top: 3px; }
+.badge { display: inline-block; border-radius: 6px; padding: 0 7px; font-size: .72rem; }
+.badge.new { background: var(--anzhiyu-red, #ff7242); color: #fff; }
+.badge.rise { background: var(--anzhiyu-green, #acde7d); color: #fff; }
+.badge.gh { background: var(--anzhiyu-blue, #425aef); color: #fff; }
 </style>
