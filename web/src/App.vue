@@ -17,14 +17,14 @@ const consoleOpen = ref(false)
 // 中控台数据
 const stories = ref([])
 const digests = ref([])
-const musicOn = ref(false)
+const musicOn = ref(true) // 参考站 #nav-music 常驻，meting-js 懒加载
 
 function applyTheme() {
   document.documentElement.setAttribute('data-theme', dark.value ? 'dark' : 'light')
   localStorage.setItem('githubhot_theme', dark.value ? 'dark' : 'light')
 }
 function toggleTheme() { dark.value = !dark.value; applyTheme() }
-function onScroll() { scrolled.value = window.scrollY > 20 }
+function onScroll() { scrolled.value = window.scrollY > 20; updatePercent(); updateRightside() }
 function toggleMenu() { menuOpen.value = !menuOpen.value }
 function closeMenu() { menuOpen.value = false }
 function toggleConsole() { consoleOpen.value = !consoleOpen.value }
@@ -36,9 +36,50 @@ function toRandom() {
 }
 
 function toggleMusic() {
-  const btn = document.querySelector('#nav-music .aplayer-play, #nav-music .aplayer-pause')
-  if (btn) btn.click()
-  musicOn.value = !musicOn.value
+  // 参考站同构：nav-music 由 meting-js 自定义元素挂载 APlayer
+  const meting = document.querySelector('#nav-music meting-js')
+  const ap = meting && meting.aplayer
+  if (ap) ap.toggle()
+  musicOn.value = ap ? !ap.audio.paused : !musicOn.value
+}
+
+function toggleRightside() {
+  // 参考站 main.js rightSideFn["rightside-config"] 同构：.show 展开配置行，.status 保持 300ms 渐隐
+  const hide = document.getElementById('rightside-config-hide')
+  if (!hide) return
+  if (hide.classList.contains('show')) {
+    hide.classList.add('status')
+    setTimeout(() => hide.classList.remove('status'), 300)
+  }
+  hide.classList.toggle('show')
+}
+
+// 参考站 scrollFn 同构：滚动后右侧工具滑入；页面不满一屏时始终显示
+function updateRightside() {
+  const rs = document.getElementById('rightside')
+  if (!rs) return
+  const innerHeight = window.innerHeight + 56
+  if (window.scrollY > 5) {
+    if (window.getComputedStyle(rs).getPropertyValue('opacity') === '0') {
+      rs.style.cssText = 'opacity: 0.8; transform: translateX(-58px)'
+    }
+  } else if (document.body.scrollHeight <= innerHeight) {
+    rs.style.cssText = 'opacity: 1; transform: translateX(-58px)'
+  } else {
+    rs.style.cssText = ''
+  }
+}
+
+function translateToggle() {
+  if (window.translateFn) window.translateFn.translatePage()
+}
+
+// nav-totop 百分比（参考站 #percent 同构）
+function updatePercent() {
+  const el = document.getElementById('percent')
+  if (!el) return
+  const total = document.documentElement.scrollHeight - document.documentElement.clientHeight
+  el.textContent = total > 0 ? Math.min(100, Math.round((window.scrollY / total) * 100)) + '' : '0'
 }
 
 async function doSearch() {
@@ -77,26 +118,11 @@ const monthLabel = (ym) => {
 onMounted(async () => {
   applyTheme()
   window.addEventListener('scroll', onScroll, { passive: true })
+  updateRightside()
   try {
     const [sn, dg] = await Promise.all([api.get('/api/v1/hot/news'), api.get('/api/v1/digests?pageSize=50')])
     stories.value = sn.items || []
     digests.value = dg.items || []
-  } catch { /* 静默 */ }
-  // APlayer 挂载到 #nav-music（主题 CSS 全套悬浮/中控台样式）
-  try {
-    const cfg = await api.get('/api/v1/site/config')
-    const list = cfg.music || []
-    if (list.length && window.APlayer) {
-      musicOn.value = true
-      window.aplayerInstance = new window.APlayer({
-        container: document.getElementById('nav-music'),
-        mini: true,
-        fixed: false,
-        autoplay: false,
-        theme: '#eabcbd',
-        audio: list.map((t) => ({ name: t.name, artist: t.artist || '', url: t.url, cover: t.cover || '' }))
-      })
-    }
   } catch { /* 静默 */ }
 })
 onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
@@ -105,6 +131,29 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
 </script>
 
 <template>
+  <!-- AnZhiYu 星空背景（火箭/地球/月球/宇航员 + 闪烁星星，主题 CSS 全套动画） -->
+  <div id="web_bg">
+    <div class="bg_stars">
+      <div class="bg_objects">
+        <img class="bg_object_rocket" src="/anzhiyu/img/bg/rocket.svg" width="40px" alt="web_bg">
+        <div class="bg_earth-moon">
+          <img class="bg_object_earth" src="/anzhiyu/img/bg/earth.svg" width="100px" alt="web_bg">
+          <img class="bg_object_moon" src="/anzhiyu/img/bg/moon.svg" width="80px" alt="web_bg">
+        </div>
+        <div class="bg_box_astronaut"><img class="bg_object_astronaut" src="/anzhiyu/img/bg/astronaut.svg" width="140px" alt="web_bg"></div>
+      </div>
+      <div class="bg_glowing_stars">
+        <div class="bg_star"></div>
+        <div class="bg_star"></div>
+        <div class="bg_star"></div>
+        <div class="bg_star"></div>
+        <div class="bg_star"></div>
+      </div>
+    </div>
+  </div>
+  <!-- 音乐馆封面背景层（Music 页面加载后随歌曲封面联动） -->
+  <div id="an_music_bg"></div>
+
   <!-- AnZhiYu #nav：桌面端 悬停下拉；窄屏 #toggle-menu 汉堡 → #sidebar-menus 抽屉 -->
   <nav id="nav" :class="{ 'nav-fixed': scrolled }">
     <div id="nav-group">
@@ -145,6 +194,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
             <div class="back-menu-list-group">
               <div class="back-menu-list-title">站点</div>
               <div class="back-menu-list">
+                <a class="back-menu-item" href="/music"><span class="back-menu-item-text">音乐馆</span></a>
                 <a class="back-menu-item" href="/about"><span class="back-menu-item-text">关于本站</span></a>
                 <a class="back-menu-item" href="https://github.com/NoraStory/GithubHot" target="_blank"><span class="back-menu-item-text">源码仓库</span></a>
                 <a class="back-menu-item" v-if="getToken()" href="/admin/usage"><span class="back-menu-item-text">管理端</span></a>
@@ -186,6 +236,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
           <ul class="menus_item_child">
             <li><router-link class="site-page child faa-parent animated-hover" to="/tools"><i class="anzhiyufont anzhiyu-icon-tools faa-tada" style="font-size: 0.9em;"></i><span> 工具库</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/album"><i class="anzhiyufont anzhiyu-icon-images faa-tada" style="font-size: 0.9em;"></i><span> 相册集</span></router-link></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/music"><i class="anzhiyufont anzhiyu-icon-music faa-tada" style="font-size: 0.9em;"></i><span> 音乐馆</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/messages"><i class="anzhiyufont anzhiyu-icon-comments faa-tada" style="font-size: 0.9em;"></i><span> 留言板</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/air-conditioner"><i class="anzhiyufont anzhiyu-icon-fan faa-tada" style="font-size: 0.9em;"></i><span> 小空调</span></router-link></li>
           </ul>
@@ -259,6 +310,12 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
       <div class="nav-button" id="toggle-menu" title="菜单" @click="toggleMenu">
         <a class="site-page social-icon"><i class="anzhiyufont anzhiyu-icon-bars"></i></a>
       </div>
+      <!-- AnZhiYu 返回顶部（带滚动百分比） -->
+      <div class="nav-button" id="nav-totop">
+        <a class="totopbtn" href="javascript:void(0);" @click="window.anzhiyu && window.anzhiyu.scrollToDest(0, 500)">
+          <i class="anzhiyufont anzhiyu-icon-arrow-up"></i><span id="percent">0</span>
+        </a>
+      </div>
     </div>
   </nav>
 
@@ -319,14 +376,23 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
           <i class="anzhiyufont anzhiyu-icon-moon"></i>
         </a>
       </div>
-      <div class="console-btn-item">
-        <a title="随机逛逛" href="javascript:void(0);" @click="toRandom"><i class="anzhiyufont anzhiyu-icon-dice"></i></a>
+      <div class="console-btn-item" id="consoleHideAside" title="边栏显示控制" @click="window.anzhiyu && window.anzhiyu.hideAsideBtn()">
+        <a class="asideSwitch" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-arrows-left-right"></i></a>
       </div>
-      <div class="console-btn-item" :class="{ on: musicOn }">
-        <a title="音乐开关" href="javascript:void(0);" @click="toggleMusic"><i class="anzhiyufont anzhiyu-icon-music"></i></a>
+      <div class="console-btn-item" id="consoleCommentBarrage" title="热评开关" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()">
+        <a class="commentBarrage" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-message"></i></a>
       </div>
-      <div class="console-btn-item">
-        <router-link title="管理端" to="/admin/usage"><i class="anzhiyufont anzhiyu-icon-gear"></i></router-link>
+      <div class="console-btn-item" id="consoleMusic" title="音乐开关" @click="toggleMusic">
+        <a class="music-switch" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-music"></i></a>
+      </div>
+      <div class="console-btn-item" id="consoleKeyboard" title="快捷键开关" @click="window.anzhiyu && window.anzhiyu.keyboardToggle()">
+        <a class="keyboard-switch" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-keyboard"></i></a>
+      </div>
+      <div class="console-btn-item" id="consoleRandomPost" title="随机逛逛" @click="toRandom">
+        <a href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-dice"></i></a>
+      </div>
+      <div class="console-btn-item" id="consoleAdmin" title="管理端">
+        <router-link to="/admin/usage"><i class="anzhiyufont anzhiyu-icon-gear"></i></router-link>
       </div>
       <div id="console-naoDark">
         <div class="container">
@@ -345,17 +411,39 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
     <div class="console-mask" @click="consoleOpen = false"></div>
   </div>
 
-  <!-- 背景音乐（AnZhiYu #nav-music 悬浮播放器，主题 CSS 全套样式；无歌单时隐藏） -->
-  <div id="nav-music" v-if="musicOn">
-    <div id="aplayer-mount"></div>
+  <!-- 背景音乐（AnZhiYu #nav-music 同构：hoverTips 标签 + meting-js 自定义元素挂载 APlayer） -->
+  <div id="nav-music">
+    <a id="nav-music-hoverTips" href="javascript:void(0);" accesskey="m" @click="toggleMusic">播放音乐</a>
+    <div id="console-music-bg"></div>
+    <meting-js id="652135520" server="netease" type="playlist" mutex="true" preload="none" theme="var(--anzhiyu-main)" data-lrctype="0" order="random" volume="0.5"></meting-js>
   </div>
 
-  <!-- 窄屏抽屉菜单（AnZhiYu #sidebar-menus 同构） -->
+  <!-- AnZhiYu 右侧工具（简繁/昼夜/边栏/设置/回到顶部） -->
+  <div id="rightside">
+    <div id="rightside-config-hide">
+      <button id="translateLink" type="button" title="简繁转换" @click="translateToggle">繁</button>
+      <button id="darkmode" type="button" title="浅色和深色模式转换" @click="dark = !dark; applyTheme()"><i class="anzhiyufont anzhiyu-icon-circle-half-stroke"></i></button>
+      <button id="hide-aside-btn" type="button" title="单栏和双栏切换" @click="window.anzhiyu && window.anzhiyu.hideAsideBtn()"><i class="anzhiyufont anzhiyu-icon-arrows-left-right"></i></button>
+    </div>
+    <div id="rightside-config-show">
+      <button id="rightside-config" type="button" title="设置" @click="toggleRightside"><i class="anzhiyufont anzhiyu-icon-gear"></i></button>
+      <a id="switch-commentBarrage" href="javascript:void(0);" title="开关弹幕" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()"><i class="anzhiyufont anzhiyu-icon-danmu"></i></a>
+      <button id="go-up" type="button" title="回到顶部" @click="window.anzhiyu && window.anzhiyu.scrollToDest(0, 500)"><i class="anzhiyufont anzhiyu-icon-arrow-up"></i></button>
+    </div>
+  </div>
+
+  <!-- 窄屏抽屉菜单（AnZhiYu #sidebar-menus 同构，含 menu-mask 与站点数据行） -->
   <div id="sidebar" v-if="menuOpen" @click.self="closeMenu">
+    <div id="menu-mask"></div>
     <div class="sidebar-menus" id="sidebar-menus">
       <div class="sidebar-author">
         <div class="author-name">🔥 GithubHot</div>
         <div class="author-desc">双热点追踪站</div>
+      </div>
+      <div class="sidebar-site-data site-data is-center">
+        <router-link to="/archives" title="archive"><div class="headline">期刊</div><div class="length-num">{{ digests.length }}</div></router-link>
+        <router-link to="/tags" title="tag"><div class="headline">标签</div><div class="length-num">{{ tagCloud.length }}</div></router-link>
+        <router-link to="/categories" title="category"><div class="headline">分类</div><div class="length-num">3</div></router-link>
       </div>
       <div class="menus_groups">
         <router-link class="site-page child" to="/"><span> 首页</span></router-link>
@@ -373,6 +461,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
         <router-link class="site-page child" to="/tags"><span> 标签</span></router-link>
         <router-link class="site-page child" to="/charts"><span> 统计</span></router-link>
         <router-link class="site-page child" to="/link"><span> 资源</span></router-link>
+        <router-link class="site-page child" to="/music"><span> 音乐馆</span></router-link>
         <router-link class="site-page child" to="/about"><span> 关于</span></router-link>
         <router-link v-if="getToken()" class="site-page child" to="/admin/usage"><span> 管理端</span></router-link>
       </div>
@@ -424,11 +513,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
 #console .empty { color: var(--anzhiyu-gray); font-size: .85rem; padding: 8px 0; }
 #console .button-group .console-btn-item a { cursor: pointer; }
 
-/* 背景音乐悬浮挂件 */
-#nav-music { position: fixed; left: 22px; bottom: 22px; z-index: 96; width: 66px; height: 66px; border-radius: 50%; overflow: hidden; box-shadow: var(--anzhiyu-shadow-blackdeep, 0 2px 16px -3px rgba(0,0,0,.15)); background: var(--anzhiyu-card-bg); }
-#nav-music .aplayer { margin: 0; }
-#nav-music .aplayer-body { width: 66px; }
-#nav-music .aplayer-pic { width: 66px; height: 66px; }
+/* 背景音乐悬浮挂件（主题 CSS 自带 #nav-music/#nav-music-hoverTips/.aplayer 全套样式） */
 
 /* 窄屏：隐藏平铺菜单，仅汉堡按钮（AnZhiYu 断点行为）；中控台仅桌面 */
 #toggle-menu { display: none; }

@@ -1,7 +1,8 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../lib/api'
+import CustomMusicPlayer from '../components/CustomMusicPlayer.vue'
 
 const router = useRouter()
 const view = ref({ github: [], news: [], fusion: [] })
@@ -81,6 +82,23 @@ function loadPoem() {
 
 // 随便逛逛
 const stories = ref([])
+
+// 侧边栏：最新留言 + 标签云 + 问候语轮换
+const latestComments = ref([])
+const tagCloud = computed(() => {
+  const counts = {}
+  for (const n of stories.value) {
+    for (const t of n.tags || []) counts[t] = (counts[t] || 0) + 1
+  }
+  const max = Math.max(...Object.values(counts), 1)
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10)
+    .map(([name, count]) => ({ name, count, size: (0.9 + (count / max) * 0.5).toFixed(2) }))
+})
+function sayhiClick() {
+  const el = document.getElementById('author-info__sayhi')
+  const skills = (window.GLOBAL_CONFIG && window.GLOBAL_CONFIG.authorStatus && window.GLOBAL_CONFIG.authorStatus.skills) || ['你好呀']
+  if (el) el.textContent = skills[Math.floor(Math.random() * skills.length)]
+}
 function toRandom() {
   const pool = stories.value.length ? stories.value.map((s) => `/story/${s.storyId}`) : (digestsAll.value || []).map((d) => `/digest/${d.date}`)
   if (pool.length) router.push(pool[Math.floor(Math.random() * pool.length)])
@@ -99,6 +117,41 @@ function coverOf(title) {
   return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
 }
 
+// 小板报问候（参考站 welcome.js 改造版：本地时间问候 + 欢迎语）
+function greeting() {
+  const h = new Date().getHours()
+  if (h < 5) return '睡个好觉，保证精力充沛'
+  if (h < 10) return '一日之计在于晨'
+  if (h < 14) return '吃饱了才有力气干活'
+  if (h < 18) return '集中精力，攻克难关'
+  return '不要太劳累了，早睡更健康'
+}
+function welcomeHTML() {
+  const h = new Date().getHours()
+  const timeChange = h >= 5 && h < 11 ? '<span>🌤️ 早上好，一日之计在于晨</span>'
+    : h >= 11 && h < 13 ? '<span>☀️ 中午好，记得午休喔~</span>'
+    : h >= 13 && h < 17 ? '<span>🕞 下午好，饮茶先啦！</span>'
+    : h >= 17 && h < 19 ? '<span>🚶‍♂️ 即将下班，记得按时吃饭~</span>'
+    : h >= 19 ? '<span>🌙 晚上好，夜生活嗨起来！</span>'
+    : '<span>夜深了，早点休息，少熬夜</span>'
+  const lines = ['数据与诗，都在这里相遇', 'GitHub 热点 × AI 资讯，一站式追踪', '老电影开场，热点正在加载', '今天的榜单，由 LLM 为你精选']
+  const line = lines[Math.floor(Math.random() * lines.length)]
+  return `🙋欢迎来到 <b><span style="color: var(--anzhiyu-main);">GithubHot</span></b> 💖<br>😊${line}🍂<br>🕒<b><span>${new Date().toLocaleDateString('zh-CN')}</span></b><br>${timeChange}<br>`
+}
+
+// 参考站 peoplecanvas（gsap 小人动画）：脚本仅在画布挂载后注入一次，此后靠 pjax:success 事件重建
+function bootPeopleCanvas() {
+  if (window.__people2Loaded) {
+    setTimeout(() => document.dispatchEvent(new Event('pjax:success')), 80)
+    return
+  }
+  window.__people2Loaded = true
+  const s = document.createElement('script')
+  s.src = '/anzhiyu/js/people_2.js'
+  s.async = true
+  document.body.appendChild(s)
+}
+
 onMounted(async () => {
   typeLoop()
   loadPoem()
@@ -108,8 +161,20 @@ onMounted(async () => {
   stories.value = d.items || []
   const dg = await api.get('/api/v1/digests?pageSize=50')
   digestsAll.value = dg.items || []
+  try {
+    const ms = await api.get('/api/v1/messages')
+    latestComments.value = (ms.items || []).slice(0, 5)
+  } catch { /* 静默 */ }
   const cfg = await api.get('/api/v1/site/config').catch(() => null)
   if (cfg && cfg.homeVideos) videoList.value = cfg.homeVideos
+  // 自定义音乐播放器（music-index 改造版）与 peoplecanvas 画布挂载同步
+  bootPeopleCanvas()
+  setTimeout(() => document.dispatchEvent(new Event('pjax:complete')), 120)
+  // 小板报欢迎语（参考站 welcome.js 改造版：本地时间问候，不依赖第三方 IP 接口）
+  const sayhi = document.getElementById('author-info__sayhi')
+  if (sayhi) sayhi.textContent = greeting()
+  const w = document.getElementById('welcome-info')
+  if (w) w.innerHTML = welcomeHTML()
 })
 onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); clearInterval(quoteTimer) })
 </script>
@@ -138,26 +203,32 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
     <div id="scroll-down"><i class="anzhiyufont anzhiyu-icon-angle-down scroll-down-effects" @click="scrollDown"></i></div>
   </header>
 
-  <!-- home_top：随便逛逛 + 分类三按钮 -->
+  <!-- home_top：随便逛逛 + 分类三按钮 + 自定义音乐播放器（参考站同构） -->
   <main id="blog-container">
     <div id="home_top">
-      <div id="bannerGroup">
-        <div id="random-banner" @click="toRandom">
-          <a id="random-hover" href="javascript:void(0)">
-            <i class="anzhiyufont anzhiyu-icon-paper-plane"></i>
-            <div class="bannerText">随便逛逛<i class="anzhiyufont anzhiyu-icon-arrow-right"></i></div>
-          </a>
+      <div class="swiper_container_card" style="height: auto; width: 100%">
+        <div id="bannerGroup">
+          <div id="random-banner" @click="toRandom">
+            <canvas id="peoplecanvas"></canvas>
+            <a id="random-hover" href="javascript:void(0)">
+              <i class="anzhiyufont anzhiyu-icon-paper-plane"></i>
+              <div class="bannerText">随便逛逛<i class="anzhiyufont anzhiyu-icon-arrow-right"></i></div>
+            </a>
+          </div>
+          <div class="categoryGroup">
+            <div class="categoryItem" style="box-shadow: var(--anzhiyu-shadow-blue)">
+              <router-link class="categoryButton blue" to="/github"><span class="categoryButtonText">GitHub 项目榜</span><i class="anzhiyufont anzhiyu-icon-fire"></i></router-link>
+            </div>
+            <div class="categoryItem" style="box-shadow: var(--anzhiyu-shadow-red)">
+              <router-link class="categoryButton red" to="/news"><span class="categoryButtonText">AI 资讯榜</span><i class="anzhiyufont anzhiyu-icon-shapes"></i></router-link>
+            </div>
+            <div class="categoryItem" style="box-shadow: var(--anzhiyu-shadow-green)">
+              <router-link class="categoryButton green" to="/fusion"><span class="categoryButtonText">融合观察</span><i class="anzhiyufont anzhiyu-icon-dove"></i></router-link>
+            </div>
+          </div>
         </div>
-        <div class="categoryGroup">
-          <div class="categoryItem" style="box-shadow: var(--anzhiyu-shadow-blue)">
-            <router-link class="categoryButton blue" to="/github"><span class="categoryButtonText">GitHub 项目榜</span><i class="anzhiyufont anzhiyu-icon-fire"></i></router-link>
-          </div>
-          <div class="categoryItem" style="box-shadow: var(--anzhiyu-shadow-red)">
-            <router-link class="categoryButton red" to="/news"><span class="categoryButtonText">AI 资讯榜</span><i class="anzhiyufont anzhiyu-icon-shapes"></i></router-link>
-          </div>
-          <div class="categoryItem" style="box-shadow: var(--anzhiyu-shadow-green)">
-            <router-link class="categoryButton green" to="/fusion"><span class="categoryButtonText">融合观察</span><i class="anzhiyufont anzhiyu-icon-dove"></i></router-link>
-          </div>
+        <div id="custom-music-player-placeholder" style="width: 625px; min-height: 340px; margin-left: 0.5rem;">
+          <CustomMusicPlayer />
         </div>
       </div>
     </div>
@@ -212,6 +283,68 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
             <span class="page-item" :class="{ disabled: page === 1 }" @click="page > 1 && page--">‹</span>
             <span v-for="pn in Math.max(1, Math.ceil(total / pageSize))" :key="pn" class="page-item" :class="{ active: pn === page }" @click="pn !== page && (page = pn)">{{ pn }}</span>
             <span class="page-item" :class="{ disabled: page >= Math.ceil(total / pageSize) }" @click="page < Math.ceil(total / pageSize) && page++">›</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧边栏（参考站 home 同构）：个人信息 / 小板报 / 倒计时 / 最新评论 / 标签云 -->
+      <div class="aside-content" id="aside-content">
+        <div class="card-widget card-info">
+          <div class="card-content">
+            <div class="author-info__sayhi" id="author-info__sayhi" @click="sayhiClick"></div>
+            <div class="author-info-avatar">
+              <img class="avatar-img" src="/img/avatar.webp" alt="avatar" @error="e => e.target.src = '/img/background/GIF/loading3.gif'">
+              <div class="author-status"><img class="g-status" src="/img/background/GIF/loading3.gif" alt="status"></div>
+            </div>
+            <div class="author-info__description">GitHub 开源项目热点 × AI 资讯热点：自动采集、LLM 精选、事件聚簇与融合观察。</div>
+            <div class="author-info__bottom-group">
+              <a class="author-info__bottom-group-left" href="/">
+                <h1 class="author-info__name">GithubHot</h1>
+                <div class="author-info__desc">双热点追踪站</div>
+              </a>
+              <div class="card-info-social-icons is-center">
+                <a class="social-icon faa-parent animated-hover" href="https://github.com/NoraStory/GithubHot" target="_blank" title="Github"><i class="anzhiyufont anzhiyu-icon-github"></i></a>
+                <a class="social-icon faa-parent animated-hover" href="/feed/digest.xml" target="_blank" title="RSS"><i class="anzhiyufont anzhiyu-icon-rss"></i></a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card-widget card-announcement">
+          <div class="item-headline"><i class="anzhiyufont anzhiyu-icon-bullhorn anzhiyu-shake"></i><span>小板报</span></div>
+          <div class="announcement_content"><div id="welcome-info"></div></div>
+        </div>
+        <div class="card-widget card-countdown">
+          <div class="item-headline"><i class="anzhiyufont anzhiyu-icon-hourglass-half"></i><span>倒计时</span></div>
+          <div class="item-content">
+            <div class="cd-count-left">
+              <span class="cd-text">距离</span>
+              <span class="cd-name" id="eventName"></span>
+              <span class="cd-time" id="daysUntil"></span>
+              <span class="cd-date" id="eventDate"></span>
+            </div>
+            <div id="countRight" class="cd-count-right"></div>
+          </div>
+        </div>
+        <div class="card-widget card-latest-comments">
+          <div class="item-headline"><i class="fas fa-comments"></i><span>最新留言</span></div>
+          <div class="item-content">
+            <router-link to="/messages" class="headline-right" title="查看更多"><i class="fas fa-angle-right"></i></router-link>
+            <div class="aside-list" id="latest-comments">
+              <div v-for="m in latestComments" :key="m.id" class="aside-list-item">
+                <span class="chip">{{ m.name }}</span> {{ m.content }}
+              </div>
+              <div v-if="!latestComments.length" class="empty">还没有留言，来抢沙发～</div>
+            </div>
+          </div>
+        </div>
+        <div class="sticky_layout">
+          <div class="card-widget">
+            <div class="card-tags">
+              <div class="item-headline"><i class="anzhiyufont anzhiyu-icon-tags"></i><span>标签</span></div>
+              <div class="card-tag-cloud">
+                <router-link v-for="c in tagCloud" :key="c.name" :to="{ path: '/search', query: { q: c.name } }" :style="{ fontSize: c.size + 'rem' }">{{ c.name }}<sup>{{ c.count }}</sup></router-link>
+              </div>
+            </div>
           </div>
         </div>
       </div>

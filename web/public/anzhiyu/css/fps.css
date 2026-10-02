@@ -1,0 +1,1 @@
+#fps{position:fixed;right:9px;bottom:65px;z-index:1919810}@media screen and (max-width:800px){#fps{display:none!important}}[data-theme=light] #fps{background-color:rgba(255,255,255,.85);backdrop-filter:blur(5px) saturate(150%);padding:0 6px;border-radius:20px}[data-theme=dark] #fps{background-color:#1d1e22;backdrop-filter:blur(5px) saturate(150%);padding:0 6px;border-radius:20px}
