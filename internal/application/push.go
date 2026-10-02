@@ -58,7 +58,10 @@ func BuildStoryDetail(ctx context.Context, d Deps, id string) (*StoryDetailView,
 		return nil, fmt.Errorf("读取事件: %w", err)
 	}
 	v := &StoryDetailView{
-		Story: buildStoryRow(ctx, d, s, 0, mustSourceNames(ctx, d), d.Clock.Now()),
+		Story:    buildStoryRow(ctx, d, s, 0, mustSourceNames(ctx, d), d.Clock.Now()),
+		Members:  []DiagRow{},
+		Projects: []ProjectRow{},
+		History:  []story.HotnessPoint{},
 	}
 	var ids []string
 	for _, m := range s.Members {
@@ -95,6 +98,9 @@ func BuildStoryDetail(ctx context.Context, d Deps, id string) (*StoryDetailView,
 		}
 	}
 	v.History, _ = d.Stories.HotnessHistory(ctx, id, 100)
+	if v.History == nil {
+		v.History = []story.HotnessPoint{}
+	}
 	return v, nil
 }
 

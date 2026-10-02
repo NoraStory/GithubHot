@@ -5,7 +5,9 @@ import { api } from '../lib/api'
 const view = ref({ fusion: [], generatedAt: '' })
 const loading = ref(true)
 onMounted(async () => {
-  view.value = await api.get('/api/v1/hot/fusion')
+  // 后端返回 { generatedAt, pairs }（契约见 /api/v1/hot/fusion）
+  const d = await api.get('/api/v1/hot/fusion')
+  view.value = { fusion: d.pairs || [], generatedAt: d.generatedAt || '' }
   loading.value = false
 })
 </script>

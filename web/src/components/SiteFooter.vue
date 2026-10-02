@@ -9,12 +9,14 @@ onMounted(() => {
   if (window.Typed && window.jinrishici && window.jinrishici.load) {
     window.jinrishici.load((result) => {
       const content = result && result.data && result.data.content
-      if (content) {
-        new window.Typed('#footer-type-tips', {
+      // 回调是异步的：直接传元素引用并二次校验，避免路由切换后选择器落空
+      const tips = document.getElementById('footer-type-tips')
+      if (content && tips && window.Typed) {
+        new window.Typed(tips, {
           strings: [content], startDelay: 300, typeSpeed: 150, loop: true, backSpeed: 70
         })
-      } else {
-        el.textContent = '数据与诗，都在这里相遇'
+      } else if (tips) {
+        tips.textContent = content || '数据与诗，都在这里相遇'
       }
     })
   } else {

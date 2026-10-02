@@ -14,7 +14,7 @@ onMounted(() => {
 <template>
   <header class="post-bg" id="page-header">
     <div id="post-info">
-      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">小物</router-link></div></div>
+      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">站点</router-link></div></div>
       <h1 class="post-title">小空调</h1>
       <div id="post-meta"><div class="meta-firstline">
         <span class="post-meta-label">天热了，进来吹会儿空调～</span>

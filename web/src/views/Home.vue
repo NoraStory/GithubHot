@@ -170,6 +170,14 @@ onMounted(async () => {
   // 自定义音乐播放器（music-index 改造版）与 peoplecanvas 画布挂载同步
   bootPeopleCanvas()
   setTimeout(() => document.dispatchEvent(new Event('pjax:complete')), 120)
+  // 背景视频加载器（index_media.js）：仅首页有 #home-media-container 时注入，避免其他页面报错
+  if (document.getElementById('home-media-container') && !window.__indexMediaLoaded) {
+    window.__indexMediaLoaded = true
+    const s = document.createElement('script')
+    s.src = '/anzhiyu/js/index_media.js'
+    s.async = true
+    document.body.appendChild(s)
+  }
   // 小板报欢迎语（参考站 welcome.js 改造版：本地时间问候，不依赖第三方 IP 接口）
   const sayhi = document.getElementById('author-info__sayhi')
   if (sayhi) sayhi.textContent = greeting()
@@ -253,16 +261,16 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
 
         <div v-for="d in paged" :key="d.date" class="recent-post-item fade-up" @click="router.push(`/digest/${d.date}`)">
           <div class="post_cover left">
-            <a :href="`/digest/${d.date}`" :title="d.date">
+            <router-link :to="`/digest/${d.date}`" :title="d.date">
               <img class="post_bg" :src="coverOf(d.date)" alt="cover" style="pointer-events: none">
-            </a>
+            </router-link>
           </div>
           <div class="recent-post-info">
             <div class="recent-post-info-top">
               <div class="recent-post-info-top-tips">
                 <div class="article-categories-original">{{ d.kind === 'weekly' ? '周报' : d.kind === 'monthly' ? '月报' : '日报' }}</div>
               </div>
-              <a class="article-title" :href="`/digest/${d.date}`" :title="d.date">{{ d.date }} 双热点报告</a>
+              <router-link class="article-title" :to="`/digest/${d.date}`" :title="d.date">{{ d.date }} 双热点报告</router-link>
             </div>
             <div class="article-meta-wrap">
               <span class="post-meta-date">

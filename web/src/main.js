@@ -18,6 +18,10 @@ import Music from './views/Music.vue'
 import AirConditioner from './views/AirConditioner.vue'
 import Privacy from './views/Privacy.vue'
 import Listing from './views/Listing.vue'
+import Archives from './views/Archives.vue'
+import TagCloud from './views/TagCloud.vue'
+import Link from './views/Link.vue'
+import Charts from './views/Charts.vue'
 import AdminLayout from './admin/AdminLayout.vue'
 import AdminLogin from './admin/AdminLogin.vue'
 import AdminUsage from './admin/AdminUsage.vue'
@@ -46,6 +50,11 @@ const router = createRouter({
     { path: '/music', component: Music },
     { path: '/air-conditioner', component: AirConditioner },
     { path: '/privacy', component: Privacy },
+    { path: '/archives', component: Archives },
+    { path: '/categories', component: TagCloud, props: { mode: 'categories' } },
+    { path: '/tags', component: TagCloud, props: { mode: 'tags' } },
+    { path: '/link', component: Link },
+    { path: '/charts', component: Charts },
     { path: '/categories/:name', component: Listing },
     { path: '/tags/:name', component: Listing },
     { path: '/archives/:year/:month', component: Listing },
@@ -75,12 +84,6 @@ router.beforeEach((to) => {
   if (to.path.startsWith('/admin') && to.path !== '/admin/login' && !getToken()) {
     return { path: '/admin/login', query: { redirect: to.fullPath } }
   }
-})
-
-// 页面切换淡入
-router.afterEach(() => {
-  document.documentElement.classList.add('page-switching')
-  setTimeout(() => document.documentElement.classList.remove('page-switching'), 60)
 })
 
 createApp(App).use(router).mount('#app')

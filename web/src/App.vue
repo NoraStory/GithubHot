@@ -711,11 +711,9 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
     </div>
   </div>
 
-  <router-view v-slot="{ Component }">
-    <transition name="page" mode="out-in">
-      <component :is="Component" :key="$route.fullPath" />
-    </transition>
-  </router-view>
+  <!-- 直接渲染路由组件：多根节点组件不能放在 <transition mode="out-in"> 里，
+       否则 SPA 跳转后新组件无法挂载（生产构建下过渡卡死，页面空白） -->
+  <router-view />
 
   <SiteFooter v-if="!$route.path.startsWith('/admin')" />
 </template>
@@ -770,10 +768,6 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
 #categoryBar #catalog-list::-webkit-scrollbar { display: none; }
 #categoryBar .catalog-more { margin-left: auto; padding: 0 .5rem; }
 #categoryBar .catalog-list-item.selected a { background: var(--anzhiyu-theme); color: var(--anzhiyu-white); }
-
-.page-enter-active, .page-leave-active { transition: opacity 0.3s, transform 0.3s; }
-.page-enter-from { opacity: 0; transform: translateY(12px); }
-.page-leave-to { opacity: 0; transform: translateY(-8px); }
 
 /* 单栏/双栏切换（html.hide-aside：隐藏侧边栏、放宽主栏；与主题 .layout.hide-aside 行为一致） */
 html.hide-aside #aside-content { display: none; }
