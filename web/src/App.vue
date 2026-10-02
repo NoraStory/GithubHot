@@ -775,10 +775,24 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
 html.hide-aside #aside-content { display: none; }
 html.hide-aside .layout { max-width: 1000px; }
 
-/* ===== 导航栏：昼夜两套都保证可读（不透明底 + 毛玻璃 + 分隔线），组件间距放宽 ===== */
-#nav { background: var(--anzhiyu-background); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); border-bottom: 1px solid var(--anzhiyu-card-border); }
-html[data-theme="dark"] #nav { background: rgba(24, 23, 29, 0.9); }
-#nav .site-page, #nav a, #nav #nav-right .nav-button { color: var(--anzhiyu-fontcolor); }
+/* ===== 导航栏：昼夜两套都保证可读（不透明底 + 毛玻璃 + 分隔线），组件间距放宽 =====
+   主题把 #page-header #nav 强制透明（!important），首页盖在老电影上文字是白色，
+   白天模式完全看不清——这里用同优先级 !important 后加载覆盖，统一为毛玻璃导航。 */
+#nav, #page-header #nav {
+  background: var(--anzhiyu-background) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px) !important;
+  backdrop-filter: saturate(180%) blur(20px) !important;
+  border-bottom: 1px solid var(--anzhiyu-card-border) !important;
+  box-shadow: none !important;
+}
+html[data-theme="dark"] #nav, html[data-theme="dark"] #page-header #nav { background: rgba(24, 23, 29, 0.9) !important; }
+#blog_name a, #nav #menus a, #nav #nav-right #toggle-menu a, #nav #nav-right .nav-button a, #nav .mask-name-container a,
+#nav #blog_name .back-home-button,
+#nav #site-name, #nav #site-name .site-name-text,
+#nav .site-page, #nav #nav-right .nav-button, #nav #nav-right #percent {
+  color: var(--anzhiyu-fontcolor) !important;
+  text-shadow: none !important;
+}
 #nav #nav-group { gap: 22px; }
 #nav #nav-right { gap: 14px; }
 #nav #nav-right .nav-button { margin: 0 2px; }
