@@ -20,4 +20,14 @@ type Repository interface {
 	LinkProjects(ctx context.Context, storyID string, fullNames []string) error
 	// SaveOverview 写入事件综述。
 	SaveOverview(ctx context.Context, storyID string, overview string) error
+	// SetManual 设置/取消人工锁定。
+	SetManual(ctx context.Context, storyID string, manual bool) error
+	// HotnessHistory 事件热度历史（升序，用于详情页）。
+	HotnessHistory(ctx context.Context, storyID string, limit int) ([]HotnessPoint, error)
+}
+
+// HotnessPoint 热度历史点。
+type HotnessPoint struct {
+	At      time.Time `json:"at"`
+	Hotness float64   `json:"hotness"`
 }

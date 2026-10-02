@@ -87,7 +87,19 @@ func DefaultSources(now time.Time) []source.Source {
 		CreatedAt:       now,
 	}
 
-	return append(rss, hn, ghSearch, ghTrend)
+	scriptPush := source.Source{
+		ID:              "script-push",
+		Name:            "脚本推送（CLI/API 写入）",
+		Kind:            source.KindScript,
+		Config:          map[string]string{},
+		Tier:            source.TierFirstParty,
+		Tags:            []string{"自有"},
+		IntervalMinutes: 1440,
+		Enabled:         true,
+		CreatedAt:       now,
+	}
+
+	return append(rss, hn, ghSearch, ghTrend, scriptPush)
 }
 
 // SeedSources 首次运行时把默认信源导入仓储；已存在的 ID 不覆盖（用户改过就尊重用户）。

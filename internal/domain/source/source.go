@@ -18,6 +18,7 @@ const (
 	KindHackerNews     Kind = "hacker_news"
 	KindGitHubSearch   Kind = "github_search"
 	KindGitHubTrending Kind = "github_trending"
+	KindScript         Kind = "script"
 	KindXAccount       Kind = "x_account"
 	KindWechatOA       Kind = "wechat_oa"
 )
@@ -25,7 +26,7 @@ const (
 // Implemented 报告某信源种类是否随仓库附带适配器。
 func (k Kind) Implemented() bool {
 	switch k {
-	case KindRSS, KindJSONAPI, KindWebList, KindHackerNews, KindGitHubSearch, KindGitHubTrending:
+	case KindRSS, KindJSONAPI, KindWebList, KindHackerNews, KindGitHubSearch, KindGitHubTrending, KindScript:
 		return true
 	default:
 		return false
@@ -65,10 +66,39 @@ type Source struct {
 	Config          map[string]string
 	Tier            Tier
 	Tags            []string
-	IntervalMinutes int
-	Enabled         bool
-	CreatedAt       time.Time
-	LastFetchedAt   *time.Time
+	IntervalMinutes int // 基准抓取间隔
+	// 自适应间隔（按产出自适应，AIHOT 同款思路）：空手而归指数退避，
+	// 有产出回落基准。0 = 尚未自适应，沿用基准。
+	CurrentIntervalMinutes int
+	EmptyStreak            int
+	Enabled                bool
+	CreatedAt              time.Time
+	LastFetchedAt          *time.Time
+}
+
+// ComputeAdaptive 按产出计算下次间隔：连续空手翻倍（上限 24h），有产出回落基准。
+func ComputeAdaptive(baseMinutes, emptyStreak, inserted int) (interval, streak int) {
+	if inserted > 0 {
+		return baseMinutes, 0
+	}
+	s := emptyStreak + 1
+	shift := s
+	if shift > 4 {
+		shift = 4
+	}
+	iv := baseMinutes << shift
+	if iv > 1440 {
+		iv = 1440
+	}
+	return iv, s
+}
+
+// effectiveInterval 当前生效间隔。
+func (s *Source) effectiveInterval() int {
+	if s.CurrentIntervalMinutes > 0 {
+		return s.CurrentIntervalMinutes
+	}
+	return s.IntervalMinutes
 }
 
 // Validate 检查信源不变量。
@@ -85,8 +115,7 @@ func (s *Source) Validate() error {
 	return nil
 }
 
-// DueForFetch 报告按抓取间隔该信源是否到期。
-// 抓取间隔按产出自动调整的策略在应用层，这里只做基础判断。
+// DueForFetch 报告按（自适应）抓取间隔该信源是否到期。
 func (s *Source) DueForFetch(now time.Time) bool {
 	if !s.Enabled {
 		return false
@@ -94,7 +123,7 @@ func (s *Source) DueForFetch(now time.Time) bool {
 	if s.LastFetchedAt == nil {
 		return true
 	}
-	return now.Sub(*s.LastFetchedAt) >= time.Duration(s.IntervalMinutes)*time.Minute
+	return now.Sub(*s.LastFetchedAt) >= time.Duration(s.effectiveInterval())*time.Minute
 }
 
 // ConfigValue 取配置项，缺省返回 fallback。

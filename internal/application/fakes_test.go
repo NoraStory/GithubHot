@@ -335,6 +335,26 @@ func (m *memStories) SaveOverview(_ context.Context, storyID string, overview st
 	return nil
 }
 
+func (m *memStories) SetManual(_ context.Context, storyID string, manual bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s, ok := m.m[storyID]; ok {
+		s.Manual = manual
+	}
+	return nil
+}
+
+func (m *memStories) HotnessHistory(_ context.Context, storyID string, limit int) ([]story.HotnessPoint, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rows := m.hist[storyID]
+	out := make([]story.HotnessPoint, 0, len(rows))
+	for i := len(rows) - 1; i >= 0 && len(out) < limit; i-- {
+		out = append(out, story.HotnessPoint{At: rows[i].at, Hotness: rows[i].hotness})
+	}
+	return out, nil
+}
+
 func (m *memStories) LinkProjects(_ context.Context, storyID string, fullNames []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -567,6 +587,10 @@ func (fakeSiteRenderer) RenderConsole(_ context.Context, _ ConsoleView) (string,
 
 func (fakeSiteRenderer) RenderSearch(_ context.Context, _ SearchView) (string, error) {
 	return "<html>search</html>", nil
+}
+
+func (fakeSiteRenderer) RenderStory(_ context.Context, _ StoryDetailView) (string, error) {
+	return "<html>story</html>", nil
 }
 
 type fixedClock struct{ t time.Time }

@@ -36,8 +36,8 @@ func CollectSources(ctx context.Context, d Deps, workers int) (CollectStats, err
 	var due []source.Source
 	for _, s := range all {
 		// github_search / github_trending 由 DiscoverProjects 双轨发现处理，
-		// 不走通用抓取器（它们没有 RSS 式的 FetchedItem 产出）
-		if s.Kind == source.KindGitHubSearch || s.Kind == source.KindGitHubTrending {
+		// script 由 push 接口直接写入——都不走通用抓取器
+		if s.Kind == source.KindGitHubSearch || s.Kind == source.KindGitHubTrending || s.Kind == source.KindScript {
 			continue
 		}
 		if s.DueForFetch(now) {
@@ -60,6 +60,16 @@ func CollectSources(ctx context.Context, d Deps, workers int) (CollectStats, err
 			defer func() { <-sem }()
 
 			inserted, dupes, ferr := collectOne(ctx, d, s, now)
+			// 自适应抓取间隔（AIHOT 同款）：按产出推进，失败按 0 产出退避
+			if ar, ok := d.Sources.(source.AdaptiveRepository); ok {
+				insertedForAdaptive := inserted
+				if ferr != nil {
+					insertedForAdaptive = 0
+				}
+				if aerr := ar.UpdateFetchStats(ctx, s.ID, insertedForAdaptive, s.IntervalMinutes, now); aerr != nil {
+					log.Printf("[collect] 自适应更新失败 %s: %v", s.ID, aerr)
+				}
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			stats.Inserted += inserted

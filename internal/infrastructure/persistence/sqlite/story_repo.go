@@ -24,10 +24,40 @@ func (r *StoryRepo) Save(ctx context.Context, s *story.Story) error {
 	}
 	projects, _ := json.Marshal(s.Projects)
 	_, err = r.db.ExecContext(ctx,
-		"INSERT INTO stories (id, kind, title_zh, summary_zh, url, overview, members, projects, hotness, first_seen_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, title_zh = excluded.title_zh, summary_zh = excluded.summary_zh, url = excluded.url, overview = excluded.overview, members = excluded.members, projects = excluded.projects, hotness = excluded.hotness, updated_at = excluded.updated_at",
-		s.ID, string(s.Kind), s.TitleZh, s.SummaryZh, s.URL, s.Overview, string(members), string(projects), s.Hotness, rfc(s.FirstSeenAt), rfc(s.UpdatedAt),
+		"INSERT INTO stories (id, kind, title_zh, summary_zh, url, overview, manual, members, projects, hotness, first_seen_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, title_zh = excluded.title_zh, summary_zh = excluded.summary_zh, url = excluded.url, overview = excluded.overview, manual = excluded.manual, members = excluded.members, projects = excluded.projects, hotness = excluded.hotness, updated_at = excluded.updated_at",
+		s.ID, string(s.Kind), s.TitleZh, s.SummaryZh, s.URL, s.Overview, boolInt(s.Manual), string(members), string(projects), s.Hotness, rfc(s.FirstSeenAt), rfc(s.UpdatedAt),
 	)
 	return err
+}
+
+// SetManual 设置/取消人工锁定。
+func (r *StoryRepo) SetManual(ctx context.Context, storyID string, manual bool) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE stories SET manual = ? WHERE id = ?", boolInt(manual), storyID)
+	return err
+}
+
+// HotnessHistory 事件热度历史（升序）。
+func (r *StoryRepo) HotnessHistory(ctx context.Context, storyID string, limit int) ([]story.HotnessPoint, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT at, hotness FROM story_history WHERE story_id = ? ORDER BY at DESC LIMIT ?", storyID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []story.HotnessPoint
+	for rows.Next() {
+		var p story.HotnessPoint
+		if err := rows.Scan(&p.At, &p.Hotness); err != nil {
+			return nil, err
+		}
+		p.At = parseTime(p.At.Format(time.RFC3339))
+		out = append(out, p)
+	}
+	// 反转为升序
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, rows.Err()
 }
 
 // SaveOverview 写入事件综述。
@@ -39,14 +69,14 @@ func (r *StoryRepo) SaveOverview(ctx context.Context, storyID string, overview s
 // FindByID 按ID查事件。
 func (r *StoryRepo) FindByID(ctx context.Context, id string) (*story.Story, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, kind, title_zh, summary_zh, url, COALESCE(overview, ''), members, projects, hotness, first_seen_at, updated_at FROM stories WHERE id = ?", id)
+		"SELECT id, kind, title_zh, summary_zh, url, COALESCE(overview, ''), COALESCE(manual, 0), members, projects, hotness, first_seen_at, updated_at FROM stories WHERE id = ?", id)
 	return scanStory(row)
 }
 
 // Active 指定时间之后仍有活跃成员的事件（粗过滤，精确窗口在领域服务里算）。
 func (r *StoryRepo) Active(ctx context.Context, since time.Time) ([]*story.Story, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, kind, title_zh, summary_zh, url, COALESCE(overview, ''), members, projects, hotness, first_seen_at, updated_at FROM stories WHERE updated_at >= ? OR first_seen_at >= ? ORDER BY hotness DESC",
+		"SELECT id, kind, title_zh, summary_zh, url, COALESCE(overview, ''), COALESCE(manual, 0), members, projects, hotness, first_seen_at, updated_at FROM stories WHERE updated_at >= ? OR first_seen_at >= ? ORDER BY hotness DESC",
 		rfc(since), rfc(since))
 	if err != nil {
 		return nil, err
@@ -117,10 +147,12 @@ func (r *StoryRepo) LinkProjects(ctx context.Context, storyID string, fullNames 
 func scanStory(rs rowScanner) (*story.Story, error) {
 	var s story.Story
 	var kind, members, projects string
+	var manual int
 	var first, updated string
-	if err := rs.Scan(&s.ID, &kind, &s.TitleZh, &s.SummaryZh, &s.URL, &s.Overview, &members, &projects, &s.Hotness, &first, &updated); err != nil {
+	if err := rs.Scan(&s.ID, &kind, &s.TitleZh, &s.SummaryZh, &s.URL, &s.Overview, &manual, &members, &projects, &s.Hotness, &first, &updated); err != nil {
 		return nil, err
 	}
+	s.Manual = manual == 1
 	s.Kind = story.Kind(kind)
 	_ = json.Unmarshal([]byte(members), &s.Members)
 	_ = json.Unmarshal([]byte(projects), &s.Projects)

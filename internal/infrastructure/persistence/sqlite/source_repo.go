@@ -37,7 +37,7 @@ func (r *SourceRepo) Save(ctx context.Context, s source.Source) error {
 // All 全部信源。
 func (r *SourceRepo) All(ctx context.Context) ([]source.Source, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, kind, config, tier, tags, interval_minutes, enabled, created_at, last_fetched_at FROM sources ORDER BY id")
+		"SELECT id, name, kind, config, tier, tags, interval_minutes, enabled, created_at, last_fetched_at, COALESCE(current_interval_minutes, 0), COALESCE(empty_streak, 0) FROM sources ORDER BY id")
 	if err != nil {
 		return nil, fmt.Errorf("查询信源: %w", err)
 	}
@@ -56,7 +56,7 @@ func (r *SourceRepo) All(ctx context.Context) ([]source.Source, error) {
 // FindByID 按 ID 查信源，不存在返回 sql.ErrNoRows。
 func (r *SourceRepo) FindByID(ctx context.Context, id string) (source.Source, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, name, kind, config, tier, tags, interval_minutes, enabled, created_at, last_fetched_at FROM sources WHERE id = ?", id)
+		"SELECT id, name, kind, config, tier, tags, interval_minutes, enabled, created_at, last_fetched_at, COALESCE(current_interval_minutes, 0), COALESCE(empty_streak, 0) FROM sources WHERE id = ?", id)
 	return scanSource(row)
 }
 
@@ -66,16 +66,40 @@ func (r *SourceRepo) MarkFetched(ctx context.Context, id string, at time.Time) e
 	return err
 }
 
+// UpdateFetchStats 记录抓取结果并推进自适应间隔。
+func (r *SourceRepo) UpdateFetchStats(ctx context.Context, id string, inserted, baseIntervalMinutes int, at time.Time) error {
+	interval, streak := source.ComputeAdaptive(baseIntervalMinutes, 0, inserted)
+	// 读当前 streak 推进（单连接串行化下无竞态）
+	var cur int
+	if err := r.db.QueryRowContext(ctx, "SELECT COALESCE(empty_streak, 0) FROM sources WHERE id = ?", id).Scan(&cur); err == nil {
+		interval, streak = source.ComputeAdaptive(baseIntervalMinutes, cur, inserted)
+	}
+	if _, err := r.db.ExecContext(ctx,
+		"UPDATE sources SET last_fetched_at = ?, current_interval_minutes = ?, empty_streak = ? WHERE id = ?",
+		rfc(at), interval, streak, id); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Delete 删除信源。
+func (r *SourceRepo) Delete(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM sources WHERE id = ?", id)
+	return err
+}
+
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanSource(rs rowScanner) (source.Source, error) {
 	var s source.Source
 	var kind, tier, cfg, tags string
-	var enabled int
+	var enabled, curInterval, emptyStreak int
 	var created, lastFetched string
-	if err := rs.Scan(&s.ID, &s.Name, &kind, &cfg, &tier, &tags, &s.IntervalMinutes, &enabled, &created, &lastFetched); err != nil {
+	if err := rs.Scan(&s.ID, &s.Name, &kind, &cfg, &tier, &tags, &s.IntervalMinutes, &enabled, &created, &lastFetched, &curInterval, &emptyStreak); err != nil {
 		return s, err
 	}
+	s.CurrentIntervalMinutes = curInterval
+	s.EmptyStreak = emptyStreak
 	s.Kind = source.Kind(kind)
 	s.Tier = source.Tier(tier)
 	s.Enabled = enabled == 1
@@ -101,5 +125,6 @@ func boolInt(b bool) int {
 
 // 接口满足性检查。
 var _ source.Repository = (*SourceRepo)(nil)
+var _ source.AdaptiveRepository = (*SourceRepo)(nil)
 
 var _ = sql.ErrNoRows

@@ -50,6 +50,9 @@ func ClusterIntoStories(ctx context.Context, d Deps) (ClusterStats, error) {
 	}
 	stories := map[string]*story.Story{}
 	for _, s := range active {
+		if s.Manual {
+			continue // 人工锁定的事件不参与自动聚簇（AIHOT 同款保护）
+		}
 		cp := s
 		stories[cp.ID] = cp
 	}

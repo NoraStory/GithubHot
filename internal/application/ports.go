@@ -92,6 +92,8 @@ type SiteRenderer interface {
 	RenderConsole(ctx context.Context, v ConsoleView) (string, error)
 	// RenderSearch 搜索结果页。
 	RenderSearch(ctx context.Context, v SearchView) (string, error)
+	// RenderStory 事件详情页。
+	RenderStory(ctx context.Context, v StoryDetailView) (string, error)
 }
 
 // RunRow 一次流水线运行记录（展示行）。
@@ -120,13 +122,14 @@ type DiagRow struct {
 
 // SourceInfo 信源信息（控制台展示行）。
 type SourceInfo struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Kind    string   `json:"kind"`
-	Tier    string   `json:"tier"`
-	Tags    []string `json:"tags"`
-	Enabled bool     `json:"enabled"`
-	Adapter string   `json:"adapter"`
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Kind    string            `json:"kind"`
+	Tier    string            `json:"tier"`
+	Tags    []string          `json:"tags"`
+	Enabled bool              `json:"enabled"`
+	Adapter string            `json:"adapter"`
+	Config  map[string]string `json:"config,omitempty"`
 }
 
 // ConsoleView 控制台视图。
@@ -139,6 +142,8 @@ type ConsoleView struct {
 	Sources      []SourceInfo
 	SourcesCount int
 	Digests      []DigestMeta
+	// SourcesJSON 信源 JSON（管理界面前端脚本用）。
+	SourcesJSON string
 }
 
 // DigestMeta 期号元信息。
@@ -225,6 +230,11 @@ type HotView struct {
 	Digests   []DigestMeta `json:"digests"`
 }
 
+// Notifier 通知端口（日报/失败告警推送，webhook 实现）。
+type Notifier interface {
+	Notify(ctx context.Context, title, text string) error
+}
+
 // Deps 应用层依赖的最小端口集合（全部在领域层或上方声明，基础设施层实现）。
 type Deps struct {
 	Sources        source.Repository
@@ -237,6 +247,7 @@ type Deps struct {
 	LLM            LLMGateway
 	GitHub         GitHubGateway
 	Fetchers       FetcherRegistry
+	Notifier       Notifier
 	DigestRenderer DigestRenderer
 	SiteRenderer   SiteRenderer
 	Clock          shared.Clock

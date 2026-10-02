@@ -40,6 +40,8 @@ func (s *Server) Router() http.Handler {
 	})
 	r.Get("/console", s.consolePage)
 	r.Get("/search", s.searchPage)
+	r.Get("/story/{id}", s.storyPage)
+	r.Get("/llms.txt", s.llmsTxt)
 
 	// RSS 输出：同一份内容给订阅器和 Agent 用
 	r.Get("/feed/news.xml", s.feedNews)
@@ -55,6 +57,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/digest/{date}", s.digestByDate)
 		r.Get("/sources", s.sources)
 		r.Get("/search", s.searchAPI)
+		r.Get("/agent/hot.md", s.agentMD)
+		r.Get("/story/{id}", s.storyAPI)
+		s.registerAdminRoutes(r)
 		// 控制台数据（APP/运维消费）
 		r.Get("/admin/usage", s.usageAPI)
 		r.Get("/admin/diagnostics", s.diagnosticsAPI)
@@ -162,7 +167,7 @@ func (s *Server) sourceInfos() []SourceInfoDTO {
 		}
 		out = append(out, SourceInfoDTO{
 			ID: src.ID, Name: src.Name, Kind: string(src.Kind), Tier: string(src.Tier),
-			Tags: src.Tags, Enabled: src.Enabled, Adapter: adapter,
+			Tags: src.Tags, Enabled: src.Enabled, Adapter: adapter, Config: src.Config,
 		})
 	}
 	return out
@@ -170,13 +175,14 @@ func (s *Server) sourceInfos() []SourceInfoDTO {
 
 // SourceInfoDTO 信源展示行。
 type SourceInfoDTO struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Kind    string   `json:"kind"`
-	Tier    string   `json:"tier"`
-	Tags    []string `json:"tags"`
-	Enabled bool     `json:"enabled"`
-	Adapter string   `json:"adapter"`
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Kind    string            `json:"kind"`
+	Tier    string            `json:"tier"`
+	Tags    []string          `json:"tags"`
+	Enabled bool              `json:"enabled"`
+	Adapter string            `json:"adapter"`
+	Config  map[string]string `json:"config,omitempty"`
 }
 
 // ---------- 搜索 ----------
@@ -265,9 +271,13 @@ func (s *Server) buildConsole(r *http.Request) (application.ConsoleView, error) 
 		v.Sources = append(v.Sources, application.SourceInfo{
 			ID: src.ID, Name: src.Name, Kind: src.Kind, Tier: src.Tier,
 			Tags: src.Tags, Enabled: src.Enabled, Adapter: src.Adapter,
+			Config: src.Config,
 		})
 	}
 	v.SourcesCount = len(v.Sources)
+	if data, err := json.Marshal(v.Sources); err == nil {
+		v.SourcesJSON = string(data)
+	}
 	for _, kind := range []string{"daily", "weekly", "monthly"} {
 		if dg, err := s.Deps.Digests.Latest(ctx, digest.Kind(kind)); err == nil && dg != nil {
 			v.Digests = append(v.Digests, application.DigestMeta{Date: dg.Date, Kind: string(dg.Kind)})

@@ -66,6 +66,8 @@ go build -o githubhot ./cmd/githubhot
 | `LLM_THINKING` | | `disabled` 关闭推理模型深度思考（提速约 5 倍） |
 | `LLM_BUDGET_TOKENS_PER_DAY` | | 每日 Token 预算，超限自动熔断 LLM 阶段（0=不熔断） |
 | `LLM_PRICE_IN_PER_M` / `LLM_PRICE_OUT_PER_M` | | 每百万 token 单价，仅用于成本估算展示 |
+| `NOTIFY_WEBHOOK_URL` | | 日报/失败告警 webhook；格式 `NOTIFY_WEBHOOK_FORMAT` = raw / feishu / wecom |
+| `ADMIN_TOKEN` | | 设置后信源增删/推送等管理接口需带 `X-Admin-Token` 头 |
 | `GITHUB_TOKEN` | 建议 | 无 token 限 60 次/小时；配置后 5000 次/小时 |
 | `DATA_DIR` | | 数据目录，默认 `./data` |
 | `PORT` | | serve 端口，默认 `8787` |
@@ -142,9 +144,31 @@ REST API 即契约（`/api/v1/*`，JSON，CORS 白名单可配）：
 | `GET /api/v1/digest/latest` | 最新日报（`?format=raw` 取 Markdown） |
 | `GET /api/v1/digest/{date}` | 指定日期日报 |
 | `GET /api/v1/sources` | 信源清单与适配器状态 |
+| `GET /api/v1/story/{id}` | 事件详情（成员/关联项目/热度历史） |
+| `GET /api/v1/search?q=` | 站内搜索 |
+| `GET /api/v1/agent/hot.md` | 双榜 Markdown（Agent 消费） |
+| `GET /llms.txt` | 站点说明（llms.txt 约定） |
+| `POST /api/v1/admin/sources` 等 | 信源管理（增删/试抓/推送/事件锁定，可选 `ADMIN_TOKEN`） |
 | `GET /healthz` | 健康检查 |
 
 Flutter / Kotlin / Swift 客户端直接消费以上端点；领域层也可经 gomobile 编译为移动端库复用。
+
+## MCP / 脚本推送 / 精选校准
+
+```bash
+# MCP 服务器（stdio JSON-RPC）：接入 Claude 等 Agent 客户端
+githubhot mcp        # 工具：hot_github / hot_news / hot_fusion / search / latest_digest
+
+# 脚本推送（AIHOT 的 script 信源）：外部采集脚本直接写入
+githubhot push --source script-push --url https://... --title 标题 --summary 摘要
+
+# SelectBench 精选校准：用标注样本回测预筛提示词（精确率/召回率/F1）
+githubhot bench --file data/gold.jsonl   # 每行 {"text":"...","label":"pass|drop"}
+```
+
+信源抓取间隔**按产出自适应**：连续空手而归指数退避（上限 24h），有产出回落基准。
+信源 config 设 `fulltext: "1"` 可抓取文章正文（供 LLM 写作参考）。
+事件页 `/story/{id}` 展示综述、成员报道、关联项目与热度走势；控制台可**人工锁定事件**（锁定后聚簇不再自动合并——AIHOT 同款保护）。
 
 ## 换成你的行业
 

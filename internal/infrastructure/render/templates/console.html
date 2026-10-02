@@ -94,10 +94,67 @@
     <table><tbody>{{DIGESTS}}</tbody></table>
   </div>
 
-  <h2>📡 信源</h2>
+  <h2>📡 信源（{{SOURCES_COUNT}}）</h2>
   <div class="card">
     <table><tbody>{{SOURCES}}</tbody></table>
   </div>
+
+  <h2>🛠 信源管理</h2>
+  <div class="card">
+    <div class="desc" style="margin-bottom:8px">变更类操作的可选鉴权：服务器设置 <code>ADMIN_TOKEN</code> 后，此处需填写同一令牌（本地默认关闭鉴权）</div>
+    <input id="adminToken" placeholder="ADMIN_TOKEN（未设置可留空）" style="width:320px">
+    <button onclick="testAdmin()">测试令牌</button>
+    <div id="srcMsg" class="desc" style="margin:8px 0"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <input id="nsId" placeholder="id（如 rss-xxx）" style="flex:1;min-width:140px">
+      <input id="nsName" placeholder="名称" style="flex:1;min-width:140px">
+      <select id="nsKind"><option value="rss">rss</option><option value="json_api">json_api</option><option value="web_list">web_list</option><option value="hacker_news">hacker_news</option><option value="github_search">github_search</option><option value="github_trending">github_trending</option><option value="script">script</option></select>
+      <select id="nsTier"><option value="T1">T1 官方</option><option value="T2" selected>T2 媒体</option></select>
+      <input id="nsUrl" placeholder="URL（feed/接口/页面）" style="flex:2;min-width:200px">
+      <button onclick="addSource()">新增/更新</button>
+    </div>
+    <table>
+      <thead><tr><th>ID</th><th>名称</th><th>操作</th></tr></thead>
+      <tbody id="srcRows"></tbody>
+    </table>
+  </div>
+  <script>
+    var SOURCES = {{SOURCES_JSON}};
+    function token() { return document.getElementById('adminToken').value || ''; }
+    function msg(t) { document.getElementById('srcMsg').textContent = t; }
+    function api(method, path, body) {
+      return fetch(path, { method: method, headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token() }, body: body ? JSON.stringify(body) : undefined })
+        .then(function (r) { return r.json().then(function (j) { if (!j.ok && j.error) { throw new Error(j.error); } return j; }); });
+    }
+    function testAdmin() { msg('令牌校验中…'); api('POST', '/api/v1/admin/sources/test', { id: 'ping', name: 'ping', kind: 'rss', url: 'https://example.com/feed.xml' }).then(function () { msg('鉴权通过（或服务端未启用令牌）'); }).catch(function (e) { msg('失败: ' + e.message); }); }
+    function v(id) { return document.getElementById(id).value; }
+    function addSource() {
+      var body = { id: v('nsId'), name: v('nsName') || v('nsId'), kind: v('nsKind'), tier: v('nsTier'), url: v('nsUrl'), intervalMinutes: 120, enabled: true };
+      if (!body.id || !body.url) { msg('id 与 URL 必填'); return; }
+      api('POST', '/api/v1/admin/sources', body).then(function () { msg('已保存：' + body.id); location.reload(); }).catch(function (e) { msg('失败: ' + e.message); });
+    }
+    function delSource(id) { if (!confirm('删除信源 ' + id + '？')) { return; } api('DELETE', '/api/v1/admin/sources/' + encodeURIComponent(id)).then(function () { msg('已删除 ' + id); location.reload(); }).catch(function (e) { msg('失败: ' + e.message); }); }
+    function testSource(id) {
+      var s = (SOURCES || []).filter(function (x) { return x.id === id; })[0] || {};
+      msg('试抓 ' + id + ' …');
+      api('POST', '/api/v1/admin/sources/test', { id: id, name: s.name, kind: s.kind, tier: s.tier, url: (s.config && s.config.url) || '' }).then(function (j) {
+        msg(j.ok ? ('试抓成功，共 ' + j.count + ' 条，预览: ' + (j.preview || []).map(function (p) { return p.title; }).join(' / ')) : ('试抓失败: ' + j.error));
+      }).catch(function (e) { msg('失败: ' + e.message); });
+    }
+    (function renderRows() {
+      var tbody = document.getElementById('srcRows');
+      (SOURCES || []).forEach(function (s) {
+        var tr = document.createElement('tr');
+        var btn1 = document.createElement('button'); btn1.textContent = '试抓'; btn1.onclick = function () { testSource(s.id); };
+        var btn2 = document.createElement('button'); btn2.textContent = '删除'; btn2.onclick = function () { delSource(s.id); };
+        var td1 = document.createElement('td'); td1.innerHTML = '<code>' + s.id + '</code>';
+        var td2 = document.createElement('td'); td2.innerHTML = s.name + '<div class="desc">' + s.kind + ' · ' + s.tier + (s.enabled ? '' : ' · 停用') + '</div>';
+        var td3 = document.createElement('td'); td3.appendChild(btn1); td3.appendChild(document.createTextNode(' ')); td3.appendChild(btn2);
+        tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+        tbody.appendChild(tr);
+      });
+    })();
+  </script>
 
   <footer>
     RSS：<a href="/feed/news.xml">资讯</a> / <a href="/feed/github.xml">项目</a> / <a href="/feed/digest.xml">期刊</a>

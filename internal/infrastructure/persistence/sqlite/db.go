@@ -100,6 +100,9 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE digests ADD COLUMN kind TEXT NOT NULL DEFAULT 'daily'")
 	_, _ = db.Exec("ALTER TABLE stories ADD COLUMN overview TEXT NOT NULL DEFAULT ''")
 	_, _ = db.Exec("ALTER TABLE projects ADD COLUMN description_zh TEXT NOT NULL DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE sources ADD COLUMN current_interval_minutes INTEGER NOT NULL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE sources ADD COLUMN empty_streak INTEGER NOT NULL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE stories ADD COLUMN manual INTEGER NOT NULL DEFAULT 0")
 	return nil
 }
 

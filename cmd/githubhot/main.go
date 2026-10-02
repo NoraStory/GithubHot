@@ -30,6 +30,30 @@ func main() {
 			fmt.Fprintf(os.Stderr, "服务退出: %v\n", err)
 			os.Exit(1)
 		}
+	case "mcp":
+		if err := cli.MCP(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "MCP 退出: %v\n", err)
+			os.Exit(1)
+		}
+	case "bench":
+		// 样本从 stdin 读入：cat gold.jsonl | githubhot bench
+		if err := cli.Bench(cfg, os.Stdin); err != nil {
+			fmt.Fprintf(os.Stderr, "校准失败: %v\n", err)
+			os.Exit(1)
+		}
+	case "push":
+		sourceID := flagArg(os.Args[2:], "--source")
+		rawURL := flagArg(os.Args[2:], "--url")
+		title := flagArg(os.Args[2:], "--title")
+		summary := flagArg(os.Args[2:], "--summary")
+		if sourceID == "" || rawURL == "" || title == "" {
+			fmt.Fprintln(os.Stderr, "用法: githubhot push --source script-push --url https://... --title 标题 [--summary 摘要]")
+			os.Exit(2)
+		}
+		if err := cli.Push(cfg, sourceID, rawURL, title, summary); err != nil {
+			fmt.Fprintf(os.Stderr, "推送失败: %v\n", err)
+			os.Exit(1)
+		}
 	case "version":
 		fmt.Println("GithubHot", cli.Version)
 	default:
@@ -38,12 +62,25 @@ func main() {
 	}
 }
 
+// flagArg 从参数列表取 --key value。
+func flagArg(args []string, key string) string {
+	for i, a := range args {
+		if a == key && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
 func usage() {
 	fmt.Println(`GithubHot — GitHub 开源项目热点 × AI 资讯热点
 
 用法:
   githubhot run      跑一轮完整流水线（采集 → GitHub双轨发现 → LLM精选写作 → 聚簇 → 融合 → 热度 → 日报）
   githubhot serve    启动 API + 双榜页 + 内置定时调度（服务器常驻模式）
+  githubhot mcp      以 stdio MCP 服务器运行（Claude 等 Agent 客户端接入）
+  githubhot bench    SelectBench 精选校准：--file data/gold.jsonl
+  githubhot push     脚本推送资料：--source script-push --url ... --title ...
   githubhot version  版本号
 
 配置: 见 .env.example（LLM_API_KEY 必选；GITHUB_TOKEN 建议配置）`)

@@ -4,10 +4,13 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,9 +20,11 @@ import (
 	"github.com/NoraStory/GithubHot/internal/infrastructure/fetcher"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/githubapi"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/llm"
+	"github.com/NoraStory/GithubHot/internal/infrastructure/notify"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/persistence/sqlite"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/render"
 	"github.com/NoraStory/GithubHot/internal/interfaces/httpapi"
+	"github.com/NoraStory/GithubHot/internal/interfaces/mcp"
 )
 
 // Version 版本号（发布时更新）。
@@ -49,6 +54,7 @@ func build(cfg *config.Config) (application.Deps, *sqlite.DB, error) {
 		Fetchers:       fetcher.NewRegistry(),
 		DigestRenderer: render.NewMarkdown(),
 		SiteRenderer:   render.NewSite(),
+		Notifier:       notify.Webhook{URL: cfg.NotifyWebhookURL, Format: cfg.NotifyWebhookFormat},
 		Clock:          shared.SystemClock{},
 	}
 	if cfg.LLMAPIKey != "" && cfg.LLMBaseURL != "" && cfg.LLMModelA != "" {
@@ -154,6 +160,81 @@ func Serve(cfg *config.Config) error {
 	ctx, stop := signalCtx()
 	defer stop()
 	return httpListen(ctx, addr, srv.Router())
+}
+
+// MCP 启动 stdio MCP 服务器（供 Claude 等 Agent 客户端接入）。
+func MCP(cfg *config.Config) error {
+	deps, db, err := build(cfg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	ctx, stop := signalCtx()
+	defer stop()
+	srv := &mcp.Server{Deps: deps, Version: Version}
+	return srv.Run(ctx)
+}
+
+// Bench SelectBench 精选校准：JSONL 样本从 stdin 读入（无文件路径参数，杜绝路径穿越）。
+// 每行一个 JSON {"text":"...","label":"pass|drop"}。
+func Bench(cfg *config.Config, in io.Reader) error {
+	deps, db, err := build(cfg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return fmt.Errorf("读取样本: %w", err)
+	}
+	var samples []application.SelectBenchSample
+	for i, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		var smp application.SelectBenchSample
+		if err := json.Unmarshal([]byte(line), &smp); err != nil {
+			return fmt.Errorf("样本第 %d 行解析失败: %w", i+1, err)
+		}
+		samples = append(samples, smp)
+	}
+	ctx, cancel := signalCtx()
+	defer cancel()
+	rep, err := application.RunSelectBench(ctx, deps, samples)
+	if err != nil && rep == nil {
+		return err
+	}
+	out, _ := json.MarshalIndent(rep, "", "  ")
+	fmt.Println(string(out))
+	if rep != nil {
+		fmt.Printf("\n精确率 %.1f%% · 召回率 %.1f%% · F1 %.1f%%（样本 %d）\n",
+			rep.Precision*100, rep.Recall*100, rep.F1*100, rep.Total)
+	}
+	return nil
+}
+
+// Push 外部脚本推送一条资料到 script 信源。
+func Push(cfg *config.Config, sourceID, rawURL, title, summary string) error {
+	deps, db, err := build(cfg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	// script-push 信源尚不存在时先种子化
+	if _, serr := deps.Sources.FindByID(context.Background(), sourceID); serr != nil {
+		if _, ierr := application.SeedSources(context.Background(), deps); ierr != nil {
+			return ierr
+		}
+	}
+	ctx, cancel := signalCtx()
+	defer cancel()
+	it, err := application.PushItem(ctx, deps, sourceID, rawURL, title, summary)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("已推送：%s\n  id=%s\n", it.Title, it.ID)
+	return nil
 }
 
 func signalCtx() (context.Context, context.CancelFunc) {

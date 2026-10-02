@@ -12,3 +12,11 @@ type Repository interface {
 	FindByID(ctx context.Context, id string) (Source, error)
 	MarkFetched(ctx context.Context, id string, at time.Time) error
 }
+
+// AdaptiveRepository 自适应与管理的可选仓储扩展。
+type AdaptiveRepository interface {
+	// UpdateFetchStats 记录抓取结果并推进自适应间隔。
+	UpdateFetchStats(ctx context.Context, id string, inserted, baseIntervalMinutes int, at time.Time) error
+	// Delete 删除信源。
+	Delete(ctx context.Context, id string) error
+}

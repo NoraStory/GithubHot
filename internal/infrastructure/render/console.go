@@ -47,8 +47,15 @@ func (Site) RenderConsole(_ context.Context, v application.ConsoleView) (string,
 	out = strings.ReplaceAll(out, "{{STAGE_OPTIONS}}", stageOptionsHTML(v.Stages, v.Stage))
 	out = strings.ReplaceAll(out, "{{DIAGNOSTICS}}", diagRowsHTML(v.Diagnostics))
 	out = strings.ReplaceAll(out, "{{SOURCES}}", sourceRowsHTML(v.Sources))
+	out = strings.ReplaceAll(out, "{{SOURCES_COUNT}}", fmt.Sprint(v.SourcesCount))
+	out = strings.ReplaceAll(out, "{{SOURCES_JSON}}", templateJS(v.SourcesJSON))
 	out = strings.ReplaceAll(out, "{{DIGESTS}}", digestRowsHTML(v.Digests))
 	return out, nil
+}
+
+// templateJS 安全注入 JSON 数据到 <script>（转义 </script>）。
+func templateJS(json string) string {
+	return strings.ReplaceAll(json, "</script>", `<\/script>`)
 }
 
 // Search 搜索结果页。

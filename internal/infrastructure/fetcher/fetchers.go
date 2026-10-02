@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -57,7 +58,54 @@ func (RSS) Fetch(ctx context.Context, s source.Source, _ time.Time) ([]applicati
 			PublishedAt: pub,
 		})
 	}
+	// 全文抓取（site_fulltext 同款能力）：信源 config 配 fulltext=1 时，
+	// 逐条抓原文页面提取正文（上限 fulltext_items 条 / fulltext_chars 字符）
+	if s.ConfigValue("fulltext", "") == "1" {
+		maxItems := s.ConfigInt("fulltext_items", 8)
+		maxChars := s.ConfigInt("fulltext_chars", 6000)
+		limit := maxItems
+		if len(out) < limit {
+			limit = len(out)
+		}
+		for i := 0; i < limit; i++ {
+			ftctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			text := fetchFulltext(ftctx, out[i].URL, maxChars)
+			cancel()
+			if text != "" {
+				out[i].Content = text
+			}
+		}
+	}
 	return out, nil
+}
+
+// fetchFulltext 抓取文章页并提取正文文本（主内容区优先，回退全部段落）。
+func fetchFulltext(ctx context.Context, pageURL string, maxChars int) string {
+	body, status, err := safehttp.Fetch(ctx, pageURL, map[string]string{"Accept": "text/html"})
+	if err != nil || status != 200 {
+		return ""
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return ""
+	}
+	container := doc.Find("article, .post-content, .article-content, .entry-content, main").First()
+	if container.Length() == 0 {
+		container = doc.Find("body")
+	}
+	var parts []string
+	container.Find("p").Each(func(_ int, p *goquery.Selection) {
+		t := strings.TrimSpace(p.Text())
+		if len([]rune(t)) >= 20 {
+			parts = append(parts, t)
+		}
+	})
+	text := strings.Join(parts, "\n")
+	r := []rune(text)
+	if len(r) > maxChars {
+		text = string(r[:maxChars])
+	}
+	return text
 }
 
 func parseFeedTime(ts ...*time.Time) time.Time {
@@ -128,8 +176,9 @@ func (HackerNews) Fetch(ctx context.Context, s source.Source, now time.Time) ([]
 			StoryText   *string `json:"story_text"`
 		} `json:"hits"`
 	}
-	if err := jsonUnmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("解析 HN 响应: %w", err)
+	if err := jsonUnmarshal(body, &resp); err != nil || len(resp.Hits) == 0 {
+		// 降级：部分网络环境下 Algolia 出口返回 HTML 挑战页，改走 HN 官方 Firebase API
+		return fetchHNFirebase(ctx, s, now, since, keywords)
 	}
 	out := make([]application.FetchedItem, 0, 20)
 	seen := map[string]bool{}
@@ -178,6 +227,81 @@ func deref(s *string) string {
 		return ""
 	}
 	return stripHTML(*s)
+}
+
+// fetchHNFirebase HN 官方 Firebase API 降级路径：
+// topstories → 并发拉取条目 → 时间窗 + 关键词过滤。
+func fetchHNFirebase(ctx context.Context, s source.Source, now time.Time, since int64, keywords []string) ([]application.FetchedItem, error) {
+	body, _, err := safehttp.Fetch(ctx, "https://hacker-news.firebaseio.com/v0/topstories.json", map[string]string{"Accept": "application/json"})
+	if err != nil {
+		return nil, fmt.Errorf("HN Firebase 拉取失败: %w", err)
+	}
+	var ids []int64
+	if err := jsonUnmarshal(body, &ids); err != nil {
+		return nil, fmt.Errorf("HN Firebase 响应异常: %w", err)
+	}
+	if len(ids) > 60 {
+		ids = ids[:60]
+	}
+	type hnItem struct {
+		Title       string `json:"title"`
+		URL         string `json:"url"`
+		By          string `json:"by"`
+		Time        int64  `json:"time"`
+		Score       int    `json:"score"`
+		Descendants int    `json:"descendants"`
+	}
+	var (
+		mu    sync.Mutex
+		items []hnItem
+		wg    sync.WaitGroup
+		sem   = make(chan struct{}, 8)
+	)
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id int64) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ictx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			ib, _, err := safehttp.Fetch(ictx, fmt.Sprintf("https://hacker-news.firebaseio.com/v0/item/%d.json", id), nil)
+			if err != nil {
+				return
+			}
+			var it hnItem
+			if jsonUnmarshal(ib, &it) != nil || it.Title == "" || it.URL == "" {
+				return
+			}
+			mu.Lock()
+			items = append(items, it)
+			mu.Unlock()
+		}(id)
+	}
+	wg.Wait()
+
+	out := make([]application.FetchedItem, 0, 20)
+	seen := map[string]bool{}
+	for _, it := range items {
+		if seen[it.URL] {
+			continue
+		}
+		if it.Time > 0 && now.Sub(time.Unix(it.Time, 0)) > time.Duration(s.ConfigInt("hours", 24))*time.Hour {
+			continue
+		}
+		if !matchesKeywords(it.Title, keywords) {
+			continue
+		}
+		seen[it.URL] = true
+		out = append(out, application.FetchedItem{
+			URL:         it.URL,
+			Title:       it.Title,
+			Summary:     fmt.Sprintf("Hacker News 讨论（%d 分 / %d 评论）", it.Score, it.Descendants),
+			Author:      it.By,
+			PublishedAt: time.Unix(it.Time, 0).UTC(),
+		})
+	}
+	return out, nil
 }
 
 // WebList 通用网页列表抓取器（实验性）：config 指定 url 与可选 CSS 选择器。
