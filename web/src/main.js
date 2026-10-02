@@ -29,6 +29,7 @@ const router = createRouter({
     { path: '/story/:id', component: StoryDetail },
     { path: '/search', component: SearchPage },
     { path: '/digests', component: Digests },
+    { path: '/digest/latest', component: DigestDetail, props: { latest: true } },
     { path: '/digest/:date', component: DigestDetail },
     { path: '/about', component: About },
     { path: '/admin/login', component: AdminLogin },
