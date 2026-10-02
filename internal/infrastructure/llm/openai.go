@@ -22,7 +22,14 @@ type EmbedConfig struct {
 	BaseURL string
 	APIKey  string
 	Model   string // 留空 = 不启用向量，聚簇退化为词面相似度
+	// Dimensions 输出维度（MRL 可调表示）。Qwen3-Embedding-8B 最大 4096；
+	// 0 = 使用服务商默认值。
+	Dimensions int
 }
+
+// embedBatchSize 每次 embeddings 请求的最大输入条数。
+// 各服务商批量上限不一（有的低至 16/32），取保守值分批请求。
+const embedBatchSize = 16
 
 // OpenAI 兼容网关。BaseURL 形如 https://api.deepseek.com（自动补 /v1/chat/completions）。
 type OpenAI struct {
@@ -151,47 +158,81 @@ func (o *OpenAI) ChatJSON(ctx context.Context, system, user, model string, tempe
 	return "", fmt.Errorf("LLM 调用重试耗尽: %w", lastErr)
 }
 
+// embedRequest OpenAI 兼容 embeddings 请求体。
+// encoding_format 显式声明为 float——OpenAI 规范默认 base64，
+// 不声明可能拿到 base64 编码而破坏数字数组解析。
+type embedRequest struct {
+	Model          string   `json:"model"`
+	Input          []string `json:"input"`
+	Dimensions     int      `json:"dimensions,omitempty"`
+	EncodingFormat string   `json:"encoding_format"`
+}
+
 // Embed 批量语义向量；未配置向量模型返回 ErrEmbeddingsUnsupported。
-// 端点与 Key 独立于对话端点（EmbedConfig），支持跨服务商混搭。
+// 端点与 Key 独立于对话端点（EmbedConfig），支持跨服务商混搭；
+// 输入按 embedBatchSize 分批，规避服务商批量上限。
 func (o *OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if o.embed.Model == "" {
 		return nil, application.ErrEmbeddingsUnsupported
-	}
-	payload, err := json.Marshal(struct {
-		Model string   `json:"model"`
-		Input []string `json:"input"`
-	}{Model: o.embed.Model, Input: texts})
-	if err != nil {
-		return nil, err
 	}
 	endpoint := o.embedEndpoint()
 	headers := map[string]string{
 		"Content-Type":  "application/json",
 		"Authorization": "Bearer " + o.embed.APIKey,
 	}
-	body, status, err := safehttp.Do(ctx, "POST", endpoint, headers, bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	if status != 200 {
-		return nil, fmt.Errorf("embeddings 返回 %d: %s", status, safeSnippet(body))
-	}
-	var resp struct {
-		Data []struct {
-			Embedding []float32 `json:"embedding"`
-			Index     int       `json:"index"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("解析 embeddings 响应: %w", err)
-	}
-	out := make([][]float32, len(resp.Data))
-	for _, d := range resp.Data {
-		if d.Index >= 0 && d.Index < len(out) {
-			out[d.Index] = d.Embedding
+	out := make([][]float32, 0, len(texts))
+	for _, chunk := range chunkStrings(texts, embedBatchSize) {
+		payload, err := json.Marshal(embedRequest{
+			Model:          o.embed.Model,
+			Input:          chunk,
+			Dimensions:     o.embed.Dimensions,
+			EncodingFormat: "float",
+		})
+		if err != nil {
+			return nil, err
 		}
+		body, status, err := safehttp.Do(ctx, "POST", endpoint, headers, bytes.NewReader(payload))
+		if err != nil {
+			return nil, err
+		}
+		if status != 200 {
+			return nil, fmt.Errorf("embeddings 返回 %d: %s", status, safeSnippet(body))
+		}
+		var resp struct {
+			Data []struct {
+				Embedding []float32 `json:"embedding"`
+				Index     int       `json:"index"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return nil, fmt.Errorf("解析 embeddings 响应: %w", err)
+		}
+		// 按 index 对齐，容忍服务商乱序返回
+		part := make([][]float32, len(chunk))
+		for _, d := range resp.Data {
+			if d.Index >= 0 && d.Index < len(chunk) {
+				part[d.Index] = d.Embedding
+			}
+		}
+		out = append(out, part...)
 	}
 	return out, nil
+}
+
+// chunkStrings 按每批 n 条切分输入（n<=0 时视为 1）。
+func chunkStrings(xs []string, n int) [][]string {
+	if n <= 0 {
+		n = 1
+	}
+	var out [][]string
+	for i := 0; i < len(xs); i += n {
+		end := i + n
+		if end > len(xs) {
+			end = len(xs)
+		}
+		out = append(out, xs[i:end])
+	}
+	return out
 }
 
 // embedEndpoint 向量端点地址（独立于对话端点，可测试）。

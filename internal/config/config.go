@@ -19,6 +19,7 @@ type Config struct {
 	LLMEmbed     string
 	EmbedBaseURL string // 向量端点；留空复用 LLMBaseURL
 	EmbedAPIKey  string // 向量 Key；留空复用 LLMAPIKey
+	EmbedDims    int    // 输出维度；0 = 服务商默认（Qwen3-Embedding-8B 最大 4096）
 	GitHubToken  string
 	CronSpec     string // serve 模式内置调度（cron 表达式，本地时区）
 }
@@ -44,6 +45,7 @@ func Load() (*Config, error) {
 		LLMEmbed:     getEnv("LLM_EMBED_MODEL", ""),
 		EmbedBaseURL: getEnv("LLM_EMBED_BASE_URL", ""),
 		EmbedAPIKey:  getEnv("LLM_EMBED_API_KEY", ""),
+		EmbedDims:    getEnvInt("LLM_EMBED_DIMENSIONS", 0),
 		GitHubToken:  getEnv("GITHUB_TOKEN", ""),
 		CronSpec:     getEnv("HOT_CRON", "30 7 * * *"),
 	}
@@ -63,6 +65,17 @@ func Load() (*Config, error) {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// getEnvInt 整数环境变量；非法或负值回退默认。
+func getEnvInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n >= 0 {
+			return n
+		}
 	}
 	return fallback
 }

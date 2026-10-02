@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -97,5 +98,42 @@ func TestChatEndpointComposition(t *testing.T) {
 	}
 	if !strings.HasSuffix(o.BaseURL, "/api.deepseek.com") {
 		t.Fatalf("末尾斜杠应被去掉: %s", o.BaseURL)
+	}
+}
+
+func TestChunkStrings(t *testing.T) {
+	xs := []string{"a", "b", "c", "d", "e"}
+	chunks := chunkStrings(xs, 2)
+	if len(chunks) != 3 || strings.Join(chunks[0], "") != "ab" ||
+		strings.Join(chunks[1], "") != "cd" || strings.Join(chunks[2], "") != "e" {
+		t.Fatalf("分块错误: %v", chunks)
+	}
+	if got := chunkStrings(nil, 4); len(got) != 0 {
+		t.Fatalf("空输入应无分块: %v", got)
+	}
+	// 恰好整除
+	chunks2 := chunkStrings([]string{"1", "2", "3", "4"}, 2)
+	if len(chunks2) != 2 {
+		t.Fatalf("整除应得 2 块: %v", chunks2)
+	}
+}
+
+func TestEmbedRequestBodyShape(t *testing.T) {
+	// 维度取最大（4096）时请求体应带 dimensions；0 时应省略
+	withDims, err := json.Marshal(embedRequest{
+		Model: "Qwen/Qwen3-Embedding-8B", Input: []string{"x"},
+		Dimensions: 4096, EncodingFormat: "float",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"dimensions":4096`, `"encoding_format":"float"`, `"model":"Qwen/Qwen3-Embedding-8B"`} {
+		if !strings.Contains(string(withDims), want) {
+			t.Fatalf("请求体缺 %s: %s", want, withDims)
+		}
+	}
+	withoutDims, _ := json.Marshal(embedRequest{Model: "m", Input: []string{"x"}, EncodingFormat: "float"})
+	if strings.Contains(string(withoutDims), "dimensions") {
+		t.Fatalf("dimensions=0 应被省略: %s", withoutDims)
 	}
 }
