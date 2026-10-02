@@ -11,6 +11,12 @@ import SearchPage from './views/SearchPage.vue'
 import Digests from './views/Digests.vue'
 import DigestDetail from './views/DigestDetail.vue'
 import About from './views/About.vue'
+import Tools from './views/Tools.vue'
+import Album from './views/Album.vue'
+import Messages from './views/Messages.vue'
+import AirConditioner from './views/AirConditioner.vue'
+import Privacy from './views/Privacy.vue'
+import Listing from './views/Listing.vue'
 import AdminLayout from './admin/AdminLayout.vue'
 import AdminLogin from './admin/AdminLogin.vue'
 import AdminUsage from './admin/AdminUsage.vue'
@@ -33,6 +39,14 @@ const router = createRouter({
     { path: '/digest/latest', component: DigestDetail, props: { latest: true } },
     { path: '/digest/:date', component: DigestDetail },
     { path: '/about', component: About },
+    { path: '/tools', component: Tools },
+    { path: '/album', component: Album },
+    { path: '/messages', component: Messages },
+    { path: '/air-conditioner', component: AirConditioner },
+    { path: '/privacy', component: Privacy },
+    { path: '/categories/:name', component: Listing },
+    { path: '/tags/:name', component: Listing },
+    { path: '/archives/:year/:month', component: Listing },
     { path: '/admin/login', component: AdminLogin },
     {
       path: '/admin',

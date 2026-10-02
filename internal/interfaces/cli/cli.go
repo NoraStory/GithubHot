@@ -48,6 +48,7 @@ func build(cfg *config.Config) (application.Deps, *sqlite.DB, error) {
 		Projects:       sqlite.NewProjectRepo(db),
 		Stories:        sqlite.NewStoryRepo(db),
 		Digests:        sqlite.NewDigestRepo(db),
+		Messages:       sqlite.NewMessageRepo(db),
 		Usage:          usageRepo,
 		Budget:         budget,
 		GitHub:         githubapi.New(cfg.GitHubToken),

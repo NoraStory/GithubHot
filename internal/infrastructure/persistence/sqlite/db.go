@@ -90,6 +90,9 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, finished_at TEXT NOT NULL, status TEXT NOT NULL, stats TEXT NOT NULL)"); err != nil {
 		return fmt.Errorf("建表 runs: %w", err)
 	}
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, nickname TEXT NOT NULL, content TEXT NOT NULL, ip_hash TEXT NOT NULL, created_at TEXT NOT NULL)"); err != nil {
+		return fmt.Errorf("建表 messages: %w", err)
+	}
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS llm_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, phase TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, prompt_tokens INTEGER NOT NULL, completion_tokens INTEGER NOT NULL, created_at TEXT NOT NULL)"); err != nil {
 		return fmt.Errorf("建表 llm_usage: %w", err)
 	}
@@ -103,6 +106,7 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE sources ADD COLUMN current_interval_minutes INTEGER NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE sources ADD COLUMN empty_streak INTEGER NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE stories ADD COLUMN manual INTEGER NOT NULL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE messages ADD COLUMN content TEXT NOT NULL DEFAULT ''")
 	return nil
 }
 

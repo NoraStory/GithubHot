@@ -182,8 +182,19 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
           </ul>
         </div>
         <div class="menus_item">
+          <a class="site-page" href="javascript:void(0);"><span> 我的</span></a>
+          <ul class="menus_item_child">
+            <li><router-link class="site-page child faa-parent animated-hover" to="/tools"><i class="anzhiyufont anzhiyu-icon-tools faa-tada" style="font-size: 0.9em;"></i><span> 工具库</span></router-link></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/album"><i class="anzhiyufont anzhiyu-icon-images faa-tada" style="font-size: 0.9em;"></i><span> 相册集</span></router-link></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/messages"><i class="anzhiyufont anzhiyu-icon-comments faa-tada" style="font-size: 0.9em;"></i><span> 留言板</span></router-link></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/air-conditioner"><i class="anzhiyufont anzhiyu-icon-fan faa-tada" style="font-size: 0.9em;"></i><span> 小空调</span></router-link></li>
+          </ul>
+        </div>
+        <div class="menus_item">
           <a class="site-page" href="javascript:void(0);"><span> 关于</span></a>
           <ul class="menus_item_child">
+            <li><a class="site-page child faa-parent animated-hover" href="javascript:void(0)" @click="toRandom"><i class="anzhiyufont anzhiyu-icon-dice faa-tada" style="font-size: 0.9em;"></i><span> 随便逛逛</span></a></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/privacy"><i class="anzhiyufont anzhiyu-icon-file-contract faa-tada" style="font-size: 0.9em;"></i><span> 隐私协议</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/about"><i class="anzhiyufont anzhiyu-icon-github faa-tada" style="font-size: 0.9em;"></i><span> 关于本站</span></router-link></li>
             <li v-if="getToken()"><router-link class="site-page child faa-parent animated-hover" to="/admin/usage"><i class="anzhiyufont anzhiyu-icon-gear faa-tada" style="font-size: 0.9em;"></i><span> 管理端</span></router-link></li>
           </ul>
