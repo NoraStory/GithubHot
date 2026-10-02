@@ -70,7 +70,7 @@ onMounted(load)
           <div class="category-bar" id="category-bar">
             <div id="catalog-bar">
               <div id="catalog-list">
-                <div v-for="k in kinds" :key="k.v" class="catalog-list-item" :id="k.v">
+                <div v-for="k in kinds" :key="k.v" class="catalog-list-item" :id="k.v" :class="{ selected: kind === k.v }">
                   <a href="javascript:void(0)" @click="setKind(k.v)">{{ k.label }}</a>
                 </div>
               </div>

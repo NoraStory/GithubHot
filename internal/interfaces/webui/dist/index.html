@@ -7,6 +7,8 @@
   <meta property="og:description" content="GitHub 开源项目热点 × AI 资讯热点：自动采集、LLM 精选、事件聚簇与融合观察">
   <meta property="og:type" content="website">
   <title>GithubHot · GitHub 开源项目热点 × AI 资讯热点</title>
+  <!-- 首屏防闪白：样式加载前先按本地偏好设置主题 -->
+  <script>try { document.documentElement.setAttribute('data-theme', localStorage.getItem('githubhot_theme') === 'dark' ? 'dark' : 'light') } catch (e) { /* 忽略 */ }</script>
   <!-- AnZhiYu 主题样式（自托管，源自 blog.lololowe.com / hexo-theme-anzhiyu） -->
   <link rel="stylesheet" href="/anzhiyu/css/index.css">
   <link rel="stylesheet" href="/anzhiyu/css/index_media.css">
@@ -15,7 +17,6 @@
   <link rel="stylesheet" href="/anzhiyu/css/custom.css">
   <link rel="stylesheet" href="/anzhiyu/css/APlayer.min.css">
   <link rel="stylesheet" href="/anzhiyu/css/fps.css">
-  <link rel="stylesheet" href="/anzhiyu/css/welcome.css">
   <link rel="stylesheet" href="/anzhiyu/fonts/lxgw.css">
   <link rel="stylesheet" href="https://npm.elemecdn.com/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
   <link rel="stylesheet" href="/anzhiyu/overrides.css">
@@ -26,7 +27,7 @@
       musicPlayer: { playlistId: "652135520", server: "netease" },
       music_page_default: "meting",
       countdown: { targetDate: "2027-01-01", targetName: "元旦" },
-      translate: { defaultEncoding: 1, translateDelay: 0, msgToTraditionalChinese: "繁", msgToSimplifiedChinese: "简" },
+      translate: { defaultEncoding: 2, translateDelay: 0, msgToTraditionalChinese: "繁", msgToSimplifiedChinese: "简" },
       Snackbar: { position: "bottom-left", bgLight: "#49b1f5", bgDark: "#1f1f1f", chs_to_cht: "已切换为繁体中文", cht_to_chs: "已切换为简体中文" },
       authorStatus: { skills: ["🔥 GithubHot 双热点追踪", "📈 数据驱动 · LLM 精选", "🎬 老电影与古诗词爱好者", "☕ 早上好，一日之计在于晨"] },
       date_suffix: { just: "刚刚", min: "分钟前", hour: "小时前", day: "天前", month: "个月前" },
@@ -54,8 +55,8 @@
     // 参考站 Meting 接口模板（nav-music / 音乐馆 meting-js 自定义元素读取）
     var meting_api = "https://api.injahow.cn/meting/?server=:server&type=:type&id=:id&auth=:auth&r=:r";
   </script>
-  <script type="module" crossorigin src="/assets/index-BOjTzhyp.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BLLBLktq.css">
+  <script type="module" crossorigin src="/assets/index-8zqkBIE6.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-kEMHEdgc.css">
 </head>
 <body>
   <div id="app"></div>

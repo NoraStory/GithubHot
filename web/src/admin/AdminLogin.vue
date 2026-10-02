@@ -18,7 +18,7 @@ async function login() {
     const res = await fetch('/api/v1/admin/sources/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token.value.trim() },
-      body: JSON.stringify({ id: 'ping', name: 'ping', kind: 'rss', url: 'https://example.com/feed.xml' })
+      body: JSON.stringify({ id: 'ping', name: 'ping', kind: 'rss', url: 'https://example.com/feed.xml', dry: true })
     })
     const d = await res.json()
     if (d.ok || !d.error) {

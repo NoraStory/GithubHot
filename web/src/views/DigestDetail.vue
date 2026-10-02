@@ -40,7 +40,11 @@ onMounted(async () => {
   const dg = await api.get('/api/v1/digests?pageSize=50')
   allDates.value = (dg.items || []).map((d) => d.date)
   const key = date.value === 'latest' ? (allDates.value[0] || 'latest') : date.value
-  md.value = await api.raw(`/api/v1/digest/${encodeURIComponent(key)}?format=raw`)
+  try {
+    md.value = await api.raw(`/api/v1/digest/${encodeURIComponent(key)}?format=raw`)
+  } catch (e) {
+    md.value = ''
+  }
   if (date.value === 'latest') date.value = key
   loading.value = false
 })
@@ -87,8 +91,10 @@ onMounted(async () => {
     <div id="post">
       <div id="article-container" class="article">
         <div v-if="loading" class="loading">加载中 </div>
+        <!-- 尚无期刊时的友好空态 -->
+        <div v-else-if="!md" class="empty">暂无期刊：流水线完成第一轮后会在这里生成日报。</div>
         <!-- Markdown 查看器渲染区 -->
-        <div class="md-viewer" v-html="rendered"></div>
+        <div v-else class="md-viewer" v-html="rendered"></div>
       </div>
       <!-- 上一篇 / 下一篇 -->
       <div class="post-nav" v-if="prevDate || nextDate">

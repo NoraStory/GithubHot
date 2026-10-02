@@ -21,7 +21,8 @@ const (
 // 徽章规则："新"= 24h 内首次发现；"上升"= 比约 6h 前热度高 15%+。
 func BuildHotView(ctx context.Context, d Deps, kind digest.Kind) (HotView, error) {
 	spec := digestKindSpec(kind)
-	view := HotView{Generated: d.Clock.Now()}
+	// 空切片而非 nil：JSON 输出 [] 而不是 null，APP 契约友好
+	view := HotView{Generated: d.Clock.Now(), GitHub: []ProjectRow{}, News: []StoryRow{}, Fusion: []FusionRow{}}
 	now := view.Generated
 
 	// ---------- GitHub 项目榜 ----------

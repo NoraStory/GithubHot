@@ -207,6 +207,10 @@ func (s *Server) searchAPI(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
+	// 空结果返回 [] 而不是 null
+	if results == nil {
+		results = []application.SearchResult{}
+	}
 	writeJSON(w, 200, map[string]any{"query": q, "results": results})
 }
 

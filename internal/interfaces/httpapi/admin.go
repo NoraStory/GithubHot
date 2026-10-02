@@ -58,6 +58,7 @@ type sourcePayload struct {
 	IntervalMinutes int               `json:"intervalMinutes"`
 	Enabled         *bool             `json:"enabled"`
 	Config          map[string]string `json:"config"`
+	Dry             bool              `json:"dry"`
 }
 
 func (p sourcePayload) toSource(now time.Time) source.Source {
@@ -126,6 +127,11 @@ func (s *Server) testSource(w http.ResponseWriter, r *http.Request) {
 	src := p.toSource(time.Now())
 	if err := src.Validate(); err != nil {
 		writeErr(w, 400, err)
+		return
+	}
+	// 干跑：只校验配置（管理端登录令牌验证用），不发起真实抓取
+	if p.Dry {
+		writeJSON(w, 200, map[string]any{"ok": true, "dry": true})
 		return
 	}
 	fetcher, err := s.Deps.Fetchers.Fetcher(src.Kind)
