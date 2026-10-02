@@ -14,3 +14,4 @@ data/*.db-wal
 *.log
 .DS_Store
 .mimosa/
+*.exe~
