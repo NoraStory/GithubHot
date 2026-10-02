@@ -118,6 +118,31 @@ func TestChunkStrings(t *testing.T) {
 	}
 }
 
+func TestParseEmbedResponse(t *testing.T) {
+	// 正常响应：按 index 对齐
+	okBody := []byte(`{"data":[{"embedding":[1,0],"index":1},{"embedding":[0,1],"index":0}]}`)
+	part, err := parseEmbedResponse(okBody, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if part[0][0] != 0 || part[0][1] != 1 || part[1][0] != 1 {
+		t.Fatalf("index 对齐错误: %v", part)
+	}
+	// "HTTP 200 + 错误体"（服务商限流/冷启动风格）必须报错而非静默空向量
+	errBody := []byte(`{"code":20015,"message":"The parameter is invalid","data":null}`)
+	if _, err := parseEmbedResponse(errBody, 1); err == nil {
+		t.Fatal("错误体应报错")
+	}
+	// 条数不符
+	if _, err := parseEmbedResponse([]byte(`{"data":[{"embedding":[1],"index":0}]}`), 3); err == nil {
+		t.Fatal("条数不符应报错")
+	}
+	// 空向量
+	if _, err := parseEmbedResponse([]byte(`{"data":[{"embedding":[],"index":0}]}`), 1); err == nil {
+		t.Fatal("空向量应报错")
+	}
+}
+
 func TestEmbedRequestBodyShape(t *testing.T) {
 	// 维度取最大（4096）时请求体应带 dimensions；0 时应省略
 	withDims, err := json.Marshal(embedRequest{

@@ -170,7 +170,8 @@ type embedRequest struct {
 
 // Embed 批量语义向量；未配置向量模型返回 ErrEmbeddingsUnsupported。
 // 端点与 Key 独立于对话端点（EmbedConfig），支持跨服务商混搭；
-// 输入按 embedBatchSize 分批，规避服务商批量上限。
+// 输入按 embedBatchSize 分批，规避服务商批量上限；
+// 每批最多重试两次（向量模型冷启动/限流常见瞬时错误）。
 func (o *OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if o.embed.Model == "" {
 		return nil, application.ErrEmbeddingsUnsupported
@@ -191,32 +192,60 @@ func (o *OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error)
 		if err != nil {
 			return nil, err
 		}
-		body, status, err := safehttp.Do(ctx, "POST", endpoint, headers, bytes.NewReader(payload))
+		var body []byte
+		for attempt := 0; attempt < 3; attempt++ {
+			if attempt > 0 {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(time.Duration(1<<uint(attempt-1)) * 2 * time.Second):
+				}
+			}
+			body, _, err = safehttp.Do(ctx, "POST", endpoint, headers, bytes.NewReader(payload))
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("embeddings 请求重试耗尽: %w", err)
+		}
+		part, err := parseEmbedResponse(body, len(chunk))
 		if err != nil {
 			return nil, err
-		}
-		if status != 200 {
-			return nil, fmt.Errorf("embeddings 返回 %d: %s", status, safeSnippet(body))
-		}
-		var resp struct {
-			Data []struct {
-				Embedding []float32 `json:"embedding"`
-				Index     int       `json:"index"`
-			} `json:"data"`
-		}
-		if err := json.Unmarshal(body, &resp); err != nil {
-			return nil, fmt.Errorf("解析 embeddings 响应: %w", err)
-		}
-		// 按 index 对齐，容忍服务商乱序返回
-		part := make([][]float32, len(chunk))
-		for _, d := range resp.Data {
-			if d.Index >= 0 && d.Index < len(chunk) {
-				part[d.Index] = d.Embedding
-			}
 		}
 		out = append(out, part...)
 	}
 	return out, nil
+}
+
+// parseEmbedResponse 解析并校验一批向量：条数必须与请求一致，
+// 拒绝"HTTP 200 + 错误体"（如 {"code":20015,...}）被静默当成空向量。
+func parseEmbedResponse(body []byte, want int) ([][]float32, error) {
+	var resp struct {
+		Data []struct {
+			Embedding []float32 `json:"embedding"`
+			Index     int       `json:"index"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("解析 embeddings 响应: %w", err)
+	}
+	if len(resp.Data) != want {
+		return nil, fmt.Errorf("embeddings 响应条数不符（期望 %d 得到 %d）: %s", want, len(resp.Data), safeSnippet(body))
+	}
+	// 按 index 对齐，容忍服务商乱序返回
+	part := make([][]float32, want)
+	for _, d := range resp.Data {
+		if d.Index >= 0 && d.Index < want {
+			part[d.Index] = d.Embedding
+		}
+	}
+	for i, v := range part {
+		if len(v) == 0 {
+			return nil, fmt.Errorf("embeddings 响应第 %d 条向量为空: %s", i, safeSnippet(body))
+		}
+	}
+	return part, nil
 }
 
 // chunkStrings 按每批 n 条切分输入（n<=0 时视为 1）。
