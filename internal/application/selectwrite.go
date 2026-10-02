@@ -43,6 +43,11 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 	if d.LLM == nil {
 		return stats, fmt.Errorf("LLM 必选：未配置 LLM 网关（LLM_API_KEY）")
 	}
+	setPhase := func(phase string) {
+		if ps, ok := d.LLM.(PhaseSetter); ok {
+			ps.SetPhase(phase)
+		}
+	}
 	if limit <= 0 {
 		limit = 120
 	}
@@ -88,6 +93,7 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 	}
 
 	// ---------- 阶段 2：双评分（filtered → scored/rejected，逐条两次独立调用） ----------
+	setPhase("score")
 	filtered, err := d.Items.ByStage(ctx, []item.Stage{item.StageFiltered}, limit)
 	if err != nil {
 		return stats, fmt.Errorf("读取待评分条目: %w", err)
@@ -145,6 +151,7 @@ func SelectAndWrite(ctx context.Context, d Deps, limit int) (SelectWriteStats, e
 	stats.Scored = len(scored)
 
 	// ---------- 阶段 3：中文写作（scored → written，限流） ----------
+	setPhase("write")
 	toWrite, err := d.Items.ByStage(ctx, []item.Stage{item.StageScored}, writeLimit)
 	if err != nil {
 		return stats, fmt.Errorf("读取待写作条目: %w", err)
