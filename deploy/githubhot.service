@@ -1,0 +1,29 @@
+# GithubHot systemd 服务（服务器常驻模式）
+#
+# 安装：
+#   1. go build -o /opt/githubhot/githubhot ./cmd/githubhot
+#   2. 把 .env 放到 /opt/githubhot/.env
+#   3. cp deploy/githubhot.service /etc/systemd/system/
+#   4. systemctl daemon-reload && systemctl enable --now githubhot
+#
+# 日志：journalctl -u githubhot -f
+
+[Unit]
+Description=GithubHot - GitHub x AI dual hot tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/githubhot
+ExecStart=/opt/githubhot/githubhot serve
+Restart=on-failure
+RestartSec=5
+# 加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/githubhot
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

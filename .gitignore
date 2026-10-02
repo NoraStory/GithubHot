@@ -1,0 +1,16 @@
+# 二进制
+githubhot
+githubhot.exe
+*.exe
+
+# 本地数据（日报与站点产物由流水线生成，是否入库由你决定：
+# Actions 模式提交 data/digests 与 data/site，因此不在这里忽略）
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# 环境与杂项
+.env
+*.log
+.DS_Store
+.mimosa/

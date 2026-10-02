@@ -1,0 +1,42 @@
+name: Daily Hot
+
+# 每天 07:30（UTC 23:30 前一日 ≈ 北京时间 07:30）跑一轮完整流水线，
+# 日报与站点产物提交回仓库。无服务器也能运转；有服务器时可用 serve 模式替代。
+on:
+  schedule:
+    - cron: "30 23 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Run pipeline
+        env:
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_MODEL_B: ${{ secrets.LLM_MODEL_B }}
+          LLM_EMBED_MODEL: ${{ secrets.LLM_EMBED_MODEL }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          DATA_DIR: ./data
+        run: go run ./cmd/githubhot run
+      - name: Commit digests & site
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/digests data/site
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "daily: update hot digests [skip ci]"
+            git push
+          fi

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GithubHot · GitHub × AI 双热点</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #21262d; --fg: #e6edf3;
+    --muted: #8b949e; --accent: #58a6ff; --hot: #f78166; --green: #3fb950; --tag: #1f6feb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { text-align: center; padding: 28px 0 8px; }
+  header h1 { font-size: 28px; letter-spacing: 1px; }
+  header h1 span { color: var(--accent); }
+  header .sub { color: var(--muted); margin-top: 6px; font-size: 13px; }
+  .tabs { display: flex; gap: 8px; justify-content: center; margin: 22px 0 18px; flex-wrap: wrap; }
+  .tab { padding: 8px 20px; border-radius: 20px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; font-size: 14px; }
+  .tab.active { color: var(--fg); border-color: var(--accent); background: #12233b; }
+  section { display: none; }
+  section.active { display: block; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 16px; margin-bottom: 14px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .rank { color: var(--muted); width: 36px; font-variant-numeric: tabular-nums; }
+  .repo a { color: var(--accent); text-decoration: none; font-weight: 600; }
+  .repo a:hover { text-decoration: underline; }
+  .desc { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .topics .topic { display: inline-block; background: var(--tag); color: #fff; border-radius: 4px; padding: 0 6px; font-size: 11px; margin-right: 4px; margin-top: 4px; }
+  .num { font-variant-numeric: tabular-nums; }
+  .hot { color: var(--hot); font-weight: 600; }
+  .badge { display: inline-block; background: #238636; color: #fff; font-size: 11px; border-radius: 10px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
+  .badge:first-child { margin-left: 10px; }
+  .story { padding: 14px 4px; border-bottom: 1px solid var(--border); }
+  .story:last-child { border-bottom: none; }
+  .story-head a { color: var(--accent); text-decoration: none; font-weight: 600; font-size: 16px; }
+  .story-head a:hover { text-decoration: underline; }
+  .summary { color: var(--fg); opacity: .85; margin-top: 6px; font-size: 14px; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .fusion { padding: 12px 4px; border-bottom: 1px solid var(--border); }
+  .fusion:last-child { border-bottom: none; }
+  .fusion .x { color: var(--hot); margin: 0 10px; font-weight: 700; }
+  .fusion .news { color: var(--fg); }
+  .fusion a { color: var(--accent); text-decoration: none; font-weight: 600; }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 30px; }
+  footer a { color: var(--accent); }
+  @media (max-width: 640px) { td:nth-child(3), th:nth-child(3) { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Github<span>Hot</span></h1>
+    <div class="sub">GitHub 开源项目热点 × AI 资讯热点 —— 双热度追踪 · 生成于 {{GENERATED}}</div>
+  </header>
+  <div class="tabs">
+    <button class="tab active" data-t="gh">🔥 GitHub 项目榜</button>
+    <button class="tab" data-t="ai">🤖 AI 资讯榜</button>
+    <button class="tab" data-t="fx">🔗 融合观察</button>
+  </div>
+  <section id="gh" class="active">
+    <div class="card"><table>
+      <thead><tr><th>#</th><th>项目</th><th>语言</th><th>24h ★</th><th>热度</th></tr></thead>
+      <tbody>{{GITHUB_ROWS}}</tbody>
+    </table></div>
+  </section>
+  <section id="ai">
+    <div class="card">{{NEWS_ROWS}}</div>
+  </section>
+  <section id="fx">
+    <div class="card">{{FUSION_ROWS}}</div>
+  </section>
+  <footer>数据由本地流水线自动采集与 LLM 精选 · <a href="https://github.com/NoraStory/GithubHot" target="_blank" rel="noopener">GithubHot</a> · REST API: <code>/api/v1/hot/github</code></footer>
+</div>
+<script>
+document.querySelectorAll('.tab').forEach(function (t) {
+  t.addEventListener('click', function () {
+    document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
+    document.querySelectorAll('section').forEach(function (x) { x.classList.remove('active'); });
+    t.classList.add('active');
+    document.getElementById(t.dataset.t).classList.add('active');
+  });
+});
+</script>
+</body>
+</html>
