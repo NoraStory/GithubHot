@@ -34,15 +34,15 @@ const groups = [
   }
 ]
 
-// 申请友链：模板复制 → 留言板提交（参考站 addFriendLink 的改造版）
+// 申请友链：模板复制 → GitHub Issue 提交（参考站 addFriendLink 的改造版）
 const applyText = computed(() => '昵称（请勿包含博客等字样）：\n网站地址（要求博客地址，请勿提交个人主页）：\n头像图片url（请提供尽可能清晰的图片）：\n描述：\n站点截图（可选）：')
 async function copyApply() {
   try {
     await navigator.clipboard.writeText(applyText.value)
-    window.anzhiyu && window.anzhiyu.snackbarShow('申请模板已复制，去留言板粘贴提交', false, 2500)
+    window.anzhiyu && window.anzhiyu.snackbarShow('申请模板已复制，去 GitHub Issue 提交', false, 2500)
   } catch (e) { /* 忽略 */ }
 }
-function goMessages() { applyOpen.value = false; router.push('/messages') }
+function goSubmit() { applyOpen.value = false; window.open('https://github.com/NoraStory/GithubHot/issues/new', '_blank') }
 </script>
 
 <template>
@@ -53,7 +53,7 @@ function goMessages() { applyOpen.value = false; router.push('/messages') }
         <div class="flink flink-apply">
           <h2>申请友链（0）</h2>
           <div class="apply-bar">
-            <span class="apply-tip">把本站加入你的友链后，复制模板内容到留言板提交即可互链～</span>
+            <span class="apply-tip">把本站加入你的友链后，复制模板内容提交到 GitHub Issue 即可互链～</span>
             <button class="apply-btn" @click="applyOpen = true">+ 申请友链</button>
           </div>
         </div>
@@ -82,11 +82,11 @@ function goMessages() { applyOpen.value = false; router.push('/messages') }
   <div v-if="applyOpen" class="apply-mask" @click.self="applyOpen = false">
     <div class="apply-dialog">
       <div class="apply-title">申请友链 <button class="apply-close" @click="applyOpen = false">✕</button></div>
-      <p class="apply-desc">按下述格式填写你的站点信息，提交到留言板；管理员审核通过后互链展示。</p>
+      <p class="apply-desc">按下述格式填写你的站点信息，提交到 GitHub Issue；审核通过后互链展示。</p>
       <textarea class="apply-textarea" readonly :value="applyText" rows="6"></textarea>
       <div class="apply-actions">
         <button class="apply-btn" @click="copyApply">复制申请内容</button>
-        <button class="apply-btn plain" @click="goMessages">去留言板提交 →</button>
+        <button class="apply-btn plain" @click="goSubmit">去 GitHub Issue 提交 →</button>
       </div>
     </div>
   </div>

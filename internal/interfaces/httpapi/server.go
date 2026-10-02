@@ -60,8 +60,6 @@ func (s *Server) Router() http.Handler {
 		r.Get("/search", s.searchAPI)
 		r.Get("/agent/hot.md", s.agentMD)
 		r.Get("/story/{id}", s.storyAPI)
-		r.Get("/messages", s.messagesAPI)
-		r.Post("/messages", s.postMessage)
 		s.registerAdminRoutes(r)
 		// 控制台数据（APP/运维消费）
 		r.Get("/admin/usage", s.usageAPI)

@@ -128,29 +128,33 @@ onMounted(async () => {
 </style>
 
 <style>
-/* ===== Markdown 查看器排版（AnZhiYu #article-container 风格）===== */
-.md-viewer { font-size: 1rem; line-height: 1.85; }
-.md-viewer h1 { font-size: 1.5rem; margin: .4rem 0 1rem; }
-.md-viewer h2 { font-size: 1.25rem; margin: 1.8rem 0 .8rem; position: relative; padding-left: 1.35rem; }
-.md-viewer h2::before { content: '✽'; position: absolute; left: 0; color: #fb7061; animation: ccc 1.6s linear infinite; }
-.md-viewer h3 { font-size: 1.08rem; margin: 1.2rem 0 .5rem; }
-.md-viewer h3::before { content: '✦'; position: absolute; left: 0; color: #ffbf00; font-size: .95rem; }
-@keyframes ccc { 0% { transform: rotate(0); } to { transform: rotate(-1turn); } }
-.md-viewer p { margin: .55rem 0; color: var(--anzhiyu-secondary); }
-.md-viewer strong { color: var(--anzhiyu-fontcolor); }
-.md-viewer blockquote { margin: .8rem 0; padding: 10px 16px; background: var(--anzhiyu-background); border-left: 3px solid var(--anzhiyu-theme); border-radius: 6px; color: var(--anzhiyu-secondary); font-size: .95rem; }
-.md-viewer blockquote p { margin: 0; }
-.md-viewer code { background: var(--anzhiyu-background); padding: 1px 6px; border-radius: 4px; font-size: .85rem; color: var(--anzhiyu-blue); }
-.md-viewer a { color: var(--anzhiyu-blue); }
-.md-viewer a:hover { color: var(--anzhiyu-hover); }
-.md-viewer hr { border: none; border-top: 1px dashed var(--anzhiyu-card-border); margin: 1.2rem 0; }
-.md-viewer em { color: var(--anzhiyu-gray); font-size: .85rem; font-style: normal; }
-/* 表格：滚动容器 + 主题粉调表头 */
-.md-viewer .table-wrap { overflow-x: auto; margin: 0.8rem 0; border-radius: var(--anzhiyu-radius); border: 1px solid var(--anzhiyu-card-border); }
-.md-viewer table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: .92rem; margin: 0; }
-.md-viewer thead th { background: var(--anzhiyu-theme-op); color: var(--anzhiyu-secondary); font-weight: 600; padding: 10px; text-align: left; white-space: nowrap; }
-.md-viewer tbody td { padding: 10px; border-bottom: 1px solid var(--anzhiyu-card-border); vertical-align: top; }
-.md-viewer tbody tr:hover { background: var(--anzhiyu-background); }
+/* ===== Markdown 查看器排版（阅读优先：窄栏/大字号/舒适行高/清晰标题层级）===== */
+#article-container { max-width: 46rem; margin: 0 auto; }
+.md-viewer { font-size: 1.06rem; line-height: 1.95; letter-spacing: 0.01em; color: var(--anzhiyu-fontcolor); }
+.md-viewer h1 { font-size: 1.55rem; line-height: 1.4; margin: 0.4rem 0 1.3rem; padding-bottom: 0.7rem; border-bottom: 2px solid var(--anzhiyu-theme-op); color: var(--anzhiyu-fontcolor); }
+.md-viewer h2 { font-size: 1.3rem; line-height: 1.45; margin: 2.2rem 0 1rem; padding: 0.6rem 1rem; background: var(--anzhiyu-theme-op); border-radius: 8px; color: var(--anzhiyu-fontcolor); }
+.md-viewer h2:first-child { margin-top: 0.4rem; }
+.md-viewer h3 { font-size: 1.13rem; line-height: 1.5; margin: 1.7rem 0 0.7rem; padding-left: 0.75rem; border-left: 4px solid var(--anzhiyu-hover); color: var(--anzhiyu-fontcolor); }
+.md-viewer p { margin: 0.9rem 0; color: var(--anzhiyu-secondary); }
+.md-viewer strong { color: var(--anzhiyu-hover); font-weight: 700; }
+.md-viewer em { color: var(--anzhiyu-gray); font-size: 0.85em; font-style: normal; }
+.md-viewer ul, .md-viewer ol { margin: 0.8rem 0; padding-left: 1.7rem; }
+.md-viewer li { margin: 0.4rem 0; color: var(--anzhiyu-secondary); }
+.md-viewer li::marker { color: var(--anzhiyu-theme); }
+.md-viewer blockquote { margin: 1rem 0; padding: 0.9rem 1.2rem; background: var(--anzhiyu-background); border-left: 4px solid var(--anzhiyu-theme); border-radius: 0 8px 8px 0; color: var(--anzhiyu-secondary); font-size: 0.97rem; }
+.md-viewer blockquote p { margin: 0.3rem 0; }
+.md-viewer code { background: var(--anzhiyu-background); padding: 2px 7px; border-radius: 5px; font-size: 0.86em; color: var(--anzhiyu-blue); line-height: 1.6; }
+.md-viewer a { color: var(--anzhiyu-blue); text-decoration: none; border-bottom: 1px dashed transparent; transition: all .2s; }
+.md-viewer a:hover { color: var(--anzhiyu-hover); border-bottom-color: var(--anzhiyu-hover); }
+.md-viewer img { max-width: 100%; border-radius: 8px; margin: 0.8rem 0; }
+.md-viewer hr { border: none; border-top: 1px dashed var(--anzhiyu-card-border); margin: 1.6rem 0; }
+/* 表格：滚动容器 + 粉调表头 + 斑马纹 */
+.md-viewer .table-wrap { overflow-x: auto; margin: 1rem 0; border-radius: var(--anzhiyu-radius); border: 1px solid var(--anzhiyu-card-border); background: var(--anzhiyu-card-bg); }
+.md-viewer table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 0.92rem; margin: 0; }
+.md-viewer thead th { background: var(--anzhiyu-theme-op); color: var(--anzhiyu-fontcolor); font-weight: 700; padding: 11px 12px; text-align: left; white-space: nowrap; }
+.md-viewer tbody td { padding: 10px 12px; border-bottom: 1px solid var(--anzhiyu-card-border); vertical-align: top; line-height: 1.7; }
+.md-viewer tbody tr:nth-child(even) { background: var(--anzhiyu-background); }
+.md-viewer tbody tr:hover { background: var(--anzhiyu-theme-op); }
 .md-viewer tbody tr:last-child td { border-bottom: none; }
 .md-viewer td a { font-weight: 600; }
 </style>

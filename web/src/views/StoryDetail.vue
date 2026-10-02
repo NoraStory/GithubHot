@@ -108,7 +108,7 @@ function maxHot(history) {
 .post-title { font-size: 1.9rem; font-weight: 700; margin: 12px 0; text-shadow: 0 3px 14px rgba(0,0,0,.3); max-width: 900px; }
 .post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }
 #post-meta .meta-firstline { display: flex; gap: 12px; align-items: center; justify-content: center; opacity: .92; font-size: .88rem; flex-wrap: wrap; }
-.event-overview { margin: 0 0 1rem; padding: 12px 16px; background: var(--anzhiyu-background); border-left: 3px solid var(--anzhiyu-theme); border-radius: 6px; color: var(--anzhiyu-secondary); }
+.event-overview { margin: 0 0 1.1rem; padding: 0.9rem 1.2rem; background: var(--anzhiyu-theme-op); border-left: 4px solid var(--anzhiyu-hover); border-radius: 0 8px 8px 0; color: var(--anzhiyu-secondary); }
 .hist { display: flex; align-items: flex-end; gap: 5px; height: 90px; padding: 8px 0 24px; }
 .hist .bar { flex: 1; background: linear-gradient(180deg, var(--anzhiyu-theme), #f6d6c3); border-radius: 3px 3px 0 0; min-height: 4px; position: relative; }
 .hist .bar span { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: .66rem; color: var(--anzhiyu-gray); }
@@ -120,4 +120,15 @@ function maxHot(history) {
 .member-link:hover { color: var(--anzhiyu-hover); }
 .desc { color: var(--anzhiyu-gray); font-size: .8rem; }
 @media (max-width: 768px) { .post-bg { height: 18rem; } .post-title { font-size: 1.4rem; } }
+</style>
+
+<style>
+/* ===== 事件详情阅读排版（与日报查看器一致：窄栏/舒适行高/标题层级）===== */
+#content-inner > #post { max-width: 46rem; margin: 0 auto; }
+#article-container.article { font-size: 1.04rem; line-height: 1.9; letter-spacing: 0.01em; }
+#article-container.article h2 { font-size: 1.28rem; margin: 2rem 0 0.9rem; padding: 0.55rem 1rem; background: var(--anzhiyu-theme-op); border-radius: 8px; }
+#article-container.article p { margin: 0.9rem 0; color: var(--anzhiyu-secondary); }
+#article-container.article .event-overview strong { color: var(--anzhiyu-hover); }
+#article-container.article .recent-post-desc { line-height: 1.85; }
+#article-container.article .member-link { font-size: 1.02rem; line-height: 1.7; }
 </style>

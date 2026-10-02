@@ -202,7 +202,6 @@ type Deps struct {
 	LLM            LLMGateway
 	GitHub         GitHubGateway
 	Fetchers       FetcherRegistry
-	Messages       MessageRepo
 	Notifier       Notifier
 	DigestRenderer DigestRenderer
 	Clock          shared.Clock

@@ -13,7 +13,6 @@ import DigestDetail from './views/DigestDetail.vue'
 import About from './views/About.vue'
 import Tools from './views/Tools.vue'
 import Album from './views/Album.vue'
-import Messages from './views/Messages.vue'
 import Music from './views/Music.vue'
 import AirConditioner from './views/AirConditioner.vue'
 import Privacy from './views/Privacy.vue'
@@ -46,7 +45,6 @@ const router = createRouter({
     { path: '/about', component: About },
     { path: '/tools', component: Tools },
     { path: '/album', component: Album },
-    { path: '/messages', component: Messages },
     { path: '/music', component: Music },
     { path: '/air-conditioner', component: AirConditioner },
     { path: '/privacy', component: Privacy },

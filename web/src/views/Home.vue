@@ -83,8 +83,7 @@ function loadPoem() {
 // 随便逛逛
 const stories = ref([])
 
-// 侧边栏：最新留言 + 标签云 + 问候语轮换
-const latestComments = ref([])
+// 侧边栏：热点速览 + 标签云 + 问候语轮换
 const tagCloud = computed(() => {
   const counts = {}
   for (const n of stories.value) {
@@ -161,10 +160,6 @@ onMounted(async () => {
   stories.value = d.items || []
   const dg = await api.get('/api/v1/digests?pageSize=50')
   digestsAll.value = dg.items || []
-  try {
-    const ms = await api.get('/api/v1/messages')
-    latestComments.value = (ms.items || []).slice(0, 5)
-  } catch { /* 静默 */ }
   const cfg = await api.get('/api/v1/site/config').catch(() => null)
   if (cfg && cfg.homeVideos) videoList.value = cfg.homeVideos
   // 自定义音乐播放器（music-index 改造版）与 peoplecanvas 画布挂载同步
@@ -334,14 +329,14 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
           </div>
         </div>
         <div class="card-widget card-latest-comments">
-          <div class="item-headline"><i class="fas fa-comments"></i><span>最新留言</span></div>
+          <div class="item-headline"><i class="anzhiyufont anzhiyu-icon-fire"></i><span>热点速览</span></div>
           <div class="item-content">
-            <router-link to="/messages" class="headline-right" title="查看更多"><i class="fas fa-angle-right"></i></router-link>
+            <router-link to="/news" class="headline-right" title="查看更多"><i class="fas fa-angle-right"></i></router-link>
             <div class="aside-list" id="latest-comments">
-              <router-link v-for="m in latestComments" :key="m.id" class="aside-list-item" to="/messages" :title="'查看留言板：' + (m.content || '')">
-                <span class="chip">{{ m.name }}</span> {{ m.content }}
+              <router-link v-for="s in stories.slice(0, 5)" :key="s.storyId" class="aside-list-item" :to="`/story/${s.storyId}`" :title="s.titleZh">
+                <span class="chip">{{ s.hotness.toFixed(0) }}</span> {{ s.titleZh }}
               </router-link>
-              <div v-if="!latestComments.length" class="empty">还没有留言，来抢沙发～</div>
+              <div v-if="!stories.length" class="empty">暂无热点事件</div>
             </div>
           </div>
         </div>

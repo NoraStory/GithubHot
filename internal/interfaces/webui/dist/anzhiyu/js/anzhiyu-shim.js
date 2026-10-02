@@ -69,7 +69,7 @@
     anzhiyu.snackbarShow(on ? "已切换单栏布局" : "已切换双栏布局", false, 1500);
   };
 
-  // 热评弹幕开关：状态持久化 + 通知 Vue 层渲染/隐藏
+  // 快讯弹幕开关：状态持久化 + 通知 Vue 层渲染/隐藏
   anzhiyu.switchCommentBarrage = function () {
     var current = localStorage.getItem("commentBarrageSwitch") !== "false";
     var next = !current;
@@ -77,9 +77,9 @@
     var btn = document.getElementById("consoleCommentBarrage");
     if (btn) next ? btn.classList.add("on") : btn.classList.remove("on");
     var menuText = document.querySelector(".menu-commentBarrage-text");
-    if (menuText) menuText.textContent = next ? "关闭热评" : "显示热评";
+    if (menuText) menuText.textContent = next ? "关闭快讯" : "显示快讯";
     window.dispatchEvent(new CustomEvent("githubhot:barrage", { detail: { on: next } }));
-    anzhiyu.snackbarShow(next ? "✨ 已开启热评弹幕" : "已关闭热评弹幕", false, 1500);
+    anzhiyu.snackbarShow(next ? "✨ 已开启快讯弹幕" : "已关闭快讯弹幕", false, 1500);
   };
 
   // 快捷键开关：状态持久化 + 通知 Vue 层

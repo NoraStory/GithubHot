@@ -82,18 +82,17 @@ function updatePercent() {
   el.textContent = total > 0 ? Math.min(100, Math.round((window.scrollY / total) * 100)) + '' : '0'
 }
 
-// ===== 热评弹幕（参考站 .comment-barrage 同构，数据来自本站留言 API）=====
+// ===== AI 热点快讯弹幕（参考站 .comment-barrage 同构，数据来自 AI 资讯榜）=====
 const barrageOn = ref(localStorage.getItem('commentBarrageSwitch') !== 'false')
 const barrageItems = ref([])
 let barrageTimer = null
 let barrageSeq = 0
-let messagesPool = []
 
 function barrageSpawn() {
-  if (!messagesPool.length) return
-  const m = messagesPool[Math.floor(Math.random() * messagesPool.length)]
+  if (!stories.value.length) return
+  const s = stories.value[Math.floor(Math.random() * stories.value.length)]
   const id = ++barrageSeq
-  barrageItems.value.push({ id, name: m.name || '访客', content: (m.content || '').slice(0, 120), date: m.time || '' })
+  barrageItems.value.push({ id, name: 'AI 快讯', content: (s.titleZh || '').slice(0, 100), storyId: s.storyId })
   if (barrageItems.value.length > 3) barrageItems.value.shift()
   setTimeout(() => {
     const el = document.getElementById('barrage-item-' + id)
@@ -171,12 +170,6 @@ async function rmPasteText() {
       window.anzhiyu && window.anzhiyu.snackbarShow('请先聚焦输入框再粘贴', false, 2000)
     }
   } catch (e) { window.anzhiyu && window.anzhiyu.snackbarShow('读取剪贴板失败', false, 2000) }
-}
-async function rmQuoteText() {
-  const sel = window.getSelection().toString()
-  if (!sel) { window.anzhiyu && window.anzhiyu.snackbarShow('请先选中文本', false, 1500); return }
-  const quote = '> ' + sel.split('\n').join('\n> ')
-  try { await navigator.clipboard.writeText(quote); window.anzhiyu && window.anzhiyu.snackbarShow('已复制引用，去留言板粘贴吧') } catch (e) { /* 忽略 */ }
 }
 function rmNewWindow() { window.open(location.href, '_blank') }
 async function rmCopyLink(link) {
@@ -263,12 +256,8 @@ onMounted(async () => {
     stories.value = sn.items || []
     digests.value = dg.items || []
   } catch { /* 静默 */ }
-  // 热评弹幕：数据 + 轮播
-  try {
-    const ms = await api.get('/api/v1/messages')
-    messagesPool = ms.items || []
-    if (barrageOn.value) startBarrage()
-  } catch { /* 静默 */ }
+  // 快讯弹幕：数据来自 AI 资讯榜（stories 已就绪），延迟一点等首屏稳定
+  if (barrageOn.value) startBarrage()
   // 快捷键 + shim 状态事件
   document.addEventListener('keydown', keyHandler)
   window.addEventListener('githubhot:barrage', (ev) => {
@@ -407,7 +396,6 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
             <li><router-link class="site-page child faa-parent animated-hover" to="/tools"><i class="anzhiyufont anzhiyu-icon-tools faa-tada" style="font-size: 0.9em;"></i><span> 工具库</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/album"><i class="anzhiyufont anzhiyu-icon-images faa-tada" style="font-size: 0.9em;"></i><span> 相册集</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/music"><i class="anzhiyufont anzhiyu-icon-music faa-tada" style="font-size: 0.9em;"></i><span> 音乐馆</span></router-link></li>
-            <li><router-link class="site-page child faa-parent animated-hover" to="/messages"><i class="anzhiyufont anzhiyu-icon-comments faa-tada" style="font-size: 0.9em;"></i><span> 留言板</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/air-conditioner"><i class="anzhiyufont anzhiyu-icon-fan faa-tada" style="font-size: 0.9em;"></i><span> 小空调</span></router-link></li>
           </ul>
         </div>
@@ -549,7 +537,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
       <div class="console-btn-item" id="consoleHideAside" title="边栏显示控制" @click="window.anzhiyu && window.anzhiyu.hideAsideBtn()">
         <a class="asideSwitch" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-arrows-left-right"></i></a>
       </div>
-      <div class="console-btn-item" id="consoleCommentBarrage" :class="{ on: barrageOn }" title="热评开关" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()">
+      <div class="console-btn-item" id="consoleCommentBarrage" :class="{ on: barrageOn }" title="快讯弹幕开关" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()">
         <a class="commentBarrage" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-message"></i></a>
       </div>
       <div class="console-btn-item" id="consoleMusic" title="音乐开关" @click="toggleMusic">
@@ -602,7 +590,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
     </div>
   </div>
 
-  <!-- 热评弹幕（参考站 .comment-barrage 同构，数据来自本站留言；最多 3 条轮播，9 秒淡出） -->
+  <!-- AI 热点快讯弹幕（参考站 .comment-barrage 同构，数据来自资讯榜；最多 3 条轮播，9 秒淡出） -->
   <div class="comment-barrage" v-if="barrageOn">
     <div
       v-for="(b, i) in barrageItems" :key="b.id" :id="'barrage-item-' + b.id"
@@ -610,10 +598,10 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
       :style="{ right: '70px', bottom: (24 + (barrageItems.length - 1 - i) * 172) + 'px' }"
     >
       <div class="barrageHead">
-        <span class="barrageTitle">留言</span>
+        <span class="barrageTitle">快讯</span>
         <span class="barrageNick">{{ b.name }}</span>
       </div>
-      <a class="barrageContent" href="/messages" @click.prevent="router.push('/messages')">{{ b.content }}</a>
+      <a class="barrageContent" :href="`/story/${b.storyId}`" @click.prevent="router.push(`/story/${b.storyId}`)">{{ b.content }}</a>
     </div>
   </div>
 
@@ -628,7 +616,6 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
     <div class="rightMenu-group rightMenu-line rightMenuPlugin">
       <div class="rightMenu-item" id="menu-copytext" @click="rmCopyText"><i class="anzhiyufont anzhiyu-icon-copy"></i><span>复制选中文本</span></div>
       <div class="rightMenu-item" id="menu-pastetext" @click="rmPasteText"><i class="anzhiyufont anzhiyu-icon-paste"></i><span>粘贴文本</span></div>
-      <div class="rightMenu-item" id="menu-commenttext" @click="rmQuoteText"><i class="anzhiyufont anzhiyu-icon-comment-medical"></i><span>引用到评论</span></div>
       <div class="rightMenu-item" id="menu-newwindow" @click="rmNewWindow"><i class="anzhiyufont anzhiyu-icon-window-restore"></i><span>新窗口打开</span></div>
       <div class="rightMenu-item" id="menu-copylink" @click="rmCopyLink(rightMenu.isLink ? rightMenu.linkURL : '')"><i class="anzhiyufont anzhiyu-icon-link"></i><span>复制链接地址</span></div>
       <template v-if="rightMenu.isImage">
@@ -650,7 +637,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
     </div>
     <div class="rightMenu-group rightMenu-line rightMenuOther">
       <a class="rightMenu-item" id="menu-copy" href="javascript:void(0);" @click="rmCopyLink()"><i class="anzhiyufont anzhiyu-icon-copy"></i><span>复制地址</span></a>
-      <a class="rightMenu-item" id="menu-commentBarrage" href="javascript:void(0);" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()"><i class="anzhiyufont anzhiyu-icon-message"></i><span class="menu-commentBarrage-text">{{ barrageOn ? '关闭热评' : '显示热评' }}</span></a>
+      <a class="rightMenu-item" id="menu-commentBarrage" href="javascript:void(0);" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()"><i class="anzhiyufont anzhiyu-icon-message"></i><span class="menu-commentBarrage-text">{{ barrageOn ? '关闭快讯' : '显示快讯' }}</span></a>
       <a class="rightMenu-item" id="menu-darkmode" href="javascript:void(0);" @click="rmDarkmode"><i class="anzhiyufont anzhiyu-icon-circle-half-stroke"></i><span class="menu-darkmode-text">{{ dark ? '浅色模式' : '深色模式' }}</span></a>
       <a class="rightMenu-item" id="menu-translate" href="javascript:void(0);" @click="rmTranslate"><i class="anzhiyufont anzhiyu-icon-language"></i><span>转为繁体</span></a>
     </div>
@@ -773,7 +760,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
 html.hide-aside #aside-content { display: none; }
 html.hide-aside .layout { max-width: 1000px; }
 
-/* 热评弹幕：容器不拦截点击，条目可交互 */
+/* 快讯弹幕：容器不拦截点击，条目可交互 */
 .comment-barrage { pointer-events: none; }
 .comment-barrage-item { pointer-events: auto; }
 </style>

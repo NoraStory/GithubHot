@@ -14,14 +14,14 @@
       <div id="article-container" class="article">
         <h2>数据采集</h2>
         <p>本站通过公开信源（RSS / Hacker News / GitHub 公开 API）采集**公开内容**，不收集任何个人信息。GitHub API 调用使用服务器配置的只读令牌。</p>
-        <h2>日志与留言</h2>
-        <p>服务日志记录访问 IP 与请求路径，仅用于故障排查与限频（留言板 30 秒限频即基于 IP 摘要，不存储原始 IP）。留言板内容为公开展示，请勿提交个人敏感信息。</p>
+        <h2>日志与限频</h2>
+        <p>服务日志记录访问 IP 与请求路径，仅用于故障排查；本站不提供公开展示的用户内容，不存储任何访客提交的信息。</p>
         <h2>模型调用</h2>
         <p>精选与摘要环节调用大模型 API（火山方舟），发送的内容仅为公开资讯的标题与摘要，不包含用户数据。</p>
         <h2>Cookie 与本地存储</h2>
         <p>本站不使用跟踪 Cookie；浏览器 localStorage 仅保存深色模式偏好与管理端令牌（本地工具用途）。</p>
         <h2>联系我们</h2>
-        <p>如对隐私政策有疑问，欢迎在 <router-link to="/messages">留言板</router-link> 或 <a href="https://github.com/NoraStory/GithubHot" target="_blank" rel="noopener">GitHub 仓库</a> 留言。</p>
+        <p>如对隐私政策有疑问，欢迎在 <a href="https://github.com/NoraStory/GithubHot" target="_blank" rel="noopener">GitHub 仓库</a> 留言（GitHub Issue）。</p>
       </div>
     </div>
   </main>
