@@ -80,7 +80,7 @@ onMounted(async () => {
     <div id="post-info">
       <div id="post-firstinfo">
         <div class="meta-firstline">
-          <a class="post-meta-original">{{ board === 'github' ? 'GitHub 榜' : 'AI 榜' }}</a>
+          <router-link class="post-meta-original" to="/">{{ board === 'github' ? 'GitHub 榜' : 'AI 榜' }}</router-link>
         </div>
       </div>
       <h1 class="post-title">{{ board === 'github' ? 'GitHub 项目热点' : 'AI 资讯热点' }}</h1>

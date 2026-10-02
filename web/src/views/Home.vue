@@ -330,9 +330,9 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
           <div class="item-content">
             <router-link to="/messages" class="headline-right" title="查看更多"><i class="fas fa-angle-right"></i></router-link>
             <div class="aside-list" id="latest-comments">
-              <div v-for="m in latestComments" :key="m.id" class="aside-list-item">
+              <router-link v-for="m in latestComments" :key="m.id" class="aside-list-item" to="/messages" :title="'查看留言板：' + (m.content || '')">
                 <span class="chip">{{ m.name }}</span> {{ m.content }}
-              </div>
+              </router-link>
               <div v-if="!latestComments.length" class="empty">还没有留言，来抢沙发～</div>
             </div>
           </div>

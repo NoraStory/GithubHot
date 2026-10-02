@@ -5,7 +5,7 @@
 <template>
   <header class="post-bg" id="page-header">
     <div id="post-info">
-      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">关于</a></div></div>
+      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">关于</router-link></div></div>
       <h1 class="post-title">关于 GithubHot</h1>
       <div id="post-meta"><div class="meta-firstline">
         <span class="post-meta-label">GitHub 开源项目热点 × AI 资讯热点 —— 双热度追踪</span>

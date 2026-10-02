@@ -27,7 +27,7 @@ function maxHot(history) {
     <div id="post-info">
       <div id="post-firstinfo">
         <div class="meta-firstline">
-          <a class="post-meta-original">事件</a>
+          <router-link class="post-meta-original" to="/">事件</router-link>
           <span class="article-meta tags">
             <a v-for="t in detail.story.tags" :key="t" class="article-meta__tags"><span><i class="anzhiyufont anzhiyu-icon-hashtag"></i>{{ t }}</span></a>
           </span>

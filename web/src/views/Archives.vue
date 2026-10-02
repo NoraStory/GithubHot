@@ -36,7 +36,7 @@ onMounted(async () => {
 <template>
   <header class="post-bg" id="page-header">
     <div id="post-info">
-      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">归档</a></div></div>
+      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">归档</router-link></div></div>
       <h1 class="post-title">文章归档</h1>
       <div id="post-meta"><div class="meta-firstline">
         <span class="post-meta-label">期刊与事件按时间归档 · 共 {{ sorted.length }} 篇</span>

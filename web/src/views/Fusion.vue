@@ -13,7 +13,7 @@ onMounted(async () => {
 <template>
   <header class="post-bg" id="page-header">
     <div id="post-info">
-      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">融合观察</a></div></div>
+      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">融合观察</router-link></div></div>
       <h1 class="post-title">资讯 × 项目互相印证</h1>
       <div id="post-meta"><div class="meta-firstline">
         <span class="post-meta-label">AI 资讯事件与 GitHub 项目配对成功时，双方热度获得 ×1.25 加成</span>

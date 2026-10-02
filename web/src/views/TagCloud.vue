@@ -48,7 +48,7 @@ onMounted(async () => {
 <template>
   <header class="post-bg" id="page-header">
     <div id="post-info">
-      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">{{ mode === 'tags' ? '标签' : '分类' }}</a></div></div>
+      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">{{ mode === 'tags' ? '标签' : '分类' }}</router-link></div></div>
       <h1 class="post-title">{{ mode === 'tags' ? '事件标签' : '内容分类' }}</h1>
       <div id="post-meta"><div class="meta-firstline">
         <span class="post-meta-label">点击标签查看对应内容</span>

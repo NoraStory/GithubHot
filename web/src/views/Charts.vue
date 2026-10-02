@@ -40,7 +40,7 @@ function maxDay(days) {
 <template>
   <header class="post-bg" id="page-header">
     <div id="post-info">
-      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">统计与工具</a></div></div>
+      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">统计与工具</router-link></div></div>
       <h1 class="post-title">站点统计 & API 工具箱</h1>
     </div>
   </header>

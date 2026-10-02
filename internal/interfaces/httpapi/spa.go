@@ -26,6 +26,12 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 	}
 	if data, err := fs.ReadFile(dist, p); err == nil {
 		w.Header().Set("Content-Type", contentType(p))
+		// 带哈希的资源可长缓存；其余静态资源与页面必须回源，避免部署后拿到旧版
+		if strings.HasPrefix(p, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 		_, _ = w.Write(data)
 		return
 	}
@@ -38,6 +44,7 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(index)
 }
 

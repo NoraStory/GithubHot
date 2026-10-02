@@ -53,7 +53,7 @@ onMounted(load)
 <template>
   <header class="post-bg" id="page-header">
     <div id="post-info">
-      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">归档</a></div></div>
+      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">归档</router-link></div></div>
       <h1 class="post-title">全部期刊</h1>
       <div id="post-meta"><div class="meta-firstline">
         <span class="post-meta-label">日报每天 08:00 · 周报每周一 · 月报每月 1 日</span>

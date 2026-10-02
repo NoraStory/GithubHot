@@ -1,6 +1,11 @@
 <script setup>
-// 友链/资源页（AnZhiYu flink site-card 同构）：本站全部出口资源
+// 友链/资源页（AnZhiYu flink site-card 同构）：本站全部出口资源 + 申请友链
+import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import BannerMini from '../components/BannerMini.vue'
+
+const router = useRouter()
+const applyOpen = ref(false)
 
 const groups = [
   {
@@ -28,6 +33,16 @@ const groups = [
     ]
   }
 ]
+
+// 申请友链：模板复制 → 留言板提交（参考站 addFriendLink 的改造版）
+const applyText = computed(() => '昵称（请勿包含博客等字样）：\n网站地址（要求博客地址，请勿提交个人主页）：\n头像图片url（请提供尽可能清晰的图片）：\n描述：\n站点截图（可选）：')
+async function copyApply() {
+  try {
+    await navigator.clipboard.writeText(applyText.value)
+    window.anzhiyu && window.anzhiyu.snackbarShow('申请模板已复制，去留言板粘贴提交', false, 2500)
+  } catch (e) { /* 忽略 */ }
+}
+function goMessages() { applyOpen.value = false; router.push('/messages') }
 </script>
 
 <template>
@@ -35,6 +50,13 @@ const groups = [
   <main class="layout" id="content-inner">
     <div id="post">
       <div id="article-container" class="article">
+        <div class="flink flink-apply">
+          <h2>申请友链（0）</h2>
+          <div class="apply-bar">
+            <span class="apply-tip">把本站加入你的友链后，复制模板内容到留言板提交即可互链～</span>
+            <button class="apply-btn" @click="applyOpen = true">+ 申请友链</button>
+          </div>
+        </div>
         <div v-for="g in groups" :key="g.title" class="flink">
           <h2>{{ g.title }}（{{ g.sites.length }}）</h2>
           <div class="site-card-group">
@@ -55,6 +77,19 @@ const groups = [
       </div>
     </div>
   </main>
+
+  <!-- 申请友链弹窗 -->
+  <div v-if="applyOpen" class="apply-mask" @click.self="applyOpen = false">
+    <div class="apply-dialog">
+      <div class="apply-title">申请友链 <button class="apply-close" @click="applyOpen = false">✕</button></div>
+      <p class="apply-desc">按下述格式填写你的站点信息，提交到留言板；管理员审核通过后互链展示。</p>
+      <textarea class="apply-textarea" readonly :value="applyText" rows="6"></textarea>
+      <div class="apply-actions">
+        <button class="apply-btn" @click="copyApply">复制申请内容</button>
+        <button class="apply-btn plain" @click="goMessages">去留言板提交 →</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -69,4 +104,19 @@ const groups = [
 .site-card .info { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
 .site-card-name { font-weight: 700; font-size: .95rem; }
 .site-card-desc { color: var(--anzhiyu-gray); font-size: .8rem; }
+
+/* 申请友链 */
+.apply-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; background: var(--anzhiyu-background); border-radius: var(--anzhiyu-radius); padding: 14px 18px; }
+.apply-tip { color: var(--anzhiyu-gray); font-size: .86rem; }
+.apply-btn { background: var(--anzhiyu-theme); color: #fff; border: none; border-radius: 20px; padding: 7px 18px; font-size: .88rem; cursor: pointer; }
+.apply-btn:hover { background: var(--anzhiyu-hover); }
+.apply-btn.plain { background: transparent; color: var(--anzhiyu-main); border: 1px solid var(--anzhiyu-main); }
+.apply-btn.plain:hover { background: var(--anzhiyu-theme-op); }
+.apply-mask { position: fixed; inset: 0; z-index: 10020; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.apply-dialog { width: min(560px, 92vw); background: var(--anzhiyu-card-bg); border-radius: 12px; padding: 22px 24px; box-shadow: var(--anzhiyu-shadow-main); }
+.apply-title { font-weight: 700; font-size: 1.1rem; display: flex; justify-content: space-between; align-items: center; }
+.apply-close { background: none; border: none; color: var(--anzhiyu-gray); font-size: 1rem; cursor: pointer; }
+.apply-desc { color: var(--anzhiyu-gray); font-size: .84rem; margin: 8px 0 12px; }
+.apply-textarea { width: 100%; box-sizing: border-box; background: var(--anzhiyu-background); border: 1px solid var(--anzhiyu-card-border); border-radius: 8px; color: var(--anzhiyu-fontcolor); font-size: .86rem; line-height: 1.7; padding: 10px 12px; resize: vertical; }
+.apply-actions { display: flex; gap: 10px; margin-top: 14px; }
 </style>

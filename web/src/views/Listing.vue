@@ -70,7 +70,7 @@ onMounted(async () => {
 <template>
   <header class="post-bg" id="page-header">
     <div id="post-info">
-      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">{{ route.path.startsWith('/archives') ? '归档' : route.path.startsWith('/categories') ? '分类' : '标签' }}</a></div></div>
+      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">{{ route.path.startsWith('/archives') ? '归档' : route.path.startsWith('/categories') ? '分类' : '标签' }}</router-link></div></div>
       <h1 class="post-title">{{ route.path.startsWith('/archives') ? month : name }}</h1>
       <div id="post-meta"><div class="meta-firstline">
         <span class="post-meta-label">共 {{ entries.length }} 篇</span>

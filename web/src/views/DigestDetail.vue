@@ -52,7 +52,7 @@ onMounted(async () => {
     <div id="post-info">
       <div id="post-firstinfo">
         <div class="meta-firstline">
-          <a class="post-meta-original">期刊</a>
+          <router-link class="post-meta-original" to="/">期刊</router-link>
           <span class="article-meta tags">
             <a class="article-meta__tags"><span><i class="anzhiyufont anzhiyu-icon-hashtag"></i>双热点</span></a>
             <a class="article-meta__tags"><span><i class="anzhiyufont anzhiyu-icon-hashtag"></i>日报</span></a>

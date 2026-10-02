@@ -24,7 +24,7 @@ onMounted(() => { if (q.value) doSearch() })
 <template>
   <header class="post-bg" id="page-header">
     <div id="post-info">
-      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">搜索</a></div></div>
+      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">搜索</router-link></div></div>
       <h1 class="post-title">站内搜索</h1>
       <form id="post-meta" class="searchform" @submit.prevent="doSearch">
         <input v-model="q" placeholder="搜索标题 / 摘要，如：Claude、agent、向量数据库">

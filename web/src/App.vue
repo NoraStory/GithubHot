@@ -82,6 +82,145 @@ function updatePercent() {
   el.textContent = total > 0 ? Math.min(100, Math.round((window.scrollY / total) * 100)) + '' : '0'
 }
 
+// ===== 热评弹幕（参考站 .comment-barrage 同构，数据来自本站留言 API）=====
+const barrageOn = ref(localStorage.getItem('commentBarrageSwitch') !== 'false')
+const barrageItems = ref([])
+let barrageTimer = null
+let barrageSeq = 0
+let messagesPool = []
+
+function barrageSpawn() {
+  if (!messagesPool.length) return
+  const m = messagesPool[Math.floor(Math.random() * messagesPool.length)]
+  const id = ++barrageSeq
+  barrageItems.value.push({ id, name: m.name || '访客', content: (m.content || '').slice(0, 120), date: m.time || '' })
+  if (barrageItems.value.length > 3) barrageItems.value.shift()
+  setTimeout(() => {
+    const el = document.getElementById('barrage-item-' + id)
+    if (el) {
+      el.classList.add('out')
+      setTimeout(() => { barrageItems.value = barrageItems.value.filter((i) => i.id !== id) }, 620)
+    }
+  }, 9000)
+}
+function startBarrage() {
+  stopBarrage()
+  if (!barrageOn.value) return
+  barrageTimer = setInterval(barrageSpawn, 4000)
+  setTimeout(barrageSpawn, 1200)
+}
+function stopBarrage() { if (barrageTimer) { clearInterval(barrageTimer); barrageTimer = null } }
+
+// ===== 快捷键系统（参考站 keyUpEven 同构：M/R/H/D/I/G/N/F + Esc，开关持久化）=====
+const keyboardOn = ref(localStorage.getItem('keyboardToggle') !== 'false')
+function keyHandler(e) {
+  if (!keyboardOn.value) return
+  if (e.altKey || e.ctrlKey || e.metaKey) return
+  const t = e.target
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+  switch (e.key.toLowerCase()) {
+    case 'm': e.preventDefault(); toggleMusic(); break
+    case 'r': e.preventDefault(); toRandom(); break
+    case 'h': e.preventDefault(); router.push('/'); break
+    case 'd': e.preventDefault(); toggleTheme(); break
+    case 'i': e.preventDefault(); consoleOpen.value = !consoleOpen.value; break
+    case 'g': e.preventDefault(); router.push('/github'); break
+    case 'n': e.preventDefault(); router.push('/news'); break
+    case 'f': e.preventDefault(); router.push('/fusion'); break
+    case 'escape':
+      consoleOpen.value = false; menuOpen.value = false; searchMask.value = false
+      closeRightMenu()
+      break
+  }
+}
+
+// ===== 右键自定义菜单（参考站 #rightMenu + #rightmenu-mask 同构，上下文感知）=====
+const rightMenu = ref(null)
+function openRightMenu(e) {
+  const imgEl = e.target.closest && e.target.closest('img')
+  const linkEl = e.target.closest && e.target.closest('a[href]')
+  const sel = window.getSelection()
+  rightMenu.value = {
+    x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 480),
+    isImage: !!imgEl, imageURL: imgEl ? (imgEl.currentSrc || imgEl.src) : '',
+    isLink: !!linkEl, linkURL: linkEl ? linkEl.href : '',
+    hasSelection: !!(sel && sel.toString().trim())
+  }
+}
+function closeRightMenu() { rightMenu.value = null }
+function rmBack() { history.back() }
+function rmForward() { history.forward() }
+function rmRefresh() { location.reload() }
+function rmTop() { window.anzhiyu && window.anzhiyu.scrollToDest(0, 500) }
+async function rmCopyText() {
+  const sel = window.getSelection().toString()
+  if (!sel) { window.anzhiyu && window.anzhiyu.snackbarShow('请先选中文本', false, 1500); return }
+  try { await navigator.clipboard.writeText(sel); window.anzhiyu && window.anzhiyu.snackbarShow('已复制选中文本') } catch (e) { /* 忽略 */ }
+}
+async function rmPasteText() {
+  try {
+    const text = await navigator.clipboard.readText()
+    const el = document.activeElement
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+      const start = el.selectionStart || 0
+      el.value = el.value.slice(0, start) + text + el.value.slice(el.selectionEnd || start)
+      window.anzhiyu && window.anzhiyu.snackbarShow('已粘贴')
+    } else if (el && el.isContentEditable) {
+      el.textContent += text
+    } else {
+      window.anzhiyu && window.anzhiyu.snackbarShow('请先聚焦输入框再粘贴', false, 2000)
+    }
+  } catch (e) { window.anzhiyu && window.anzhiyu.snackbarShow('读取剪贴板失败', false, 2000) }
+}
+async function rmQuoteText() {
+  const sel = window.getSelection().toString()
+  if (!sel) { window.anzhiyu && window.anzhiyu.snackbarShow('请先选中文本', false, 1500); return }
+  const quote = '> ' + sel.split('\n').join('\n> ')
+  try { await navigator.clipboard.writeText(quote); window.anzhiyu && window.anzhiyu.snackbarShow('已复制引用，去留言板粘贴吧') } catch (e) { /* 忽略 */ }
+}
+function rmNewWindow() { window.open(location.href, '_blank') }
+async function rmCopyLink(link) {
+  try { await navigator.clipboard.writeText(link || location.href); window.anzhiyu && window.anzhiyu.snackbarShow('已复制链接地址') } catch (e) { /* 忽略 */ }
+}
+function rmCopyImage(url) {
+  // canvas 转 blob 复制（避免跨域 fetch；同源/data URI 直接成功，失败回退复制链接）
+  try {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const c = document.createElement('canvas')
+      c.width = img.naturalWidth; c.height = img.naturalHeight
+      c.getContext('2d').drawImage(img, 0, 0)
+      c.toBlob((blob) => {
+        if (!blob) { rmCopyLink(url); return }
+        navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]).then(() => {
+          window.anzhiyu && window.anzhiyu.snackbarShow('已复制图片')
+        }).catch(() => rmCopyLink(url))
+      })
+    }
+    img.onerror = () => rmCopyLink(url)
+    img.src = url
+  } catch (e) { rmCopyLink(url) }
+}
+function rmDownloadImage(url) {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = url.split('/').pop().split('?')[0] || 'image'
+  document.body.appendChild(a); a.click(); a.remove()
+}
+function rmNewWindowImage(url) { window.open(url, '_blank') }
+function rmSearch() { searchMask.value = true; searchQ.value = window.getSelection().toString() }
+function rmSearchBaidu() {
+  const q = window.getSelection().toString() || document.title
+  window.open('https://www.baidu.com/s?wd=' + encodeURIComponent(q), '_blank')
+}
+function rmCopyMusicName() {
+  const name = window.anzhiyu && window.anzhiyu.musicGetName()
+  if (name) navigator.clipboard.writeText(name).then(() => window.anzhiyu && window.anzhiyu.snackbarShow('已复制歌名'))
+}
+function rmDarkmode() { toggleTheme() }
+function rmTranslate() { translateToggle() }
+
 async function doSearch() {
   if (!searchQ.value.trim()) return
   const d = await api.get(`/api/v1/search?q=${encodeURIComponent(searchQ.value)}`)
@@ -124,6 +263,37 @@ onMounted(async () => {
     stories.value = sn.items || []
     digests.value = dg.items || []
   } catch { /* 静默 */ }
+  // 热评弹幕：数据 + 轮播
+  try {
+    const ms = await api.get('/api/v1/messages')
+    messagesPool = ms.items || []
+    if (barrageOn.value) startBarrage()
+  } catch { /* 静默 */ }
+  // 快捷键 + shim 状态事件
+  document.addEventListener('keydown', keyHandler)
+  window.addEventListener('githubhot:barrage', (ev) => {
+    barrageOn.value = !!(ev.detail && ev.detail.on)
+    if (barrageOn.value) startBarrage()
+    else { stopBarrage(); barrageItems.value = [] }
+  })
+  window.addEventListener('githubhot:keyboard', (ev) => { keyboardOn.value = !!(ev.detail && ev.detail.on) })
+  // 右键自定义菜单：打开/点击别处关闭/滚动关闭
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.defaultPrevented) { e.preventDefault(); openRightMenu(e) }
+  })
+  document.addEventListener('click', (e) => {
+    if (rightMenu.value && !e.target.closest('#rightMenu')) closeRightMenu()
+  })
+  window.addEventListener('scroll', () => { if (rightMenu.value) closeRightMenu() }, { passive: true })
+  // nav-music 圆盘/封面点击伸缩（参考站 musicBindEvent 同构）
+  const nm = document.getElementById('nav-music')
+  if (nm) {
+    nm.addEventListener('click', (e) => {
+      if (e.target.closest('.aplayer-music') || e.target.closest('.aplayer-pic')) {
+        window.anzhiyu && window.anzhiyu.musicTelescopic()
+      }
+    })
+  }
 })
 onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 
@@ -329,9 +499,9 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
             <span class="author-content-item-title"> 最新事件</span>
           </div>
           <div class="aside-list">
-            <a v-for="s in stories.slice(0, 5)" :key="s.storyId" class="aside-list-item" :href="`/story/${s.storyId}`">
+            <router-link v-for="s in stories.slice(0, 5)" :key="s.storyId" class="aside-list-item" :to="`/story/${s.storyId}`">
               <span class="chip">{{ s.hotness.toFixed(0) }}</span> {{ s.titleZh }}
-            </a>
+            </router-link>
             <div v-if="!stories.length" class="empty">暂无事件</div>
           </div>
         </div>
@@ -379,13 +549,13 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
       <div class="console-btn-item" id="consoleHideAside" title="边栏显示控制" @click="window.anzhiyu && window.anzhiyu.hideAsideBtn()">
         <a class="asideSwitch" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-arrows-left-right"></i></a>
       </div>
-      <div class="console-btn-item" id="consoleCommentBarrage" title="热评开关" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()">
+      <div class="console-btn-item" id="consoleCommentBarrage" :class="{ on: barrageOn }" title="热评开关" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()">
         <a class="commentBarrage" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-message"></i></a>
       </div>
       <div class="console-btn-item" id="consoleMusic" title="音乐开关" @click="toggleMusic">
         <a class="music-switch" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-music"></i></a>
       </div>
-      <div class="console-btn-item" id="consoleKeyboard" title="快捷键开关" @click="window.anzhiyu && window.anzhiyu.keyboardToggle()">
+      <div class="console-btn-item" id="consoleKeyboard" :class="{ on: keyboardOn }" title="快捷键开关" @click="window.anzhiyu && window.anzhiyu.keyboardToggle()">
         <a class="keyboard-switch" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-keyboard"></i></a>
       </div>
       <div class="console-btn-item" id="consoleRandomPost" title="随机逛逛" @click="toRandom">
@@ -394,7 +564,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
       <div class="console-btn-item" id="consoleAdmin" title="管理端">
         <router-link to="/admin/usage"><i class="anzhiyufont anzhiyu-icon-gear"></i></router-link>
       </div>
-      <div id="console-naoDark">
+      <div id="console-naoDark" @click="dark = !dark; applyTheme()">
         <div class="container">
           <div class="components">
             <div class="main-button">
@@ -431,6 +601,61 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
       <button id="go-up" type="button" title="回到顶部" @click="window.anzhiyu && window.anzhiyu.scrollToDest(0, 500)"><i class="anzhiyufont anzhiyu-icon-arrow-up"></i></button>
     </div>
   </div>
+
+  <!-- 热评弹幕（参考站 .comment-barrage 同构，数据来自本站留言；最多 3 条轮播，9 秒淡出） -->
+  <div class="comment-barrage" v-if="barrageOn">
+    <div
+      v-for="(b, i) in barrageItems" :key="b.id" :id="'barrage-item-' + b.id"
+      class="comment-barrage-item"
+      :style="{ right: '70px', bottom: (24 + (barrageItems.length - 1 - i) * 172) + 'px' }"
+    >
+      <div class="barrageHead">
+        <span class="barrageTitle">留言</span>
+        <span class="barrageNick">{{ b.name }}</span>
+      </div>
+      <a class="barrageContent" href="/messages" @click.prevent="router.push('/messages')">{{ b.content }}</a>
+    </div>
+  </div>
+
+  <!-- 右键自定义菜单（参考站 #rightMenu + #rightmenu-mask 同构，图片/链接上下文感知） -->
+  <div v-if="rightMenu" id="rightMenu" :style="{ left: rightMenu.x + 'px', top: rightMenu.y + 'px', display: 'flex', flexDirection: 'column' }">
+    <div class="rightMenu-group rightMenu-small">
+      <div class="rightMenu-item" id="menu-backward" @click="rmBack"><i class="anzhiyufont anzhiyu-icon-arrow-left"></i></div>
+      <div class="rightMenu-item" id="menu-forward" @click="rmForward"><i class="anzhiyufont anzhiyu-icon-arrow-right"></i></div>
+      <div class="rightMenu-item" id="menu-refresh" @click="rmRefresh"><i class="anzhiyufont anzhiyu-icon-arrow-rotate-right" style="font-size: 1rem;"></i></div>
+      <div class="rightMenu-item" id="menu-top" @click="rmTop"><i class="anzhiyufont anzhiyu-icon-arrow-up"></i></div>
+    </div>
+    <div class="rightMenu-group rightMenu-line rightMenuPlugin">
+      <div class="rightMenu-item" id="menu-copytext" @click="rmCopyText"><i class="anzhiyufont anzhiyu-icon-copy"></i><span>复制选中文本</span></div>
+      <div class="rightMenu-item" id="menu-pastetext" @click="rmPasteText"><i class="anzhiyufont anzhiyu-icon-paste"></i><span>粘贴文本</span></div>
+      <div class="rightMenu-item" id="menu-commenttext" @click="rmQuoteText"><i class="anzhiyufont anzhiyu-icon-comment-medical"></i><span>引用到评论</span></div>
+      <div class="rightMenu-item" id="menu-newwindow" @click="rmNewWindow"><i class="anzhiyufont anzhiyu-icon-window-restore"></i><span>新窗口打开</span></div>
+      <div class="rightMenu-item" id="menu-copylink" @click="rmCopyLink(rightMenu.isLink ? rightMenu.linkURL : '')"><i class="anzhiyufont anzhiyu-icon-link"></i><span>复制链接地址</span></div>
+      <template v-if="rightMenu.isImage">
+        <div class="rightMenu-item" id="menu-copyimg" @click="rmCopyImage(rightMenu.imageURL)"><i class="anzhiyufont anzhiyu-icon-images"></i><span>复制此图片</span></div>
+        <div class="rightMenu-item" id="menu-downloadimg" @click="rmDownloadImage(rightMenu.imageURL)"><i class="anzhiyufont anzhiyu-icon-download"></i><span>下载此图片</span></div>
+        <div class="rightMenu-item" id="menu-newwindowimg" @click="rmNewWindowImage(rightMenu.imageURL)"><i class="anzhiyufont anzhiyu-icon-window-restore"></i><span>新窗口打开图片</span></div>
+      </template>
+      <div class="rightMenu-item" id="menu-search" @click="rmSearch"><i class="anzhiyufont anzhiyu-icon-magnifying-glass"></i><span>站内搜索</span></div>
+      <div class="rightMenu-item" id="menu-searchBaidu" @click="rmSearchBaidu"><i class="anzhiyufont anzhiyu-icon-magnifying-glass"></i><span>百度搜索</span></div>
+      <div class="rightMenu-item" id="menu-music-toggle" @click="window.anzhiyu && window.anzhiyu.musicToggle()"><i class="anzhiyufont anzhiyu-icon-play"></i><span>播放/暂停音乐</span></div>
+      <div class="rightMenu-item" id="menu-music-back" @click="window.anzhiyu && window.anzhiyu.musicSkipBack()"><i class="anzhiyufont anzhiyu-icon-backward"></i><span>切换到上一首</span></div>
+      <div class="rightMenu-item" id="menu-music-forward" @click="window.anzhiyu && window.anzhiyu.musicSkipForward()"><i class="anzhiyufont anzhiyu-icon-forward"></i><span>切换到下一首</span></div>
+      <div class="rightMenu-item" id="menu-music-copyMusicName" @click="rmCopyMusicName"><i class="anzhiyufont anzhiyu-icon-copy"></i><span>复制歌名</span></div>
+    </div>
+    <div class="rightMenu-group rightMenu-line rightMenuOther">
+      <a class="rightMenu-item menu-link" id="menu-randomPost" href="javascript:void(0);" @click="toRandom"><i class="anzhiyufont anzhiyu-icon-shuffle"></i><span>随便逛逛</span></a>
+      <router-link class="rightMenu-item menu-link" to="/categories"><i class="anzhiyufont anzhiyu-icon-cube"></i><span>博客分类</span></router-link>
+      <router-link class="rightMenu-item menu-link" to="/tags"><i class="anzhiyufont anzhiyu-icon-tags"></i><span>文章标签</span></router-link>
+    </div>
+    <div class="rightMenu-group rightMenu-line rightMenuOther">
+      <a class="rightMenu-item" id="menu-copy" href="javascript:void(0);" @click="rmCopyLink()"><i class="anzhiyufont anzhiyu-icon-copy"></i><span>复制地址</span></a>
+      <a class="rightMenu-item" id="menu-commentBarrage" href="javascript:void(0);" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()"><i class="anzhiyufont anzhiyu-icon-message"></i><span class="menu-commentBarrage-text">{{ barrageOn ? '关闭热评' : '显示热评' }}</span></a>
+      <a class="rightMenu-item" id="menu-darkmode" href="javascript:void(0);" @click="rmDarkmode"><i class="anzhiyufont anzhiyu-icon-circle-half-stroke"></i><span class="menu-darkmode-text">{{ dark ? '浅色模式' : '深色模式' }}</span></a>
+      <a class="rightMenu-item" id="menu-translate" href="javascript:void(0);" @click="rmTranslate"><i class="anzhiyufont anzhiyu-icon-language"></i><span>转为繁体</span></a>
+    </div>
+  </div>
+  <div id="rightmenu-mask" v-if="rightMenu" style="display: block;" @click="closeRightMenu"></div>
 
   <!-- 窄屏抽屉菜单（AnZhiYu #sidebar-menus 同构，含 menu-mask 与站点数据行） -->
   <div id="sidebar" v-if="menuOpen" @click.self="closeMenu">
@@ -549,4 +774,12 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
 .page-enter-active, .page-leave-active { transition: opacity 0.3s, transform 0.3s; }
 .page-enter-from { opacity: 0; transform: translateY(12px); }
 .page-leave-to { opacity: 0; transform: translateY(-8px); }
+
+/* 单栏/双栏切换（html.hide-aside：隐藏侧边栏、放宽主栏；与主题 .layout.hide-aside 行为一致） */
+html.hide-aside #aside-content { display: none; }
+html.hide-aside .layout { max-width: 1000px; }
+
+/* 热评弹幕：容器不拦截点击，条目可交互 */
+.comment-barrage { pointer-events: none; }
+.comment-barrage-item { pointer-events: auto; }
 </style>

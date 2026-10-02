@@ -36,7 +36,7 @@ async function submit() {
 <template>
   <header class="post-bg" id="page-header">
     <div id="post-info">
-      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">留言板</a></div></div>
+      <div id="post-firstinfo"><div class="meta-firstline"><router-link class="post-meta-original" to="/">留言板</router-link></div></div>
       <h1 class="post-title">给我留言</h1>
       <div id="post-meta"><div class="meta-firstline">
         <span class="post-meta-label">分享你对双热点站的建议 · 每 30 秒可留一条</span>
