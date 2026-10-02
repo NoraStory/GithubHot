@@ -920,4 +920,64 @@ body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-list ol li.aplaye
 body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-bar { background: #2a2c3a; }
 body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-bar .aplayer-played { background: var(--anzhiyu-main) !important; }
 body[data-type="music"] #anMusic-page-meting .aplayer .aplayer-bar .aplayer-played .aplayer-thumb { background: #fff !important; }
+
+/* ===== 全站虚拟背景：固定星空/光斑层（下拉不再白底）+ 内容毛玻璃化 ===== */
+html, body { background: transparent !important; }
+#web_bg {
+  display: block !important;
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(ellipse 60% 50% at 12% 8%, rgba(234, 188, 189, .30), transparent 60%),
+    radial-gradient(ellipse 50% 45% at 88% 10%, rgba(66, 90, 239, .22), transparent 62%),
+    radial-gradient(ellipse 55% 45% at 50% 100%, rgba(116, 185, 255, .20), transparent 65%),
+    linear-gradient(180deg, #eaf1fb 0%, #f5f8fd 55%, #eef3fb 100%);
+}
+html[data-theme="dark"] #web_bg {
+  background:
+    radial-gradient(ellipse 60% 50% at 12% 8%, rgba(234, 188, 189, .14), transparent 60%),
+    radial-gradient(ellipse 50% 45% at 88% 10%, rgba(66, 90, 239, .20), transparent 62%),
+    radial-gradient(ellipse 55% 45% at 50% 100%, rgba(116, 185, 255, .12), transparent 65%),
+    linear-gradient(180deg, #14151d 0%, #18171d 55%, #14151c 100%);
+}
+#web_bg:before { display: none; }
+#web_bg .bg_glowing_stars { position: absolute; inset: 0; }
+#web_bg .bg_glowing_stars .bg_star { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #fff; box-shadow: 0 0 12px 2px rgba(255, 255, 255, .75); opacity: .7; animation: gh-twinkle 3.2s ease-in-out infinite; }
+#web_bg .bg_glowing_stars .bg_star:nth-child(1) { left: 12%; top: 18%; }
+#web_bg .bg_glowing_stars .bg_star:nth-child(2) { left: 32%; top: 8%; animation-delay: .6s; }
+#web_bg .bg_glowing_stars .bg_star:nth-child(3) { left: 58%; top: 14%; animation-delay: 1.2s; }
+#web_bg .bg_glowing_stars .bg_star:nth-child(4) { left: 78%; top: 30%; animation-delay: 1.8s; }
+#web_bg .bg_glowing_stars .bg_star:nth-child(5) { left: 45%; top: 40%; animation-delay: 2.4s; }
+#web_bg .bg_objects { position: absolute; inset: 0; }
+#web_bg .bg_object_rocket { position: absolute; right: 8%; top: 10%; opacity: .85; animation: gh-float 9s ease-in-out infinite; }
+#web_bg .bg_earth-moon { position: absolute; left: 5%; top: 56%; opacity: .8; animation: gh-float 11s ease-in-out infinite reverse; }
+#web_bg .bg_box_astronaut { position: absolute; right: 11%; bottom: 6%; opacity: .8; animation: gh-float 13s ease-in-out infinite; }
+@keyframes gh-twinkle { 0%, 100% { opacity: .25; transform: scale(.8); } 50% { opacity: .9; transform: scale(1.15); } }
+@keyframes gh-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-18px); } }
+
+/* 内容表面毛玻璃化（卡片/侧栏/分类条/工具栏/子页面板） */
+.recent-post-item {
+  background: var(--anzhiyu-maskbg) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  backdrop-filter: saturate(180%) blur(16px);
+  border: 1px solid var(--anzhiyu-card-border) !important;
+}
+#aside-content .card-widget {
+  background: var(--anzhiyu-maskbg) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  backdrop-filter: saturate(180%) blur(14px);
+}
+#category-bar { background: var(--anzhiyu-maskbg) !important; -webkit-backdrop-filter: saturate(180%) blur(14px); backdrop-filter: saturate(180%) blur(14px); }
+.toolbar .search-input, .toolbar .select { background: var(--anzhiyu-maskbg) !important; }
+/* 子页内容面板：星背景上的毛玻璃（含深色主题适配） */
+div#post {
+  background: var(--anzhiyu-maskbg) !important;
+  border-radius: 16px;
+  padding: 24px 28px;
+  border: 1px solid var(--anzhiyu-card-border);
+  -webkit-backdrop-filter: saturate(160%) blur(16px);
+  backdrop-filter: saturate(160%) blur(16px);
+}
+html[data-theme="dark"] div#post { background: rgba(24, 23, 29, .55) !important; }
 </style>
