@@ -14,6 +14,17 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build frontend
+        run: |
+          cd web
+          npm ci
+          npm run build
+          cd ..
+          mkdir -p internal/interfaces/webui
+          cp -r web/dist internal/interfaces/webui/dist
       - name: Vet
         run: go vet ./...
       - name: Test

@@ -575,24 +575,6 @@ func (fakeDigestRenderer) Render(_ context.Context, v DigestView) (string, error
 	return b.String(), nil
 }
 
-type fakeSiteRenderer struct{}
-
-func (fakeSiteRenderer) RenderIndex(_ context.Context, _ HotView) (string, error) {
-	return "<html>site</html>", nil
-}
-
-func (fakeSiteRenderer) RenderConsole(_ context.Context, _ ConsoleView) (string, error) {
-	return "<html>console</html>", nil
-}
-
-func (fakeSiteRenderer) RenderSearch(_ context.Context, _ SearchView) (string, error) {
-	return "<html>search</html>", nil
-}
-
-func (fakeSiteRenderer) RenderStory(_ context.Context, _ StoryDetailView) (string, error) {
-	return "<html>story</html>", nil
-}
-
 type fixedClock struct{ t time.Time }
 
 func (c fixedClock) Now() time.Time { return c.t }

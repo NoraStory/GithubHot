@@ -53,7 +53,6 @@ func build(cfg *config.Config) (application.Deps, *sqlite.DB, error) {
 		GitHub:         githubapi.New(cfg.GitHubToken),
 		Fetchers:       fetcher.NewRegistry(),
 		DigestRenderer: render.NewMarkdown(),
-		SiteRenderer:   render.NewSite(),
 		Notifier:       notify.Webhook{URL: cfg.NotifyWebhookURL, Format: cfg.NotifyWebhookFormat},
 		Clock:          shared.SystemClock{},
 	}
@@ -117,16 +116,6 @@ func Run(cfg *config.Config) error {
 	if werr := os.WriteFile(digestPath, []byte(res.DigestMD), 0o644); werr != nil {
 		return fmt.Errorf("写日报文件: %w", werr)
 	}
-	siteDir := filepath.Join(cfg.DataDir, "site")
-	if err := os.MkdirAll(siteDir, 0o755); err != nil {
-		return err
-	}
-	if res.SiteHTML != "" {
-		if werr := os.WriteFile(filepath.Join(siteDir, "index.html"), []byte(res.SiteHTML), 0o644); werr != nil {
-			return fmt.Errorf("写站点文件: %w", werr)
-		}
-	}
-
 	printResult(res, digestPath)
 	return nil
 }

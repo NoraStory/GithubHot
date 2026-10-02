@@ -89,12 +89,6 @@ func BuildHotView(ctx context.Context, d Deps, kind digest.Kind) (HotView, error
 		}
 	}
 
-	// ---------- 期刊（侧栏） ----------
-	for _, kind := range []digest.Kind{digest.KindDaily, digest.KindWeekly, digest.KindMonthly} {
-		if dg, err := d.Digests.Latest(ctx, kind); err == nil && dg != nil {
-			view.Digests = append(view.Digests, DigestMeta{Date: dg.Date, Kind: string(dg.Kind)})
-		}
-	}
 	return view, nil
 }
 

@@ -33,12 +33,18 @@ GithubHot 是一个自己找热点、自己写日报的网站框架（Go 实现�
 
 ## 快速开始
 
-需要 Go 1.22+ 和任意 OpenAI 兼容的模型 API Key（DeepSeek / 智谱 / 通义 / OpenAI 均可）。
+需要 Go 1.22+、Node 18+（构建 Vue3 前端）和任意 OpenAI 兼容的模型 API Key（DeepSeek / 智谱 / 通义 / OpenAI 均可）。
 
 ```bash
 git clone https://github.com/NoraStory/GithubHot.git
 cd GithubHot
 cp .env.example .env        # 填入 LLM_API_KEY，建议同时填 GITHUB_TOKEN
+
+# 构建前端（Vue3 + Vite，产物嵌入二进制）
+cd web && npm ci && npm run build && cd ..
+rm -rf internal/interfaces/webui/dist
+cp -r web/dist internal/interfaces/webui/dist
+
 go build -o githubhot ./cmd/githubhot
 
 # 跑一轮完整流水线（采集 → 发现 → 精选 → 聚簇 → 融合 → 热度 → 日报）
@@ -80,6 +86,16 @@ go build -o githubhot ./cmd/githubhot
 > 代理环境（Clash TUN/fake-ip 等）：设置 `HTTPS_PROXY` 后，DNS 级校验由代理负责，
 > 主机名与 IP 字面量校验仍然生效——否则 fake-ip 返回的 198.18/15 伪地址会被
 > SSRF 防护当作保留地址拒绝。
+
+## 前端（Vue3，AnZhiYu 复刻）
+
+`web/` 是 Vue3 + vue-router + Vite 前端，**用户端与管理端分离**：
+
+- 用户端：首页（全屏 Banner 轮播 + 一言打字机 + 搜索）、GitHub 榜、AI 榜、融合观察、事件详情（综述/成员/关联项目/热度走势）、搜索、期刊列表与详情（分页）、关于；
+- 管理端（`/admin/*`，`ADMIN_TOKEN` 登录门）：Token 用量、内容诊断、运行历史、信源管理（增删/试抓）、期刊；
+- AnZhiyu 复刻元素：霞鹜文楷字体、粉主题令牌、毛玻璃吸顶导航、卡片投影悬停、彩色旋转标题符、亮/暗主题切换、背景音乐播放器（`MUSIC_PLAYLIST` 配置歌单）、返回顶部、页面过渡动画。
+
+本地前端开发：`cd web && npm run dev`（代理 API 到 :8787）。
 
 ## 架构（DDD）
 

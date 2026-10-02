@@ -28,6 +28,7 @@ type Config struct {
 	PriceOutPerM        float64 // 输出单价（每百万 token），仅用于成本展示
 	NotifyWebhookURL    string  // 日报/告警 webhook；空 = 不推送
 	NotifyWebhookFormat string  // raw（默认）/ feishu / wecom
+	MusicPlaylist       string  // 背景音乐歌单 JSON（前端播放器）
 	GitHubToken         string
 	CronSpec            string // serve 模式内置调度（cron 表达式，本地时区）
 }
@@ -61,6 +62,7 @@ func Load() (*Config, error) {
 		PriceOutPerM:        getEnvFloat("LLM_PRICE_OUT_PER_M", 0),
 		NotifyWebhookURL:    getEnv("NOTIFY_WEBHOOK_URL", ""),
 		NotifyWebhookFormat: getEnv("NOTIFY_WEBHOOK_FORMAT", ""),
+		MusicPlaylist:       getEnv("MUSIC_PLAYLIST", ""),
 		GitHubToken:         getEnv("GITHUB_TOKEN", ""),
 		CronSpec:            getEnv("HOT_CRON", "30 7 * * *"),
 	}

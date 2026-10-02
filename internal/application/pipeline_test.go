@@ -25,7 +25,6 @@ func TestPipelineEndToEnd(t *testing.T) {
 		GitHub:         fakeGitHub{},
 		Fetchers:       fakeRegistry{f: fakeFetcher{now: now}},
 		DigestRenderer: fakeDigestRenderer{},
-		SiteRenderer:   fakeSiteRenderer{},
 		Clock:          fixedClock{t: now},
 	}
 	_ = d.Sources.Save(context.Background(), source.Source{

@@ -85,17 +85,6 @@ type DigestRenderer interface {
 	Render(ctx context.Context, v DigestView) (string, error)
 }
 
-// SiteRenderer 双榜网页渲染端口。
-type SiteRenderer interface {
-	RenderIndex(ctx context.Context, v HotView) (string, error)
-	// RenderConsole 控制台页（用量/诊断/运行/信源）。
-	RenderConsole(ctx context.Context, v ConsoleView) (string, error)
-	// RenderSearch 搜索结果页。
-	RenderSearch(ctx context.Context, v SearchView) (string, error)
-	// RenderStory 事件详情页。
-	RenderStory(ctx context.Context, v StoryDetailView) (string, error)
-}
-
 // RunRow 一次流水线运行记录（展示行）。
 type RunRow struct {
 	StartedAt string  `json:"startedAt"`
@@ -120,43 +109,10 @@ type DiagRow struct {
 	Published  string  `json:"publishedAt"`
 }
 
-// SourceInfo 信源信息（控制台展示行）。
-type SourceInfo struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	Kind    string            `json:"kind"`
-	Tier    string            `json:"tier"`
-	Tags    []string          `json:"tags"`
-	Enabled bool              `json:"enabled"`
-	Adapter string            `json:"adapter"`
-	Config  map[string]string `json:"config,omitempty"`
-}
-
-// ConsoleView 控制台视图。
-type ConsoleView struct {
-	Usage        UsageSummary
-	Runs         []RunRow
-	Diagnostics  []DiagRow
-	Stage        string
-	Stages       []string
-	Sources      []SourceInfo
-	SourcesCount int
-	Digests      []DigestMeta
-	// SourcesJSON 信源 JSON（管理界面前端脚本用）。
-	SourcesJSON string
-}
-
 // DigestMeta 期号元信息。
 type DigestMeta struct {
 	Date string `json:"date"`
 	Kind string `json:"kind"`
-}
-
-// SearchView 搜索结果页视图。
-type SearchView struct {
-	Query   string
-	Results []SearchResult
-	Took    string
 }
 
 // DigestView 日报渲染的视图模型（接口层数据契约，含未来 APP 复用的 JSON 形状）。
@@ -227,7 +183,6 @@ type HotView struct {
 	GitHub    []ProjectRow `json:"github"`
 	News      []StoryRow   `json:"news"`
 	Fusion    []FusionRow  `json:"fusion"`
-	Digests   []DigestMeta `json:"digests"`
 }
 
 // Notifier 通知端口（日报/失败告警推送，webhook 实现）。
@@ -249,6 +204,5 @@ type Deps struct {
 	Fetchers       FetcherRegistry
 	Notifier       Notifier
 	DigestRenderer DigestRenderer
-	SiteRenderer   SiteRenderer
 	Clock          shared.Clock
 }

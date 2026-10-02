@@ -270,21 +270,6 @@ func fmtF(b *strings.Builder, format string, args ...any) {
 }
 
 // storyPage 事件详情页。
-func (s *Server) storyPage(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	v, err := application.BuildStoryDetail(s.ctx(), s.Deps, id)
-	if err != nil {
-		writeErr(w, 404, err)
-		return
-	}
-	htmlOut, err := s.Deps.SiteRenderer.RenderStory(s.ctx(), *v)
-	if err != nil {
-		writeErr(w, 500, err)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(htmlOut))
-}
 
 // storyAPI 事件详情 JSON（APP 契约）。
 func (s *Server) storyAPI(w http.ResponseWriter, r *http.Request) {

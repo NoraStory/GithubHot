@@ -15,7 +15,6 @@ type PipelineResult struct {
 	WeeklyDate  string           `json:"weeklyDate,omitempty"`
 	MonthlyDate string           `json:"monthlyDate,omitempty"`
 	DigestMD    string           `json:"-"`
-	SiteHTML    string           `json:"-"`
 	View        HotView          `json:"-"`
 	Collect     CollectStats     `json:"collect"`
 	Discover    DiscoverStats    `json:"discover"`
@@ -171,14 +170,6 @@ func finishPipeline(ctx context.Context, d Deps, res *PipelineResult, started ti
 			res.MonthlyDate = md.Date
 			fmt.Printf("[pipeline] 月报已生成：%s\n", md.Date)
 		}
-	}
-
-	if d.SiteRenderer != nil {
-		html, serr := d.SiteRenderer.RenderIndex(ctx, view)
-		if serr != nil {
-			fmt.Printf("[pipeline] 站点渲染失败（跳过）: %v\n", serr)
-		}
-		res.SiteHTML = html
 	}
 
 	res.DurationSec = d.Clock.Now().Sub(started).Seconds()

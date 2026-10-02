@@ -15,3 +15,5 @@ data/*.db-wal
 .DS_Store
 .mimosa/
 *.exe~
+web/node_modules/
+web/dist/
