@@ -1,7 +1,6 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
-import './styles/anzhiyu.css'
 import { getToken } from './lib/api'
 
 import Home from './views/Home.vue'

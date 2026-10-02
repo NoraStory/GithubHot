@@ -22,42 +22,52 @@ onMounted(() => { if (q.value) doSearch() })
 </script>
 
 <template>
-  <div class="layout page-enter">
-    <main id="article-container">
-      <div class="card article">
-        <h2 class="first-title">🔍 搜索</h2>
-        <div class="meta-line">检索已精选写作的资讯与事件{{ took ? ` · 耗时 ${took}` : '' }}</div>
-        <form class="searchform" @submit.prevent="doSearch">
-          <input v-model="q" placeholder="搜索标题 / 摘要，如：Claude、agent、向量数据库">
-          <button>搜索</button>
-        </form>
+  <header class="post-bg" id="page-header">
+    <div id="post-info">
+      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">搜索</a></div></div>
+      <h1 class="post-title">站内搜索</h1>
+      <form id="post-meta" class="searchform" @submit.prevent="doSearch">
+        <input v-model="q" placeholder="搜索标题 / 摘要，如：Claude、agent、向量数据库">
+        <button>搜索</button>
+      </form>
+    </div>
+  </header>
+  <main class="layout" id="content-inner">
+    <div id="post">
+      <div id="article-container" class="article">
+        <div class="meta-line" v-if="results !== null">耗时 {{ took }} · {{ results.length }} 条结果</div>
         <div v-if="loading" class="loading">搜索中 </div>
         <div v-else-if="results !== null && !results.length" class="empty">没有匹配结果</div>
-        <div v-for="r in results || []" :key="r.url" class="story fade-up">
-          <div class="story-head">
-            <span class="chip">{{ r.kind === 'story' ? '事件' : 'AI 资讯' }}</span>
-            <a class="title" :href="r.url" target="_blank" rel="noopener">{{ r.titleZh }}</a>
-          </div>
-          <div class="summary">{{ r.summaryZh }}</div>
-          <div class="story-meta">{{ r.sourceNames }} · 热度 {{ r.hotness.toFixed(1) }}</div>
+        <div v-for="r in results || []" :key="r.url" class="story-line fade-up">
+          <a class="member-link" :href="r.url" target="_blank" rel="noopener">
+            <span class="chip">{{ r.kind === 'story' ? '事件' : '资讯' }}</span> {{ r.titleZh }}
+          </a>
+          <span class="desc">{{ r.summaryZh }}</span>
+          <span class="desc">{{ r.sourceNames }} · 热度 {{ r.hotness.toFixed(1) }}</span>
         </div>
       </div>
-    </main>
-  </div>
+    </div>
+  </main>
 </template>
 
 <style scoped>
-.meta-line { color: var(--anzhiyu-gray); font-size: .8rem; margin: 8px 0 12px; }
-.searchform { display: flex; gap: 10px; margin-bottom: 14px; }
-.searchform input { flex: 1; background: var(--anzhiyu-card-bg); color: var(--anzhiyu-fontcolor); border: 1px solid var(--anzhiyu-card-border); border-radius: 50px; padding: 10px 20px; font: inherit; outline: none; }
-.searchform input:focus { border-color: var(--anzhiyu-theme); }
-.searchform button { background: var(--anzhiyu-theme); color: #fff; border: none; border-radius: 50px; padding: 10px 26px; cursor: pointer; font: inherit; }
+.post-bg { height: 18rem; position: relative; overflow: hidden;
+  background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66,90,239,.35), transparent 62%),
+              radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234,188,189,.5), transparent 60%),
+              linear-gradient(160deg, #66717f 0%, #4c586f 48%, #3d4a63 100%); }
+#post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; padding: 0 1.5rem; }
+.post-title { font-size: 1.7rem; font-weight: 700; text-shadow: 0 3px 14px rgba(0,0,0,.3); }
+.post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }
+.searchform { display: flex; gap: 10px; margin-top: 16px; width: min(520px, 90vw); }
+.searchform input { flex: 1; border: none; outline: none; background: rgba(255,255,255,.96); border-radius: 50px; padding: 10px 20px; font: inherit; color: #363636; }
+.searchform button { border: none; background: var(--anzhiyu-theme); color: #fff; border-radius: 50px; padding: 10px 24px; cursor: pointer; font: inherit; }
 .searchform button:hover { background: var(--anzhiyu-hover); }
-.story { padding: 13px 4px; border-bottom: 1px dashed var(--anzhiyu-card-border); }
-.story:last-child { border-bottom: none; }
-.story-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.story-head .title { font-weight: 700; }
-.story-head .title:hover { color: var(--anzhiyu-hover); }
-.summary { color: var(--anzhiyu-secondary); margin-top: 5px; font-size: .95rem; }
-.story-meta { color: var(--anzhiyu-gray); font-size: .8rem; margin-top: 5px; }
+.meta-line { color: var(--anzhiyu-gray); font-size: .8rem; margin: 8px 0; }
+.story-line { padding: 11px 4px; border-bottom: 1px dashed var(--anzhiyu-card-border); display: flex; flex-direction: column; gap: 3px; }
+.story-line:last-child { border-bottom: none; }
+.member-link { font-weight: 600; color: var(--anzhiyu-fontcolor); }
+.member-link:hover { color: var(--anzhiyu-hover); }
+.chip { display: inline-block; background: var(--anzhiyu-theme-op); color: #a8766f; border-radius: 6px; padding: 0 8px; font-size: .78rem; margin-right: 6px; }
+.desc { color: var(--anzhiyu-gray); font-size: .82rem; }
+@media (max-width: 768px) { .post-bg { height: 15rem; } }
 </style>

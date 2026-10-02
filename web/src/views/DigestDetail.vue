@@ -9,17 +9,14 @@ const loading = ref(true)
 const date = route.params.date
 
 function renderMarkdown(src) {
-  // 极简 Markdown 渲染（标题/表格行/引用/列表/粗体/链接），足够展示日报
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const inline = (s) => esc(s)
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-  const lines = src.split('\n')
   let html = ''
   let inTable = false
-  for (const line of lines) {
+  for (const line of src.split('\n')) {
     const t = line.trim()
     if (t.startsWith('|')) {
       if (/^\|[\s:|-]+\|$/.test(t)) continue
@@ -48,21 +45,37 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="layout page-enter">
-    <main id="article-container">
-      <div class="card article digest">
+  <!-- 期刊详情：post 页（横幅 + #article-container Markdown） -->
+  <header class="post-bg" id="page-header">
+    <div id="post-info">
+      <div id="post-firstinfo">
+        <div class="meta-firstline"><a class="post-meta-original">期刊</a></div>
+      </div>
+      <h1 class="post-title">{{ date }} 双热点报告</h1>
+    </div>
+  </header>
+  <main class="layout" id="content-inner">
+    <div id="post">
+      <div id="article-container" class="article">
         <div v-if="loading" class="loading">加载中 </div>
         <div class="md" v-html="md"></div>
       </div>
-    </main>
-  </div>
+    </div>
+  </main>
 </template>
 
 <style scoped>
-.digest { max-width: 1000px; margin: 0 auto; }
+.post-bg { height: 20rem; position: relative; overflow: hidden;
+  background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66,90,239,.35), transparent 62%),
+              radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234,188,189,.5), transparent 60%),
+              linear-gradient(160deg, #66717f 0%, #4c586f 48%, #3d4a63 100%); }
+#post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; }
+.post-title { font-size: 1.8rem; font-weight: 700; text-shadow: 0 3px 14px rgba(0,0,0,.3); }
+.post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }
 .md :deep(h1) { font-size: 1.5rem; margin-bottom: .6rem; }
 .md :deep(h2) { font-size: 1.25rem; margin: 1.6rem 0 .8rem; position: relative; padding-left: 1.35rem; }
-.md :deep(h2)::before { content: '✽'; position: absolute; left: 0; color: #fb7061; animation: anzhiyu-rotate 1.6s linear infinite; }
+.md :deep(h2)::before { content: '✽'; position: absolute; left: 0; color: #fb7061; animation: ccc 1.6s linear infinite; }
+@keyframes ccc { 0% { transform: rotate(0); } to { transform: rotate(-1turn); } }
 .md :deep(h3) { font-size: 1.08rem; margin: 1.1rem 0 .5rem; }
 .md :deep(p) { margin: .5rem 0; color: var(--anzhiyu-secondary); }
 .md :deep(blockquote) { margin: .6rem 0; padding: 8px 14px; background: var(--anzhiyu-background); border-left: 3px solid var(--anzhiyu-theme); border-radius: 6px; color: var(--anzhiyu-secondary); font-size: .9rem; }

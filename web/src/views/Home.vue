@@ -1,118 +1,171 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import BannerHero from '../components/BannerHero.vue'
-import SideBar from '../components/SideBar.vue'
-import Pagination from '../components/Pagination.vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../lib/api'
 
+const router = useRouter()
 const view = ref({ github: [], news: [], fusion: [], digests: [], generatedAt: '' })
 const loading = ref(true)
-const tab = ref('github')
+const filter = ref('all')
 const page = ref(1)
-const pageSize = 10
+const pageSize = 8
 
-const list = computed(() => {
-  if (tab.value === 'github') return view.value.github
-  return view.value.news
-})
-const paged = computed(() => list.value.slice((page.value - 1) * pageSize, page.value * pageSize))
-const total = computed(() => list.value.length)
+const digests = computed(() =>
+  (view.value.digests || []).filter((d) => filter.value === 'all' || d.kind === filter.value)
+)
+const paged = computed(() => digests.value.slice((page.value - 1) * pageSize, page.value * pageSize))
+const total = computed(() => digests.value.length)
+
+// 随便逛逛：随机跳一个事件/日报
+const stories = ref([])
+function toRandom() {
+  const pool = stories.value.length ? stories.value.map((s) => `/story/${s.storyId}`) : (view.value.digests || []).map((d) => `/digest/${d.date}`)
+  if (pool.length) router.push(pool[Math.floor(Math.random() * pool.length)])
+}
+function scrollDown() {
+  const el = document.getElementById('home_top')
+  if (el) el.scrollIntoView({ behavior: 'smooth' })
+}
+
+// 封面：按标题哈希取主题色渐变（内联 SVG，像素级复刻封面占位）
+function coverOf(title) {
+  let h = 0
+  for (const c of title) h = (h * 31 + c.charCodeAt(0)) % 360
+  const a = `hsl(${h}, 42%, 62%)`
+  const b = `hsl(${(h + 40) % 360}, 48%, 44%)`
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='600' height='336'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${a}'/><stop offset='1' stop-color='${b}'/></linearGradient></defs><rect width='600' height='336' fill='url(#g)'/><circle cx='500' cy='70' r='110' fill='rgba(255,255,255,0.12)'/><circle cx='90' cy='290' r='70' fill='rgba(255,255,255,0.09)'/></svg>`
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
+}
+
+// 一言打字机
+const typed = ref('')
+const quotes = [
+  '把信源换成你的，把精选标准换成你的 KnowHow。',
+  '热度按独立来源算——一家媒体发十篇也只算一次。',
+  '300 star 的新项目，比静态 30 万 star 的老项目更热。',
+  '两个世界同时说一件事，可信度更高。',
+  '48 小时窗口，24 小时减半。'
+]
+const qi = ref(0)
+let typeTimer, quoteTimer
+function typeLoop() {
+  const text = quotes[qi.value]
+  let i = 0
+  typed.value = ''
+  clearInterval(typeTimer)
+  typeTimer = setInterval(() => {
+    i++
+    typed.value = text.slice(0, i)
+    if (i >= text.length) clearInterval(typeTimer)
+  }, 70)
+}
 
 onMounted(async () => {
+  typeLoop()
+  quoteTimer = setInterval(() => { qi.value = (qi.value + 1) % quotes.length; typeLoop() }, 6000)
   view.value = await api.get('/api/v1/hot')
   loading.value = false
+  const d = await api.get('/api/v1/hot/news')
+  stories.value = d.items || []
 })
+onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(quoteTimer) })
 </script>
 
 <template>
-  <BannerHero />
-  <div class="layout" id="article-container">
-    <main id="article-container article-main">
-      <div class="card article fade-up">
-        <div class="tabs">
-          <button class="tab" :class="{ active: tab === 'github' }" @click="tab = 'github'; page = 1">🔥 GitHub 项目榜</button>
-          <button class="tab" :class="{ active: tab === 'news' }" @click="tab = 'news'; page = 1">🤖 AI 资讯榜</button>
-          <router-link class="tab link" to="/fusion">🔗 融合观察 →</router-link>
+  <!-- 首页大横幅（full_page：全屏 + 打字机副标题 + 社交图标 + 下滑箭头） -->
+  <header class="full_page" id="page-header">
+    <div id="site-info">
+      <h1 id="site-title">GithubHot</h1>
+      <div id="site-subtitle"><span id="subtitle">{{ typed }}</span></div>
+      <div id="site_social_icons">
+        <a class="social-icon faa-parent animated-hover" href="https://github.com/NoraStory/GithubHot" target="_blank" title="Github">
+          <i class="anzhiyufont anzhiyu-icon-github"></i>
+        </a>
+        <a class="social-icon faa-parent animated-hover" href="/feed/digest.xml" target="_blank" title="RSS">
+          <i class="anzhiyufont anzhiyu-icon-rss"></i>
+        </a>
+      </div>
+    </div>
+    <div id="scroll-down"><i class="anzhiyufont anzhiyu-icon-angle-down scroll-down-effects" @click="scrollDown"></i></div>
+  </header>
+
+  <!-- home_top：随便逛逛 + 分类三按钮（AnZhiYu bannerGroup 同构） -->
+  <main id="blog-container">
+    <div id="home_top">
+      <div id="bannerGroup">
+        <div id="random-banner" @click="toRandom">
+          <a id="random-hover" href="javascript:void(0)">
+            <i class="anzhiyufont anzhiyu-icon-paper-plane"></i>
+            <div class="bannerText">随便逛逛<i class="anzhiyufont anzhiyu-icon-arrow-right"></i></div>
+          </a>
         </div>
-        <div class="meta-line">生成于 {{ (view.generatedAt || '').slice(0, 16).replace('T', ' ') }} · 独立来源热度 × 快照差分增长</div>
+        <div class="categoryGroup">
+          <div class="categoryItem" style="box-shadow: var(--anzhiyu-shadow-blue)">
+            <router-link class="categoryButton blue" to="/github"><span class="categoryButtonText">GitHub 项目榜</span><i class="anzhiyufont anzhiyu-icon-fire"></i></router-link>
+          </div>
+          <div class="categoryItem" style="box-shadow: var(--anzhiyu-shadow-red)">
+            <router-link class="categoryButton red" to="/news"><span class="categoryButtonText">AI 资讯榜</span><i class="anzhiyufont anzhiyu-icon-shapes"></i></router-link>
+          </div>
+          <div class="categoryItem" style="box-shadow: var(--anzhiyu-shadow-green)">
+            <router-link class="categoryButton green" to="/fusion"><span class="categoryButtonText">融合观察</span><i class="anzhiyufont anzhiyu-icon-dove"></i></router-link>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- recent-posts：期刊文章卡（cover + tips + title + meta） -->
+    <div class="layout" id="content-inner">
+      <div class="recent-posts" id="recent-posts">
+        <div id="categoryBar">
+          <div class="category-bar" id="category-bar">
+            <div id="catalog-bar">
+              <div id="catalog-list">
+                <div v-for="k in [{ v: 'all', l: '全部' }, { v: 'daily', l: '日报' }, { v: 'weekly', l: '周报' }, { v: 'monthly', l: '月报' }]" :key="k.v" class="catalog-list-item" :id="k.v">
+                  <a href="javascript:void(0)" @click="filter = k.v; page = 1">{{ k.l }}</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div v-if="loading" class="loading">加载中 </div>
+        <div v-else-if="!paged.length" class="empty">暂无期刊</div>
 
-        <!-- GitHub 榜 -->
-        <table v-if="!loading && tab === 'github'">
-          <thead><tr><th></th><th>项目</th><th>语言</th><th>24h ★</th><th>热度</th></tr></thead>
-          <tbody>
-            <tr v-for="p in paged" :key="p.fullName" class="fade-up">
-              <td class="rank"><span class="medal" :class="'m' + p.rank" v-if="p.rank <= 3">{{ p.rank }}</span><span v-else>{{ p.rank }}</span></td>
-              <td>
-                <router-link class="repo-name" :to="`/story/${p.storyId}`" v-if="p.storyId">{{ p.fullName }}</router-link>
-                <a v-else class="repo-name" :href="p.url" target="_blank" rel="noopener">{{ p.fullName }}</a>
-                <span v-for="b in p.badges" :key="b" class="badge" :class="{ new: b === '新', gh: b.startsWith('trending') }">{{ b }}</span>
-                <div class="repo-desc">
-                  <span class="zh" v-if="p.descriptionZh">{{ p.descriptionZh }}</span>
-                  <span class="en" v-if="p.description"> {{ p.description }}</span>
-                </div>
-                <div class="topics"><span v-for="t in p.topics.slice(0, 4)" :key="t" class="chip">{{ t }}</span></div>
-              </td>
-              <td><span class="chip">{{ p.language || '-' }}</span></td>
-              <td class="num gain">+{{ p.starsGained }}</td>
-              <td class="num hot">{{ p.hotness.toFixed(1) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-if="!loading && tab === 'github' && !view.github.length" class="empty">暂无数据——先运行一次 githubhot run</div>
-
-        <!-- AI 资讯榜 -->
-        <div v-if="!loading && tab === 'news'">
-          <div v-for="s in paged" :key="s.storyId" class="story fade-up">
-            <div class="story-head">
-              <span class="rank"><span class="medal" :class="'m' + s.rank" v-if="s.rank <= 3">{{ s.rank }}</span><span v-else>{{ s.rank }}</span></span>
-              <a class="title" :href="s.url" target="_blank" rel="noopener">{{ s.titleZh }}</a>
-              <span v-for="b in s.badges" :key="b" class="badge" :class="{ new: b === '新', rise: b === '上升', gh: b === 'GitHub关联' }">{{ b }}</span>
-            </div>
-            <div class="summary">{{ s.summaryZh }}</div>
-            <div v-if="s.overview" class="overview">{{ s.overview }}</div>
-            <div class="story-meta">来源 {{ s.sourceNames.join('、') }} · 评分 {{ s.score.toFixed(1) }} · 热度 {{ s.hotness.toFixed(1) }} · {{ s.tags.join(' / ') }}</div>
+        <div v-for="d in paged" :key="d.date" class="recent-post-item fade-up" @click="router.push(`/digest/${d.date}`)">
+          <div class="post_cover left">
+            <a :href="`/digest/${d.date}`" :title="`${d.kind === 'weekly' ? '周报' : d.kind === 'monthly' ? '月报' : '日报'} ${d.date}`">
+              <img class="post_bg" :src="coverOf(d.date)" alt="cover" style="pointer-events: none">
+            </a>
           </div>
-          <div v-if="!view.news.length" class="empty">暂无数据</div>
+          <div class="recent-post-info">
+            <div class="recent-post-info-top">
+              <div class="recent-post-info-top-tips">
+                <div class="article-categories-original">{{ d.kind === 'weekly' ? '周报' : d.kind === 'monthly' ? '月报' : '日报' }}</div>
+              </div>
+              <a class="article-title" :href="`/digest/${d.date}`" :title="d.date">{{ d.date }} 双热点报告</a>
+            </div>
+            <div class="article-meta-wrap">
+              <span class="post-meta-date">
+                <i class="anzhiyufont anzhiyu-icon-calendar-days" style="font-size: 15px"></i>
+                <span class="article-meta-label">发表于</span>
+                <time>{{ d.date }}</time>
+              </span>
+              <span class="article-meta tags" v-if="d.stats">
+                <a class="article-meta__tags"><span>🔥 {{ d.stats.githubItems }} 项目</span></a>
+                <a class="article-meta__tags"><span>🤖 {{ d.stats.newsItems }} 资讯</span></a>
+              </span>
+            </div>
+          </div>
         </div>
 
-        <Pagination :total="total" :page="page" :page-size="pageSize" @change="page = $event" />
+        <div id="pagination">
+          <div class="pagination">
+            <span class="page-item" :class="{ disabled: page === 1 }" @click="page > 1 && page--">‹</span>
+            <span v-for="p in Math.max(1, Math.ceil(total / pageSize))" :key="p" class="page-item" :class="{ active: p === page }" @click="p !== page && (page = p)">{{ p }}</span>
+            <span class="page-item" :class="{ disabled: page >= Math.ceil(total / pageSize) }" @click="page < Math.ceil(total / pageSize) && page++">›</span>
+          </div>
+        </div>
       </div>
-    </main>
-    <SideBar :view="view" />
-  </div>
+    </div>
+  </main>
 </template>
-
-<style scoped>
-.article { padding: 1.8rem 2.2rem; }
-.tabs { display: flex; gap: 8px; flex-wrap: wrap; }
-.tab { border: none; background: var(--anzhiyu-background); color: var(--anzhiyu-fontcolor); padding: 8px 20px; border-radius: var(--anzhiyu-radius-full); cursor: pointer; font: inherit; font-size: .92rem; transition: all .25s; }
-.tab.active { background: var(--anzhiyu-theme); color: #fff; }
-.tab.link { text-decoration: none; display: inline-flex; align-items: center; }
-.meta-line { color: var(--anzhiyu-gray); font-size: .8rem; margin: 12px 0 4px; }
-.rank { width: 42px; text-align: center; font-weight: 700; color: var(--anzhiyu-gray); }
-.medal { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; align-items: center; justify-content: center; font-size: .85rem; color: #fff; }
-.medal.m1 { background: linear-gradient(135deg, #ffd18c, #f7a94b); }
-.medal.m2 { background: linear-gradient(135deg, #dfe4ef, #b7c1d4); }
-.medal.m3 { background: linear-gradient(135deg, #f3c3a4, #dd9368); }
-.repo-name { font-weight: 700; color: var(--anzhiyu-blue); }
-.repo-name:hover { color: var(--anzhiyu-hover); }
-.repo-desc { color: var(--anzhiyu-secondary); font-size: .86rem; margin-top: 2px; }
-.repo-desc .zh { color: var(--anzhiyu-fontcolor); }
-.repo-desc .en { color: var(--anzhiyu-gray); font-size: .8rem; }
-.topics { margin-top: 2px; }
-.topics .chip { margin-right: 4px; }
-.num { font-variant-numeric: tabular-nums; }
-.gain { color: var(--anzhiyu-green); font-weight: 700; }
-.hot { color: var(--anzhiyu-hover); font-weight: 700; }
-.story { padding: 14px 4px; border-bottom: 1px dashed var(--anzhiyu-card-border); }
-.story:last-child { border-bottom: none; }
-.story-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.story-head .title { font-weight: 700; font-size: 1.05rem; }
-.story-head .title:hover { color: var(--anzhiyu-hover); }
-.summary { color: var(--anzhiyu-secondary); margin-top: 6px; font-size: .95rem; }
-.overview { margin-top: 8px; padding: 8px 12px; background: var(--anzhiyu-background); border-radius: 6px; border-left: 3px solid var(--anzhiyu-theme); font-size: .88rem; color: var(--anzhiyu-secondary); }
-.story-meta { color: var(--anzhiyu-gray); font-size: .8rem; margin-top: 6px; }
-@media (max-width: 768px) { .article { padding: 1.2rem 1rem; } }
-</style>

@@ -11,40 +11,63 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="layout page-enter">
-    <main id="article-container">
-      <div class="card article">
-        <h2 class="first-title">🔗 融合观察：资讯 × 项目互相印证</h2>
-        <div class="meta-line">一条 AI 资讯与一个 GitHub 项目互相印证时，两个事件的热度都会获得加成——这是"双重热点"的交汇点。</div>
+  <header class="post-bg" id="page-header">
+    <div id="post-info">
+      <div id="post-firstinfo"><div class="meta-firstline"><a class="post-meta-original">融合观察</a></div></div>
+      <h1 class="post-title">资讯 × 项目互相印证</h1>
+      <div id="post-meta"><div class="meta-firstline">
+        <span class="post-meta-label">AI 资讯事件与 GitHub 项目配对成功时，双方热度获得 ×1.25 加成</span>
+      </div></div>
+    </div>
+  </header>
+  <main class="layout" id="content-inner">
+    <div id="post">
+      <div id="article-container" class="article">
         <div v-if="loading" class="loading">加载中 </div>
         <div v-if="!loading && !view.fusion.length" class="empty">本轮未发现资讯与项目的直接对应</div>
-        <div v-for="(f, i) in view.fusion" :key="i" class="fusion fade-up">
-          <div class="news-side">
-            <span class="chip">AI 资讯</span>
-            <router-link v-if="f.news.storyId" class="news-title" :to="`/story/${f.news.storyId}`">{{ f.news.titleZh }}</router-link>
-            <span v-else class="news-title">{{ f.news.titleZh }}</span>
-            <div class="desc">{{ f.news.summaryZh }}</div>
+        <div v-for="(f, i) in view.fusion" :key="i" class="recent-post-item fade-up">
+          <div class="post_cover left">
+            <a :href="f.project.url" target="_blank" rel="noopener">
+              <img class="post_bg" :src="'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='600' height='336'><rect width='600' height='336' fill='%23232832'/><text x='50%25' y='50%25' fill='%23eabcbd' font-size='34' text-anchor='middle' font-family='monospace'>${'{ AI × GH }'}</text></svg>`)" alt="cover">
+            </a>
           </div>
-          <div class="x">×</div>
-          <div class="proj-side">
-            <span class="chip blue">GitHub 项目</span>
-            <a class="proj-name" :href="f.project.url" target="_blank" rel="noopener">{{ f.project.fullName }}</a>
-            <div class="desc">{{ f.project.descriptionZh || f.project.description }}</div>
-            <div class="desc">24h +{{ f.project.starsGained }}★ · 热度 {{ f.project.hotness.toFixed(1) }}</div>
+          <div class="recent-post-info">
+            <div class="recent-post-info-top">
+              <div class="recent-post-info-top-tips">
+                <div class="article-categories-original">融合配对</div>
+                <span class="chip">热度 ×1.25</span>
+              </div>
+              <a class="article-title" :href="f.project.url" target="_blank" rel="noopener">{{ f.news.titleZh }} × {{ f.project.fullName }}</a>
+            </div>
+            <div class="article-meta-wrap">
+              <span class="post-meta-date">
+                <span class="hot">GitHub 热度 {{ f.project.hotness.toFixed(1) }}</span>
+                <span class="article-meta-separator">·</span>
+                <span class="gain">24h +{{ f.project.starsGained }} ★</span>
+              </span>
+            </div>
+            <div class="recent-post-desc">{{ f.news.summaryZh }}</div>
+            <div class="recent-post-desc secondary">{{ f.project.descriptionZh || f.project.description }}</div>
           </div>
         </div>
       </div>
-    </main>
-  </div>
+    </div>
+  </main>
 </template>
 
 <style scoped>
-.meta-line { color: var(--anzhiyu-gray); font-size: .8rem; margin: 8px 0 14px; }
-.fusion { display: flex; align-items: center; gap: 14px; padding: 14px 6px; border-bottom: 1px dashed var(--anzhiyu-card-border); }
-.fusion:last-child { border-bottom: none; }
-.fusion .news-side, .fusion .proj-side { flex: 1; min-width: 0; }
-.fusion .x { color: var(--anzhiyu-hover); font-weight: 700; font-size: 1.3rem; }
-.news-title, .proj-name { font-weight: 700; color: var(--anzhiyu-blue); }
-.news-title:hover, .proj-name:hover { color: var(--anzhiyu-hover); }
-.desc { color: var(--anzhiyu-gray); font-size: .82rem; margin-top: 3px; }
+.post-bg { height: 20rem; position: relative; overflow: hidden;
+  background: radial-gradient(ellipse 55% 85% at 15% 10%, rgba(66,90,239,.38), transparent 62%),
+              radial-gradient(ellipse 50% 80% at 85% 12%, rgba(234,188,189,.5), transparent 60%),
+              linear-gradient(160deg, #66717f 0%, #4c586f 48%, #3d4a63 100%); }
+#post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; }
+.post-title { font-size: 1.9rem; font-weight: 700; margin: 10px 0; text-shadow: 0 3px 14px rgba(0,0,0,.3); }
+.post-meta-original { background: var(--anzhiyu-theme); color: #fff; padding: 1px 12px; border-radius: 50px; font-size: .8rem; }
+#post-meta .meta-firstline { opacity: .9; font-size: .85rem; }
+.gain { color: var(--anzhiyu-green); font-weight: 700; }
+.hot { color: var(--anzhiyu-hover); font-weight: 700; }
+.chip { display: inline-block; background: var(--anzhiyu-theme-op); color: #a8766f; border-radius: 50px; padding: 1px 10px; font-size: .74rem; }
+.recent-post-desc { color: var(--anzhiyu-secondary); font-size: .9rem; margin-top: 6px; }
+.recent-post-desc.secondary { color: var(--anzhiyu-gray); font-size: .82rem; }
+@media (max-width: 768px) { .post-bg { height: 17rem; } .post-title { font-size: 1.4rem; } }
 </style>

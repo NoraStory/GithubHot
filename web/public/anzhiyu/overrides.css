@@ -1,0 +1,12 @@
+/* GithubHot 对 AnZhiYu 主题的少量适配覆盖（其余样式全部来自主题真实 CSS） */
+/* 我们的列表封面用内联渐变图 */
+.recent-post-item .post_cover img.post_bg { object-fit: cover; }
+/* APlayer fixed 播放器避免遮挡返回顶部 */
+.aplayer.aplayer-fixed { z-index: 89; }
+/* 路由过渡 */
+.page-enter-active, .page-leave-active { transition: opacity 0.3s, transform 0.3s; }
+.page-enter-from { opacity: 0; transform: translateY(12px); }
+.page-leave-to { opacity: 0; transform: translateY(-8px); }
+/* 打字机光标 */
+#site-subtitle .typed-cursor { opacity: 1; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
