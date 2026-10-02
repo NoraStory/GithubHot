@@ -17,6 +17,7 @@ import AdminUsage from './admin/AdminUsage.vue'
 import AdminDiagnostics from './admin/AdminDiagnostics.vue'
 import AdminRuns from './admin/AdminRuns.vue'
 import AdminSources from './admin/AdminSources.vue'
+import AdminStories from './admin/AdminStories.vue'
 import AdminDigests from './admin/AdminDigests.vue'
 
 const router = createRouter({
@@ -42,6 +43,7 @@ const router = createRouter({
         { path: 'diagnostics', component: AdminDiagnostics },
         { path: 'runs', component: AdminRuns },
         { path: 'sources', component: AdminSources },
+        { path: 'stories', component: AdminStories },
         { path: 'digests', component: AdminDigests }
       ]
     },

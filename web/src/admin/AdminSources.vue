@@ -1,17 +1,24 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+// 信源管理 + 脚本推送（消费 /api/v1/admin/sources 与 /api/v1/admin/push）
+import { ref, computed, onMounted } from 'vue'
 import { api } from '../lib/api'
 
 const sources = ref([])
 const msg = ref('')
 const loading = ref(true)
 const form = ref({ id: '', name: '', kind: 'rss', tier: 'T2', url: '', intervalMinutes: 120 })
+const pushForm = ref({ sourceId: 'script-push', url: '', title: '', summary: '' })
 const kinds = ['rss', 'json_api', 'web_list', 'hacker_news', 'github_search', 'github_trending', 'script']
+
+const scriptSources = computed(() => sources.value.filter((s) => s.kind === 'script'))
 
 async function load() {
   loading.value = true
   const d = await api.get('/api/v1/sources')
   sources.value = d.items || []
+  if (scriptSources.value.length && !scriptSources.value.some((s) => s.id === pushForm.value.sourceId)) {
+    pushForm.value.sourceId = scriptSources.value[0].id
+  }
   loading.value = false
 }
 onMounted(load)
@@ -51,6 +58,24 @@ async function test(id) {
     msg.value = '失败: ' + e.message
   }
 }
+async function push() {
+  const f = pushForm.value
+  if (!f.url || !f.title) { msg.value = 'URL 与标题必填'; return }
+  msg.value = '推送中…'
+  try {
+    const d = await api.post('/api/v1/admin/push', f)
+    msg.value = `已推送（id=${d.id.slice(0, 12)}…）`
+    pushForm.value.url = ''
+    pushForm.value.title = ''
+    pushForm.value.summary = ''
+  } catch (e) {
+    msg.value = '失败: ' + e.message
+  }
+}
+function displayInterval(s) {
+  const cur = s.currentIntervalMinutes || 0
+  return cur > 0 ? `${cur} 分钟（自适应）` : '—'
+}
 </script>
 
 <template>
@@ -70,19 +95,21 @@ async function test(id) {
         <input v-model="form.url" placeholder="URL（feed / 接口 / 页面）" class="wide">
         <button class="primary" @click="add">保存</button>
       </div>
-      <div class="desc">信源 config 可配 fulltext=1 开启全文抓取；kind=script 的信源通过 githubhot push 写入。</div>
+      <div class="desc">config 可配 fulltext=1 开启全文抓取；抓取间隔按产出自适应（连空退避，上限 24h）。</div>
     </div>
 
     <div class="card">
       <div v-if="loading" class="loading">加载中 </div>
       <table v-if="!loading && sources.length">
-        <thead><tr><th>ID</th><th>名称</th><th>种类 / 分级</th><th>间隔</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>ID</th><th>名称</th><th>种类</th><th>当前间隔</th><th>连空</th><th>最近抓取</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="s in sources" :key="s.id">
             <td><code>{{ s.id }}</code></td>
             <td>{{ s.name }}</td>
             <td><span class="chip">{{ s.kind }}</span> {{ s.tier }}</td>
-            <td class="num">{{ s.config && s.config.fulltext === '1' ? s.tier : s.tier }}</td>
+            <td class="num">{{ displayInterval(s) }}</td>
+            <td class="num">{{ s.emptyStreak || 0 }}</td>
+            <td class="desc">{{ s.lastFetchedAt || '从未' }}</td>
             <td><span class="badge" :class="s.enabled ? 'okbadge' : 'offbadge'">{{ s.enabled ? '启用' : '停用' }}</span></td>
             <td>
               <button class="op" @click="test(s.id)">试抓</button>
@@ -92,6 +119,24 @@ async function test(id) {
         </tbody>
       </table>
       <div v-else-if="!loading" class="empty">无信源</div>
+    </div>
+
+    <h2>📨 脚本推送</h2>
+    <div class="card">
+      <div class="desc" style="margin-bottom:10px">
+        外部脚本也可以走 CLI：<code>githubhot push --source script-push --url ... --title ...</code>；
+        或 HTTP：<code>POST /api/v1/admin/push</code>。URL 判重，kind=script 的信源才会出现在下方。
+      </div>
+      <div v-if="!scriptSources.length" class="empty">暂无 script 类信源——先在上方新增一个 kind=script 的信源</div>
+      <div v-else class="form-grid">
+        <select v-model="pushForm.sourceId">
+          <option v-for="s in scriptSources" :key="s.id" :value="s.id">{{ s.name }}（{{ s.id }}）</option>
+        </select>
+        <input v-model="pushForm.url" placeholder="https:// 资料链接" class="wide">
+        <input v-model="pushForm.title" placeholder="标题" class="wide">
+        <input v-model="pushForm.summary" placeholder="摘要（可选）" class="wide">
+        <button class="primary" @click="push">推送到流水线</button>
+      </div>
     </div>
   </div>
 </template>
@@ -106,10 +151,11 @@ button { border: 1px solid var(--anzhiyu-card-border); background: var(--anzhiyu
 button.primary { background: var(--anzhiyu-theme); color: #fff; border: none; }
 button:hover { border-color: var(--anzhiyu-hover); color: var(--anzhiyu-hover); }
 button.primary:hover { color: #fff; }
-.op { padding: 4px 12px; font-size: .82rem; }
+.op { padding: 4px 14px; font-size: .82rem; }
 .op.danger:hover { border-color: var(--anzhiyu-red); color: var(--anzhiyu-red); }
 .msg { padding: 9px 14px; font-size: .88rem; color: var(--anzhiyu-secondary); }
 .desc { color: var(--anzhiyu-gray); font-size: .8rem; }
+.chip { display: inline-block; background: var(--anzhiyu-theme-op); color: #a8766f; border-radius: 6px; padding: 0 8px; font-size: .78rem; }
 .badge { padding: 1px 10px; border-radius: 50px; font-size: .74rem; }
 .okbadge { background: #238636; color: #fff; }
 .offbadge { background: var(--anzhiyu-theme-op); color: #a8766f; }

@@ -165,9 +165,15 @@ func (s *Server) sourceInfos() []SourceInfoDTO {
 		if !src.Kind.Implemented() {
 			adapter = "extension-point"
 		}
+		lastFetched := ""
+		if src.LastFetchedAt != nil {
+			lastFetched = src.LastFetchedAt.Format("01-02 15:04")
+		}
 		out = append(out, SourceInfoDTO{
 			ID: src.ID, Name: src.Name, Kind: string(src.Kind), Tier: string(src.Tier),
 			Tags: src.Tags, Enabled: src.Enabled, Adapter: adapter, Config: src.Config,
+			CurrentInterval: src.CurrentIntervalMinutes, EmptyStreak: src.EmptyStreak,
+			LastFetchedAt: lastFetched,
 		})
 	}
 	return out
@@ -175,14 +181,17 @@ func (s *Server) sourceInfos() []SourceInfoDTO {
 
 // SourceInfoDTO 信源展示行。
 type SourceInfoDTO struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	Kind    string            `json:"kind"`
-	Tier    string            `json:"tier"`
-	Tags    []string          `json:"tags"`
-	Enabled bool              `json:"enabled"`
-	Adapter string            `json:"adapter"`
-	Config  map[string]string `json:"config,omitempty"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Kind            string            `json:"kind"`
+	Tier            string            `json:"tier"`
+	Tags            []string          `json:"tags"`
+	Enabled         bool              `json:"enabled"`
+	Adapter         string            `json:"adapter"`
+	Config          map[string]string `json:"config,omitempty"`
+	CurrentInterval int               `json:"currentIntervalMinutes"`
+	EmptyStreak     int               `json:"emptyStreak"`
+	LastFetchedAt   string            `json:"lastFetchedAt,omitempty"`
 }
 
 // ---------- 搜索 ----------
