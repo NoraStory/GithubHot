@@ -10,15 +10,17 @@ import (
 
 // Config 全局配置。
 type Config struct {
-	DataDir     string // 数据目录（SQLite + 日报 + 站点）
-	Port        string // serve 端口
-	LLMBaseURL  string
-	LLMAPIKey   string
-	LLMModelA   string
-	LLMModelB   string
-	LLMEmbed    string
-	GitHubToken string
-	CronSpec    string // serve 模式内置调度（cron 表达式，本地时区）
+	DataDir      string // 数据目录（SQLite + 日报 + 站点）
+	Port         string // serve 端口
+	LLMBaseURL   string
+	LLMAPIKey    string
+	LLMModelA    string
+	LLMModelB    string
+	LLMEmbed     string
+	EmbedBaseURL string // 向量端点；留空复用 LLMBaseURL
+	EmbedAPIKey  string // 向量 Key；留空复用 LLMAPIKey
+	GitHubToken  string
+	CronSpec     string // serve 模式内置调度（cron 表达式，本地时区）
 }
 
 // Load 读取配置。工作目录存在 .env 时先加载（环境变量优先于 .env）。
@@ -33,20 +35,27 @@ func Load() (*Config, error) {
 		dataDir = filepath.Join(wd, dataDir)
 	}
 	cfg := &Config{
-		DataDir:     dataDir,
-		Port:        getEnv("PORT", "8787"),
-		LLMBaseURL:  getEnv("LLM_BASE_URL", ""),
-		LLMAPIKey:   getEnv("LLM_API_KEY", ""),
-		LLMModelA:   getEnv("LLM_MODEL", ""),
-		LLMModelB:   getEnv("LLM_MODEL_B", ""),
-		LLMEmbed:    getEnv("LLM_EMBED_MODEL", ""),
-		GitHubToken: getEnv("GITHUB_TOKEN", ""),
-		CronSpec:    getEnv("HOT_CRON", "30 7 * * *"),
+		DataDir:      dataDir,
+		Port:         getEnv("PORT", "8787"),
+		LLMBaseURL:   getEnv("LLM_BASE_URL", ""),
+		LLMAPIKey:    getEnv("LLM_API_KEY", ""),
+		LLMModelA:    getEnv("LLM_MODEL", ""),
+		LLMModelB:    getEnv("LLM_MODEL_B", ""),
+		LLMEmbed:     getEnv("LLM_EMBED_MODEL", ""),
+		EmbedBaseURL: getEnv("LLM_EMBED_BASE_URL", ""),
+		EmbedAPIKey:  getEnv("LLM_EMBED_API_KEY", ""),
+		GitHubToken:  getEnv("GITHUB_TOKEN", ""),
+		CronSpec:     getEnv("HOT_CRON", "30 7 * * *"),
 	}
 	if cfg.LLMBaseURL != "" || cfg.LLMAPIKey != "" || cfg.LLMModelA != "" {
 		if cfg.LLMBaseURL == "" || cfg.LLMAPIKey == "" || cfg.LLMModelA == "" {
 			return nil, fmt.Errorf("LLM 配置不完整：LLM_BASE_URL / LLM_API_KEY / LLM_MODEL 需要同时提供")
 		}
+	}
+	// 向量模型可混搭服务商（LLM_EMBED_BASE_URL / LLM_EMBED_API_KEY），
+	// 但配了向量模型就必须有可用的 Key
+	if cfg.LLMEmbed != "" && cfg.EmbedAPIKey == "" && cfg.LLMAPIKey == "" {
+		return nil, fmt.Errorf("配置了 LLM_EMBED_MODEL 但没有任何 API Key（LLM_EMBED_API_KEY / LLM_API_KEY）")
 	}
 	return cfg, nil
 }

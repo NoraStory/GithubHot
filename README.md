@@ -59,6 +59,8 @@ go build -o githubhot ./cmd/githubhot
 | `LLM_MODEL` | ✅ | 主模型（预筛/评分/写作/裁决） |
 | `LLM_MODEL_B` | | 第二评分模型；不配则用主模型换温度再评 |
 | `LLM_EMBED_MODEL` | | 向量模型；配置后聚簇候选用语义召回，否则退化为词面相似度 |
+| `LLM_EMBED_BASE_URL` | | 向量接口地址；留空复用 `LLM_BASE_URL`（混搭服务商时指定） |
+| `LLM_EMBED_API_KEY` | | 向量接口 Key；留空复用 `LLM_API_KEY` |
 | `GITHUB_TOKEN` | 建议 | 无 token 限 60 次/小时；配置后 5000 次/小时 |
 | `DATA_DIR` | | 数据目录，默认 `./data` |
 | `PORT` | | serve 端口，默认 `8787` |

@@ -16,17 +16,25 @@ import (
 	"github.com/NoraStory/GithubHot/internal/infrastructure/safehttp"
 )
 
+// EmbedConfig 向量端点配置。BaseURL / APIKey 留空时复用对话端点的值——
+// 同一家服务商零额外配置；混搭（如 DeepSeek 对话 + 智谱向量）时显式指定。
+type EmbedConfig struct {
+	BaseURL string
+	APIKey  string
+	Model   string // 留空 = 不启用向量，聚簇退化为词面相似度
+}
+
 // OpenAI 兼容网关。BaseURL 形如 https://api.deepseek.com（自动补 /v1/chat/completions）。
 type OpenAI struct {
-	BaseURL    string
-	APIKey     string
-	modelA     string
-	modelB     string
-	embedModel string
+	BaseURL string
+	APIKey  string
+	modelA  string
+	modelB  string
+	embed   EmbedConfig
 }
 
 // New 构造；modelB 为空时复用 modelA（以温度差异近似"独立第二次评分"）。
-func New(baseURL, apiKey, modelA, modelB, embedModel string) (*OpenAI, error) {
+func New(baseURL, apiKey, modelA, modelB string, embed EmbedConfig) (*OpenAI, error) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		return nil, errors.New("LLM_BASE_URL 不能为空")
@@ -40,7 +48,21 @@ func New(baseURL, apiKey, modelA, modelB, embedModel string) (*OpenAI, error) {
 	if modelB == "" {
 		modelB = modelA
 	}
-	return &OpenAI{BaseURL: baseURL, APIKey: apiKey, modelA: modelA, modelB: modelB, embedModel: embedModel}, nil
+	e := EmbedConfig{
+		BaseURL: strings.TrimRight(strings.TrimSpace(embed.BaseURL), "/"),
+		APIKey:  embed.APIKey,
+		Model:   strings.TrimSpace(embed.Model),
+	}
+	if e.BaseURL == "" {
+		e.BaseURL = baseURL
+	}
+	if e.APIKey == "" {
+		e.APIKey = apiKey
+	}
+	if !strings.HasPrefix(e.BaseURL, "http://") && !strings.HasPrefix(e.BaseURL, "https://") {
+		return nil, fmt.Errorf("LLM_EMBED_BASE_URL 仅允许 http/https: %s", e.BaseURL)
+	}
+	return &OpenAI{BaseURL: baseURL, APIKey: apiKey, modelA: modelA, modelB: modelB, embed: e}, nil
 }
 
 // ModelA 主模型。
@@ -130,21 +152,22 @@ func (o *OpenAI) ChatJSON(ctx context.Context, system, user, model string, tempe
 }
 
 // Embed 批量语义向量；未配置向量模型返回 ErrEmbeddingsUnsupported。
+// 端点与 Key 独立于对话端点（EmbedConfig），支持跨服务商混搭。
 func (o *OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	if o.embedModel == "" {
+	if o.embed.Model == "" {
 		return nil, application.ErrEmbeddingsUnsupported
 	}
 	payload, err := json.Marshal(struct {
 		Model string   `json:"model"`
 		Input []string `json:"input"`
-	}{Model: o.embedModel, Input: texts})
+	}{Model: o.embed.Model, Input: texts})
 	if err != nil {
 		return nil, err
 	}
-	endpoint := strings.TrimSuffix(o.BaseURL, "/") + "/embeddings"
+	endpoint := o.embedEndpoint()
 	headers := map[string]string{
 		"Content-Type":  "application/json",
-		"Authorization": "Bearer " + o.APIKey,
+		"Authorization": "Bearer " + o.embed.APIKey,
 	}
 	body, status, err := safehttp.Do(ctx, "POST", endpoint, headers, bytes.NewReader(payload))
 	if err != nil {
@@ -169,6 +192,11 @@ func (o *OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error)
 		}
 	}
 	return out, nil
+}
+
+// embedEndpoint 向量端点地址（独立于对话端点，可测试）。
+func (o *OpenAI) embedEndpoint() string {
+	return strings.TrimSuffix(o.embed.BaseURL, "/") + "/embeddings"
 }
 
 // extractJSON 从回复中提取 JSON（容忍 markdown 代码块包裹）。
