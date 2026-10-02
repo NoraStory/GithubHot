@@ -108,6 +108,20 @@ const Overview = `下面是同一个科技事件的多条中文报道。把它�
 输出 JSON：
 {"overview":"..."}`
 
+// TranslateDesc 把 GitHub 仓库英文描述批量翻译成简洁中文。
+const TranslateDesc = `把下面的 GitHub 仓库英文描述翻译成简洁中文。
+
+要求：
+1. 一句话，不超过 40 字，技术圈通顺表达，不逐词直译。
+2. 项目名/产品名/专有名词保留英文（如 React、Kubernetes、Rust）。
+3. 只依据原文翻译，不添加原文没有的信息；空描述跳过。
+
+仓库列表（每行一条）：
+{{ITEMS}}
+
+输出 JSON：
+{"items":[{"fullName":"owner/repo","zh":"中文描述"}]}`
+
 // RenderPrompt 用值替换 {{PLACEHOLDER}} 占位符。
 func RenderPrompt(tpl, placeholder, value string) string {
 	return strings.ReplaceAll(tpl, "{{"+placeholder+"}}", value)

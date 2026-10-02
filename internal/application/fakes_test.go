@@ -200,6 +200,17 @@ func (m *memProjects) FindByFullName(_ context.Context, fullName string) (*githu
 	return nil, nil
 }
 
+func (m *memProjects) SaveDescriptionZh(_ context.Context, fullName, zh string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.m[fullName]
+	if ok {
+		p.DescriptionZh = zh
+		m.m[fullName] = p
+	}
+	return nil
+}
+
 func (m *memProjects) All(_ context.Context) ([]github.Project, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -432,6 +443,24 @@ func (f *fakeLLM) ChatJSON(_ context.Context, _, user, _ string, _ float64) (str
 			same = true
 		}
 		return fmt.Sprintf(`{"sameEvent":%t,"followUp":false,"confidence":0.95}`, same), nil
+
+	case strings.Contains(user, "翻译成简洁中文"): // 项目描述翻译
+		var out strings.Builder
+		out.WriteString(`{"items":[`)
+		first := true
+		for _, line := range strings.Split(user, "\n") {
+			m := regexp.MustCompile(`^\[([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)\]`).FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			if !first {
+				out.WriteString(",")
+			}
+			first = false
+			fmt.Fprintf(&out, `{"fullName":%q,"zh":"中文描述"}`, m[1])
+		}
+		out.WriteString(`]}`)
+		return out.String(), nil
 
 	case strings.Contains(user, "整合成一段事件综述"): // 事件综述
 		return `{"overview":"多源报道整合的事件综述。"}`, nil

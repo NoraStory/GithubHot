@@ -74,12 +74,17 @@ func DiscoverProjects(ctx context.Context, d Deps) (DiscoverStats, error) {
 			continue
 		}
 		existing, err := d.Projects.FindByFullName(ctx, r.FullName)
+		existingZh := ""
+		if existing != nil {
+			existingZh = existing.DescriptionZh
+		}
 		if err != nil || existing == nil {
 			p, cerr := github.New(r.FullName, r.HTMLURL, r.Stars, now)
 			if cerr != nil {
 				continue
 			}
 			p.Description = github.NormalizeDescription(r.Description, 300)
+			p.DescriptionZh = github.NormalizeDescription(existingZh, 300)
 			p.Language = r.Language
 			p.Topics = r.Topics
 			p.Forks = r.Forks

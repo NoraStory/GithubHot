@@ -1,48 +1,60 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>控制台 · GithubHot</title>
+<link rel="stylesheet" href="https://files.lololowe.com/fonts/lxgw-lite/result.css">
 <style>
-  :root { --bg:#0d1117; --panel:#161b22; --border:#21262d; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --hot:#f78166; --tag:#1f6feb; }
+  :root { --theme:#eabcbd; --theme-op:rgba(234,188,189,.25); --hover:#ff7242; --bg:#f7f9fe; --card:#fff; --cborder:#e3e8f7; --fc:#363636; --gray:#999; --blue:#425aef; --green:#36b562;
+    --radius:8px; --shadow:0 3px 8px 6px rgba(7,17,27,.05); --shadow-hover:0 3px 8px 6px rgba(7,17,27,.09);
+    --font:'LXGW WenKai Lite','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif; }
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { background:var(--bg); color:var(--fg); font:15px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
-  .wrap { max-width:1060px; margin:0 auto; padding:24px 16px 64px; }
-  h1 { font-size:22px; padding:16px 0 4px; }
-  h1 a { color:var(--accent); text-decoration:none; }
-  h2 { font-size:17px; margin:26px 0 10px; color:var(--accent); }
-  .sub { color:var(--muted); font-size:13px; margin-bottom:8px; }
-  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px 16px; margin-bottom:14px; overflow-x:auto; }
-  table { width:100%; border-collapse:collapse; }
-  th { text-align:left; color:var(--muted); font-weight:500; font-size:12px; padding:10px 8px; border-bottom:1px solid var(--border); }
-  td { padding:9px 8px; border-bottom:1px solid var(--border); vertical-align:top; font-size:14px; }
-  tr:last-child td { border-bottom:none; }
-  .num { font-variant-numeric:tabular-nums; }
-  .hot { color:var(--hot); font-weight:600; }
-  .badge { display:inline-block; background:#238636; color:#fff; font-size:11px; border-radius:10px; padding:1px 8px; }
-  .topic { display:inline-block; background:var(--tag); color:#fff; border-radius:4px; padding:0 6px; font-size:11px; }
-  .desc { color:var(--muted); font-size:12px; margin-top:2px; }
-  .empty { color:var(--muted); text-align:center; padding:24px 0; }
-  .budgetbar { height:8px; background:#21262d; border-radius:4px; overflow:hidden; margin:10px 0; }
-  .budgetbar div { height:100%; background:linear-gradient(90deg,#3fb950,#f78166); }
-  select, input[type=text] { background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:6px 10px; }
-  a { color:var(--accent); }
-  form.stageform { margin:10px 0; }
+  body { background:var(--bg); color:var(--fc); font:16px/1.7 var(--font); }
+  ::selection { background:rgba(234,188,189,.7); }
+  a { color:var(--fc); text-decoration:none; } a:hover { color:var(--hover); }
+  .topnav { position:fixed; top:0; left:0; right:0; z-index:91; height:60px; display:flex; align-items:center; padding:0 1.5rem; background:var(--card); outline:1px solid var(--cborder); box-shadow:0 4px 12px -3px rgba(102,102,102,.15); }
+  .topnav .brand { font-weight:700; font-size:1.15rem; display:flex; align-items:center; gap:8px; }
+  .topnav .brand .dot { width:10px; height:10px; border-radius:50%; background:var(--theme); box-shadow:0 0 0 4px var(--theme-op); }
+  .topnav a.site-page { padding:8px 14px; border-radius:var(--radius); font-size:.95rem; }
+  .topnav a.site-page:hover { background:var(--theme-op); color:var(--hover); }
+  .wrap { max-width:1200px; margin:0 auto; padding:84px 1.5rem 2rem; }
+  h2 { font-size:1.25rem; margin:1.8rem 0 .9rem; position:relative; padding-left:1.35rem; }
+  h2::before { content:'✽'; position:absolute; left:0; color:#fb7061; animation:ccc 1.6s linear infinite; }
+  @keyframes ccc { 0% { transform:rotate(0); } to { transform:rotate(-1turn); } }
+  .card { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:1.1rem 1.4rem; margin-bottom:1.1rem; overflow-x:auto; transition:box-shadow .3s; }
+  .card:hover { box-shadow:var(--shadow-hover); }
+  table { width:100%; border-collapse:collapse; font-size:.92rem; }
+  thead th { background:var(--theme-op); color:var(--fc); padding:9px 10px; text-align:left; }
+  thead th:first-child { border-radius:6px 0 0 6px; } thead th:last-child { border-radius:0 6px 6px 0; }
+  tbody td { padding:9px 10px; border-bottom:1px solid #f1f3fa; vertical-align:top; }
+  tbody tr:hover { background:var(--bg); } tbody tr:last-child td { border-bottom:none; }
+  .num { font-variant-numeric:tabular-nums; } .hot { color:var(--hover); font-weight:700; }
+  .badge { display:inline-block; background:#238636; color:#fff; font-size:.72rem; border-radius:50px; padding:1px 9px; }
+  .topic { display:inline-block; background:var(--theme-op); color:#a8766f; border-radius:6px; padding:0 8px; font-size:.78rem; }
+  .desc { color:var(--gray); font-size:.8rem; margin-top:2px; }
+  .empty { color:var(--gray); text-align:center; padding:22px 0; font-size:.92rem; }
+  .budgetbar { height:10px; background:#eef1f8; border-radius:6px; overflow:hidden; margin:12px 0 6px; }
+  .budgetbar div { height:100%; background:linear-gradient(90deg,#eabcbd,#ff7242); border-radius:6px; }
+  select, button { background:var(--card); border:1px solid var(--cborder); border-radius:var(--radius); padding:7px 14px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--hover); color:var(--hover); }
+  footer { text-align:center; color:var(--gray); font-size:.85rem; padding:22px 16px 36px; }
+  footer a { color:var(--hover); margin:0 3px; }
 </style>
 </head>
 <body>
+<div class="topnav">
+  <a class="brand" href="/"><span class="dot"></span>GithubHot</a>
+  <a class="site-page" href="/">← 返回双榜</a>
+</div>
 <div class="wrap">
-  <h1><a href="/">GithubHot</a> · 控制台</h1>
-  <div class="sub">Token 用量与预算 · 内容诊断 · 运行历史 · 信源 · 期刊</div>
-
   <h2>💰 Token 用量（近 24h） {{BUDGET_STATE}}</h2>
   <div class="card">
     <table>
       <tr><td>输入 tokens</td><td class="num">{{USAGE_PROMPT}}</td><td>输出 tokens</td><td class="num">{{USAGE_COMPLETION}}</td><td>合计</td><td class="num hot">{{USAGE_TOTAL}}</td><td>估算成本 ¥</td><td class="num">{{USAGE_COST}}</td></tr>
     </table>
     <div class="budgetbar"><div style="width:{{BUDGET_PCT}}%"></div></div>
-    <div class="sub">每日预算 {{USAGE_BUDGET}} tokens（0 = 不熔断），已用 {{BUDGET_PCT}}%</div>
+    <div class="desc">每日预算 {{USAGE_BUDGET}} tokens（0 = 不熔断），已用 {{BUDGET_PCT}}%</div>
     <table>
       <thead><tr><th>阶段</th><th>调用次数</th><th>输入</th><th>输出</th></tr></thead>
       <tbody>{{USAGE_PHASES}}</tbody>
@@ -58,11 +70,9 @@
   </div>
 
   <h2>🩺 内容诊断</h2>
-  <form class="stageform" method="get" action="/console">
-    <select name="stage">
-      {{STAGE_OPTIONS}}
-    </select>
-    <button class="topic" style="padding:6px 14px;border:none;cursor:pointer">查看</button>
+  <form method="get" action="/console" style="margin:6px 0 12px">
+    <select name="stage">{{STAGE_OPTIONS}}</select>
+    <button>查看</button>
   </form>
   <div class="card">
     <table>
@@ -81,20 +91,16 @@
 
   <h2>📰 期刊</h2>
   <div class="card">
-    <table>
-      <tbody>{{DIGESTS}}</tbody>
-    </table>
+    <table><tbody>{{DIGESTS}}</tbody></table>
   </div>
 
-  <h2>📡 信源（{{SOURCES_COUNT}}）</h2>
+  <h2>📡 信源</h2>
   <div class="card">
-    <table>
-      <tbody>{{SOURCES}}</tbody>
-    </table>
+    <table><tbody>{{SOURCES}}</tbody></table>
   </div>
 
-  <footer style="text-align:center;color:var(--muted);font-size:12px;margin-top:30px">
-    <a href="/">← 返回双榜</a> · RSS：<a href="/feed/news.xml">资讯</a> / <a href="/feed/github.xml">项目</a> / <a href="/feed/digest.xml">期刊</a>
+  <footer>
+    RSS：<a href="/feed/news.xml">资讯</a> / <a href="/feed/github.xml">项目</a> / <a href="/feed/digest.xml">期刊</a>
   </footer>
 </div>
 </body>

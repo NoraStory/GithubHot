@@ -1,120 +1,250 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GithubHot · GitHub × AI 双热点</title>
+<title>GithubHot · GitHub 开源项目热点 × AI 资讯热点</title>
+<link rel="stylesheet" href="https://files.lololowe.com/fonts/lxgw-lite/result.css">
 <style>
-  :root {
-    --bg: #0d1117; --panel: #161b22; --border: #21262d; --fg: #e6edf3;
-    --muted: #8b949e; --accent: #58a6ff; --hot: #f78166; --green: #3fb950; --tag: #1f6feb;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--fg); font: 15px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
-  .wrap { max-width: 1060px; margin: 0 auto; padding: 24px 16px 64px; }
-  header { position: relative; overflow: hidden; text-align: center; padding: 44px 16px 36px; border-radius: 14px; border: 1px solid var(--border); margin-bottom: 18px;
-    background:
-      radial-gradient(ellipse 60% 90% at 15% 0%, rgba(88,166,255,.16), transparent 60%),
-      radial-gradient(ellipse 60% 90% at 85% 0%, rgba(247,129,102,.14), transparent 60%),
-      repeating-linear-gradient(90deg, rgba(230,237,243,.03) 0 1px, transparent 1px 48px),
-      repeating-linear-gradient(0deg, rgba(230,237,243,.03) 0 1px, transparent 1px 48px),
-      linear-gradient(180deg, #10161f, var(--panel));
-  }
-  header .glow { position:absolute; top:-40px; left:50%; transform:translateX(-50%); width:420px; height:120px;
-    background: radial-gradient(ellipse at center, rgba(88,166,255,.25), transparent 70%); filter: blur(6px); pointer-events:none; }
-  header h1 { font-size: 38px; letter-spacing: 2px; line-height:1.2; }
-  header h1 .gh { color: var(--accent); }
-  header h1 .fire { color: var(--hot); }
-  header .tagline { color: var(--fg); opacity:.9; margin-top: 10px; font-size: 15px; }
-  header .tagline .x { color: var(--hot); font-weight:700; padding: 0 6px; }
-  header .stats { color: var(--muted); margin-top: 10px; font-size: 12.5px; }
-  .searchform { display:flex; gap:8px; max-width:520px; margin: 18px auto 0; }
-  .searchform input { flex:1; background:var(--bg); color:var(--fg); border:1px solid var(--border); border-radius:20px; padding:9px 18px; font-size:14px; outline:none; }
-  .searchform input:focus { border-color: var(--accent); }
-  .searchform button { background: var(--tag); color:#fff; border:none; border-radius:20px; padding:0 22px; cursor:pointer; font-size:13.5px; }
-  .tabs { display: flex; gap: 8px; justify-content: center; margin: 22px 0 18px; flex-wrap: wrap; }
-  .tab { padding: 8px 20px; border-radius: 20px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; font-size: 14px; }
-  .tab.active { color: var(--fg); border-color: var(--accent); background: #12233b; }
-  section { display: none; }
-  section.active { display: block; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 16px; margin-bottom: 14px; overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 10px 8px; border-bottom: 1px solid var(--border); }
-  td { padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  tr:last-child td { border-bottom: none; }
-  .rank { color: var(--muted); width: 36px; font-variant-numeric: tabular-nums; }
-  .repo a { color: var(--accent); text-decoration: none; font-weight: 600; }
-  .repo a:hover { text-decoration: underline; }
-  .desc { color: var(--muted); font-size: 13px; margin-top: 2px; }
-  .topics .topic { display: inline-block; background: var(--tag); color: #fff; border-radius: 4px; padding: 0 6px; font-size: 11px; margin-right: 4px; margin-top: 4px; }
-  .num { font-variant-numeric: tabular-nums; }
-  .hot { color: var(--hot); font-weight: 600; }
-  .badge { display: inline-block; background: #238636; color: #fff; font-size: 11px; border-radius: 10px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
-  .badge:first-child { margin-left: 10px; }
-  .story { padding: 14px 4px; border-bottom: 1px solid var(--border); }
-  .story:last-child { border-bottom: none; }
-  .story-head a { color: var(--accent); text-decoration: none; font-weight: 600; font-size: 16px; }
-  .story-head a:hover { text-decoration: underline; }
-  .summary { color: var(--fg); opacity: .85; margin-top: 6px; font-size: 14px; }
-  .overview { color: var(--muted); margin-top: 6px; font-size: 13px; border-left: 2px solid var(--hot); padding-left: 10px; }
-  .overview:empty { display: none; }
-  .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
-  .fusion { padding: 12px 4px; border-bottom: 1px solid var(--border); }
-  .fusion:last-child { border-bottom: none; }
-  .fusion .x { color: var(--hot); margin: 0 10px; font-weight: 700; }
-  .fusion .news { color: var(--fg); }
-  .fusion a { color: var(--accent); text-decoration: none; font-weight: 600; }
-  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
-  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 30px; }
-  footer a { color: var(--accent); }
-  @media (max-width: 640px) { td:nth-child(3), th:nth-child(3) { display: none; } }
+/* ===== 设计令牌：像素级取自 blog.lololowe.com（Hexo AnZhiYu + 站点定制粉主题）===== */
+:root {
+  --anzhiyu-theme: #eabcbd;
+  --anzhiyu-theme-op: rgba(234, 188, 189, 0.25);
+  --anzhiyu-hover: #ff7242;
+  --anzhiyu-background: #f7f9fe;
+  --anzhiyu-card-bg: #fff;
+  --anzhiyu-card-border: #e3e8f7;
+  --anzhiyu-fontcolor: #363636;
+  --anzhiyu-secondary: #4c4948;
+  --anzhiyu-gray: #999;
+  --anzhiyu-blue: #425aef;
+  --anzhiyu-green: #36b562;
+  --anzhiyu-radius: 8px;
+  --card-box-shadow: 0 3px 8px 6px rgba(7, 17, 27, 0.05);
+  --card-hover-box-shadow: 0 3px 8px 6px rgba(7, 17, 27, 0.09);
+  --style-border: 1px solid var(--anzhiyu-card-border);
+  --text-bg-hover: rgba(234, 188, 189, 0.7);
+  --font: 'LXGW WenKai Lite', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 70px; }
+body { background: var(--anzhiyu-background); color: var(--anzhiyu-fontcolor); font: 16px/1.7 var(--font); }
+::selection { background: var(--text-bg-hover); }
+a { color: var(--anzhiyu-fontcolor); text-decoration: none; transition: color .3s; }
+a:hover { color: var(--anzhiyu-hover); }
+
+/* ===== 吸顶导航（未滚动时透明覆盖在横幅上，滚动后白底描边——AnZhiYu nav-fixed 行为）===== */
+#nav { display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem; height: 60px; position: absolute; top: 0; left: 0; right: 0; z-index: 91; transition: all .5s, border .3s; }
+#nav.nav-fixed { position: fixed; background: var(--anzhiyu-card-bg); outline: 1px solid var(--anzhiyu-card-border); box-shadow: 0 4px 12px -3px rgba(102, 102, 102, .15); }
+#nav #site-name { font-weight: 700; font-size: 1.2rem; letter-spacing: .5px; display: flex; align-items: center; gap: 8px; }
+#nav #site-name .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--anzhiyu-theme); box-shadow: 0 0 0 4px var(--anzhiyu-theme-op); }
+#nav .menus_items { display: flex; gap: 4px; align-items: center; }
+#nav .site-page { position: relative; padding: 8px 14px; border-radius: var(--anzhiyu-radius); font-size: .95rem; color: var(--anzhiyu-fontcolor); }
+#nav .site-page:hover { background: var(--anzhiyu-background); color: var(--anzhiyu-hover); }
+#nav.nav-fixed .site-page:hover { background: var(--anzhiyu-theme-op); }
+#nav .search-btn { border: none; background: transparent; cursor: pointer; font: inherit; color: inherit; }
+
+/* ===== 首页横幅（post-bg：500px 全宽封面 + 居中标题，像素级同款结构）===== */
+#page-header.post-bg { position: relative; height: 31.25rem; overflow: hidden;
+  background:
+    radial-gradient(ellipse 55% 85% at 12% 8%, rgba(66, 90, 239, .35), transparent 62%),
+    radial-gradient(ellipse 50% 80% at 88% 12%, rgba(234, 188, 189, .55), transparent 60%),
+    radial-gradient(ellipse 45% 65% at 50% 108%, rgba(255, 114, 66, .28), transparent 58%),
+    linear-gradient(160deg, #66717f 0%, #4c586f 48%, #3d4a63 100%);
+}
+#page-header.post-bg #post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 1.5rem; color: #fff; }
+.post-title { font-size: 3.2rem; font-weight: 700; letter-spacing: 3px; text-shadow: 0 4px 18px rgba(0, 0, 0, .25); }
+#post-info .tagline { margin-top: 14px; font-size: 1.1rem; opacity: .95; }
+#post-info .tagline .x { color: #ffd7c9; font-weight: 700; padding: 0 8px; }
+#post-info .post-meta { margin-top: 10px; font-size: .85rem; opacity: .8; }
+#post-info .searchform { display: flex; gap: 0; max-width: 480px; width: 88%; margin: 26px auto 0; background: rgba(255, 255, 255, .96); border-radius: 50px; padding: 4px 4px 4px 20px; box-shadow: 0 8px 24px -6px rgba(0, 0, 0, .25); }
+#post-info .searchform input { flex: 1; border: none; outline: none; background: transparent; font: inherit; color: var(--anzhiyu-fontcolor); font-size: .95rem; }
+#post-info .searchform button { border: none; background: var(--anzhiyu-theme); color: #fff; border-radius: 50px; padding: 9px 26px; cursor: pointer; font: inherit; font-size: .9rem; transition: background .3s; }
+#post-info .searchform button:hover { background: var(--anzhiyu-hover); }
+
+/* ===== 布局（.layout：1200px 居中，文章列 + 侧栏）===== */
+.layout { display: flex; margin: 0 auto; padding: 1.25rem 1.5rem 2rem; max-width: 1200px; gap: 1.25rem; align-items: flex-start; }
+#article-container { flex: 1; min-width: 0; width: 100%; }
+#aside-content { width: 300px; flex-shrink: 0; }
+
+/* ===== 卡片（cardHover：白底 8px 圆角 + 双层投影 + 悬停上浮）===== */
+#article-container, .card-widget { background: var(--anzhiyu-card-bg); border-radius: var(--anzhiyu-radius); box-shadow: var(--card-box-shadow); transition: box-shadow .3s, transform .3s; }
+.card-widget { padding: 1.25rem 1.25rem 1rem; margin-bottom: 1.25rem; }
+.card-widget:hover { box-shadow: var(--card-hover-box-shadow); }
+#article-container { padding: 2.25rem 2.5rem; }
+@media (max-width: 900px) {
+  #aside-content { display: none; }
+  #article-container { padding: 1.5rem 1.25rem; }
+  .post-title { font-size: 2.2rem; }
+  #page-header.post-bg { height: 24rem; }
+  #nav .menus_items .site-page { padding: 8px 8px; font-size: .85rem; }
+}
+
+/* ===== 标题（beautify 彩色旋转符号：h2 红 / h3 黄 / h4 绿）===== */
+#article-container h2, #article-container h3 { position: relative; margin: 1.6rem 0 1rem; }
+#article-container h2 { font-size: 1.45rem; padding-left: 1.35rem; margin-top: 2.2rem; }
+#article-container h2::before, #article-container h3::before { position: absolute; animation: ccc 1.6s linear infinite; }
+#article-container h2::before { content: '✽'; color: #fb7061; left: 0; font-size: 1.1rem; }
+#article-container h3::before { content: '✦'; color: #ffbf00; left: 0; font-size: .95rem; }
+@keyframes ccc { 0% { transform: rotate(0); } to { transform: rotate(-1turn); } }
+#article-container .first-title { margin-top: 0; }
+
+/* ===== 表格（主题同款：粉调表头 + 行悬停）===== */
+table { width: 100%; border-collapse: collapse; font-size: .93rem; }
+thead th { background: var(--anzhiyu-theme-op); color: var(--anzhiyu-secondary); font-weight: 600; padding: 10px 10px; text-align: left; }
+thead th:first-child { border-radius: 6px 0 0 6px; }
+thead th:last-child { border-radius: 0 6px 6px 0; }
+tbody td { padding: 10px 10px; border-bottom: 1px solid #f1f3fa; vertical-align: top; }
+tbody tr { transition: background .2s; }
+tbody tr:hover { background: var(--anzhiyu-background); }
+tbody tr:last-child td { border-bottom: none; }
+.rank { width: 42px; text-align: center; font-weight: 700; color: var(--anzhiyu-gray); font-variant-numeric: tabular-nums; }
+.rank .medal { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; align-items: center; justify-content: center; font-size: .85rem; color: #fff; }
+.rank .medal.m1 { background: linear-gradient(135deg, #ffd18c, #f7a94b); }
+.rank .medal.m2 { background: linear-gradient(135deg, #dfe4ef, #b7c1d4); }
+.rank .medal.m3 { background: linear-gradient(135deg, #f3c3a4, #dd9368); }
+.repo-name { font-weight: 700; color: var(--anzhiyu-blue); }
+.repo-name:hover { color: var(--anzhiyu-hover); }
+.repo-desc { color: var(--anzhiyu-secondary); font-size: .86rem; margin-top: 2px; }
+.repo-desc .zh { color: var(--anzhiyu-fontcolor); }
+.repo-desc .en { color: var(--anzhiyu-gray); font-size: .8rem; }
+.langchip { display: inline-block; background: var(--anzhiyu-theme-op); border-radius: 50px; padding: 0 10px; font-size: .78rem; color: var(--anzhiyu-secondary); }
+.num { font-variant-numeric: tabular-nums; }
+.gain { color: var(--anzhiyu-green); font-weight: 700; }
+.hot { color: var(--anzhiyu-hover); font-weight: 700; }
+
+/* ===== 事件卡片（article-tag 粉色标签胶囊风格）===== */
+.story { padding: 14px 4px; border-bottom: 1px dashed var(--anzhiyu-card-border); }
+.story:last-child { border-bottom: none; }
+.story-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.story-head .rank { width: auto; }
+.story-head .title { font-weight: 700; font-size: 1.05rem; color: var(--anzhiyu-fontcolor); }
+.story-head .title:hover { color: var(--anzhiyu-hover); }
+.badge { display: inline-block; background: var(--anzhiyu-theme-op); color: #a8766f; border-radius: 50px; padding: 1px 10px; font-size: .72rem; }
+.badge.new { background: #ffe2c7; color: #d97a2b; }
+.badge.rise { background: #ffd9e2; color: #d4526e; }
+.badge.gh { background: #dbe5ff; color: #425aef; }
+.story .summary { color: var(--anzhiyu-secondary); margin-top: 6px; font-size: .95rem; }
+.story .overview { margin-top: 8px; padding: 8px 12px; background: var(--anzhiyu-background); border-radius: 6px; border-left: 3px solid var(--anzhiyu-theme); font-size: .88rem; color: var(--anzhiyu-secondary); }
+.story .meta { color: var(--anzhiyu-gray); font-size: .8rem; margin-top: 6px; }
+.fusion-item { padding: 11px 4px; border-bottom: 1px dashed var(--anzhiyu-card-border); font-size: .95rem; }
+.fusion-item:last-child { border-bottom: none; }
+.fusion-item .x { color: var(--anzhiyu-hover); font-weight: 700; padding: 0 10px; }
+.fusion-item a { color: var(--anzhiyu-blue); font-weight: 600; }
+.fusion-item a:hover { color: var(--anzhiyu-hover); }
+.empty { color: var(--anzhiyu-gray); text-align: center; padding: 26px 0; font-size: .92rem; }
+
+/* ===== 侧栏（card-widget：作者卡渐变头图 + site-data 数据栏）===== */
+.card-widget.card-info { padding: 0; overflow: hidden; }
+.card-info .avatar-bg { height: 92px; background: linear-gradient(120deg, #eabcbd, #f6d6c3 40%, #c9d4f4 80%); background-size: 200% 200%; animation: gradientMove 10s ease infinite; }
+@keyframes gradientMove { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+.card-info .card-info-content { padding: .9rem 1.25rem 1.1rem; }
+.card-info .author { font-weight: 700; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; }
+.card-info .desc { color: var(--anzhiyu-gray); font-size: .82rem; margin-top: 2px; }
+.site-data { display: flex; margin-top: 12px; border-top: 1px dashed var(--anzhiyu-card-border); padding-top: 12px; }
+.site-data > div { flex: 1; text-align: center; }
+.site-data .headline { color: var(--anzhiyu-gray); font-size: .78rem; }
+.site-data .length-num { font-weight: 700; font-size: 1.1rem; color: var(--anzhiyu-hover); }
+.widget-title { font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.widget-title::before { content: '✿'; color: var(--anzhiyu-theme); }
+.widget-list a { display: flex; justify-content: space-between; padding: 6px 2px; border-radius: 6px; font-size: .92rem; color: var(--anzhiyu-secondary); }
+.widget-list a:hover { background: var(--anzhiyu-background); color: var(--anzhiyu-hover); padding-left: 8px; }
+.widget-list .date { color: var(--anzhiyu-gray); font-size: .78rem; }
+
+/* ===== 页脚 ===== */
+footer { text-align: center; color: var(--anzhiyu-gray); font-size: .85rem; padding: 26px 16px 40px; }
+footer a { color: var(--anzhiyu-hover); margin: 0 2px; }
+footer .sep { color: var(--anzhiyu-card-border); margin: 0 8px; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="glow"></div>
-    <h1><span class="gh">Github</span><span class="fire">Hot</span></h1>
-    <div class="tagline">GitHub 开源项目热点<span class="x">×</span>AI 资讯热点 —— 双热度追踪</div>
-    <div class="stats">生成于 {{GENERATED}} · 独立来源热度 × 快照差分增长 × 事件融合</div>
+<div id="page-header" class="post-bg">
+  <nav id="nav">
+    <a id="site-name" href="/"><span class="dot"></span>GithubHot</a>
+    <div class="menus_items">
+      <a class="site-page" href="#github">GitHub 榜</a>
+      <a class="site-page" href="#news">AI 榜</a>
+      <a class="site-page" href="#fusion">融合</a>
+      <a class="site-page" href="/console">控制台</a>
+      <a class="site-page search-btn" href="/search">🔍 搜索</a>
+    </div>
+  </nav>
+  <div id="post-info">
+    <h1 class="post-title">GithubHot</h1>
+    <div class="tagline">GitHub 开源项目热点<span class="x">×</span>AI 资讯热点</div>
+    <div class="post-meta">生成于 {{GENERATED}} · 独立来源热度 × 快照差分增长 × 事件融合</div>
     <form class="searchform" action="/search" method="get">
-      <input type="text" name="q" placeholder="搜索已精选的资讯与事件，如：Claude、agent、向量数据库">
+      <input type="text" name="q" placeholder="搜索已精选的资讯与事件...">
       <button>搜索</button>
     </form>
-  </header>
-  <div class="tabs">
-    <button class="tab active" data-t="gh">🔥 GitHub 项目榜</button>
-    <button class="tab" data-t="ai">🤖 AI 资讯榜</button>
-    <button class="tab" data-t="fx">🔗 融合观察</button>
   </div>
-  <section id="gh" class="active">
-    <div class="card"><table>
-      <thead><tr><th>#</th><th>项目</th><th>语言</th><th>24h ★</th><th>热度</th></tr></thead>
-      <tbody>{{GITHUB_ROWS}}</tbody>
-    </table></div>
-  </section>
-  <section id="ai">
-    <div class="card">{{NEWS_ROWS}}</div>
-  </section>
-  <section id="fx">
-    <div class="card">{{FUSION_ROWS}}</div>
-  </section>
-  <footer style="text-align:center;color:var(--muted);font-size:12px;margin-top:30px">
-    数据由本地流水线自动采集与 LLM 精选 · <a href="https://github.com/NoraStory/GithubHot" target="_blank" rel="noopener">GithubHot</a>
-    · <a href="/console">控制台</a>
-    · RSS：<a href="/feed/news.xml">资讯</a> / <a href="/feed/github.xml">项目</a> / <a href="/feed/digest.xml">期刊</a>
-    · APP/Agent：<code>/api/v1/hot</code>
-  </footer>
 </div>
+
+<div class="layout" id="content-inner">
+  <main id="article-container">
+    <h2 class="first-title" id="github">GitHub 项目热点 <span class="langchip" style="vertical-align:middle">24h 增长口径</span></h2>
+    <table>
+      <thead><tr><th></th><th>项目</th><th>语言</th><th>24h ★</th><th>热度</th></tr></thead>
+      <tbody>{{GITHUB_ROWS}}</tbody>
+    </table>
+
+    <h2 id="news">AI 资讯热点</h2>
+    <div>{{NEWS_ROWS}}</div>
+
+    <h3 id="fusion">融合观察：资讯 × 项目互相印证</h3>
+    <div>{{FUSION_ROWS}}</div>
+  </main>
+
+  <aside id="aside-content">
+    <div class="card-widget card-info">
+      <div class="avatar-bg"></div>
+      <div class="card-info-content">
+        <div class="author">🔥 GithubHot</div>
+        <div class="desc">双热点追踪站 · 自动采集与 LLM 精选</div>
+        <div class="site-data">
+          <div><div class="length-num">{{STAT_PROJECTS}}</div><div class="headline">项目</div></div>
+          <div><div class="length-num">{{STAT_STORIES}}</div><div class="headline">事件</div></div>
+          <div><div class="length-num">{{STAT_FUSION}}</div><div class="headline">融合</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-widget">
+      <div class="widget-title">期刊</div>
+      <div class="widget-list">{{DIGEST_LIST}}</div>
+    </div>
+    <div class="card-widget">
+      <div class="widget-title">订阅</div>
+      <div class="widget-list">
+        <a href="/feed/news.xml" target="_blank" rel="noopener"><span>RSS · AI 资讯榜</span><span>→</span></a>
+        <a href="/feed/github.xml" target="_blank" rel="noopener"><span>RSS · GitHub 项目榜</span><span>→</span></a>
+        <a href="/feed/digest.xml" target="_blank" rel="noopener"><span>RSS · 期刊</span><span>→</span></a>
+      </div>
+    </div>
+    <div class="card-widget">
+      <div class="widget-title">更多</div>
+      <div class="widget-list">
+        <a href="/console"><span>控制台 · 用量与诊断</span><span>→</span></a>
+        <a href="/api/v1/hot" target="_blank" rel="noopener"><span>API · /api/v1/hot</span><span>→</span></a>
+        <a href="https://github.com/NoraStory/GithubHot" target="_blank" rel="noopener"><span>GitHub 仓库</span><span>→</span></a>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<footer>
+  <span>由 <a href="https://github.com/NoraStory/GithubHot">GithubHot</a> 自动生成</span>
+  <span class="sep">|</span>
+  <span>数据经本地流水线采集与 LLM 精选</span>
+</footer>
 <script>
-document.querySelectorAll('.tab').forEach(function (t) {
-  t.addEventListener('click', function () {
-    document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
-    document.querySelectorAll('section').forEach(function (x) { x.classList.remove('active'); });
-    t.classList.add('active');
-    document.getElementById(t.dataset.t).classList.add('active');
-  });
-});
+(function () {
+  var nav = document.getElementById('nav');
+  var onScroll = function () {
+    if (window.scrollY > 20) { nav.classList.add('nav-fixed'); } else { nav.classList.remove('nav-fixed'); }
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
 </script>
 </body>
 </html>

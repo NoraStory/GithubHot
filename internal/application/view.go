@@ -32,17 +32,18 @@ func BuildHotView(ctx context.Context, d Deps, kind digest.Kind) (HotView, error
 	for i, row := range board {
 		badges := projectBadges(row, now)
 		view.GitHub = append(view.GitHub, ProjectRow{
-			Rank:         i + 1,
-			FullName:     row.Project.FullName,
-			URL:          row.Project.HTMLURL,
-			Description:  row.Project.Description,
-			Language:     row.Project.Language,
-			Topics:       row.Project.Topics,
-			Stars:        row.Project.Stars,
-			StarsGained:  github.StarsGainedIn(row.Snaps, now, spec.projWindow),
-			TrendingRank: row.Project.TrendingRank,
-			Hotness:      row.Hotness,
-			Badges:       badges,
+			Rank:          i + 1,
+			FullName:      row.Project.FullName,
+			URL:           row.Project.HTMLURL,
+			Description:   row.Project.Description,
+			DescriptionZh: row.Project.DescriptionZh,
+			Language:      row.Project.Language,
+			Topics:        row.Project.Topics,
+			Stars:         row.Project.Stars,
+			StarsGained:   github.StarsGainedIn(row.Snaps, now, spec.projWindow),
+			TrendingRank:  row.Project.TrendingRank,
+			Hotness:       row.Hotness,
+			Badges:        badges,
 		})
 	}
 
@@ -85,6 +86,13 @@ func BuildHotView(ctx context.Context, d Deps, kind digest.Kind) (HotView, error
 					Project: projectRowOf(row, now, 0),
 				})
 			}
+		}
+	}
+
+	// ---------- 期刊（侧栏） ----------
+	for _, kind := range []digest.Kind{digest.KindDaily, digest.KindWeekly, digest.KindMonthly} {
+		if dg, err := d.Digests.Latest(ctx, kind); err == nil && dg != nil {
+			view.Digests = append(view.Digests, DigestMeta{Date: dg.Date, Kind: string(dg.Kind)})
 		}
 	}
 	return view, nil

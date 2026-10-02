@@ -94,7 +94,9 @@ func (s *Server) feedGitHub(w http.ResponseWriter, r *http.Request) {
 	items := make([]rssItem, 0, len(v.GitHub))
 	for _, p := range v.GitHub {
 		desc := fmt.Sprintf("24h +%d★ · 热度 %.1f", p.StarsGained, p.Hotness)
-		if p.Description != "" {
+		if p.DescriptionZh != "" {
+			desc += " · " + p.DescriptionZh
+		} else if p.Description != "" {
 			desc += " · " + p.Description
 		}
 		items = append(items, rssItem{

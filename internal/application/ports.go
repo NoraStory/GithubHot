@@ -177,18 +177,19 @@ type DigestStats struct {
 
 // ProjectRow GitHub 项目榜单行。
 type ProjectRow struct {
-	Rank         int      `json:"rank"`
-	FullName     string   `json:"fullName"`
-	URL          string   `json:"url"`
-	Description  string   `json:"description"`
-	Language     string   `json:"language"`
-	Topics       []string `json:"topics"`
-	Stars        int      `json:"stars"`
-	StarsGained  int      `json:"starsGained24h"`
-	TrendingRank int      `json:"trendingRank"`
-	Hotness      float64  `json:"hotness"`
-	Badges       []string `json:"badges"`
-	StoryID      string   `json:"storyId"`
+	Rank          int      `json:"rank"`
+	FullName      string   `json:"fullName"`
+	URL           string   `json:"url"`
+	Description   string   `json:"description"`
+	DescriptionZh string   `json:"descriptionZh"`
+	Language      string   `json:"language"`
+	Topics        []string `json:"topics"`
+	Stars         int      `json:"stars"`
+	StarsGained   int      `json:"starsGained"`
+	TrendingRank  int      `json:"trendingRank"`
+	Hotness       float64  `json:"hotness"`
+	Badges        []string `json:"badges"`
+	StoryID       string   `json:"storyId"`
 }
 
 // StoryRow AI 资讯榜单行。
@@ -221,6 +222,7 @@ type HotView struct {
 	GitHub    []ProjectRow `json:"github"`
 	News      []StoryRow   `json:"news"`
 	Fusion    []FusionRow  `json:"fusion"`
+	Digests   []DigestMeta `json:"digests"`
 }
 
 // Deps 应用层依赖的最小端口集合（全部在领域层或上方声明，基础设施层实现）。

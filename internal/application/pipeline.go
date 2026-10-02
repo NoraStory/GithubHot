@@ -36,6 +36,18 @@ type PipelineResult struct {
 func RunPipeline(ctx context.Context, d Deps) (*PipelineResult, error) {
 	started := d.Clock.Now()
 	res := &PipelineResult{}
+	setPhase := func(phase string) {
+		if ps, ok := d.LLM.(PhaseSetter); ok {
+			ps.SetPhase(phase)
+		}
+	}
+	budgetHit := func(stage string) bool {
+		if bc, ok := d.LLM.(BudgetChecker); ok && bc.BudgetExceeded() {
+			fmt.Printf("[pipeline] 预算熔断：跳过 %s 阶段（已有数据照常出榜出日报）\n", stage)
+			return true
+		}
+		return false
+	}
 
 	imported, err := SeedSources(ctx, d)
 	if err != nil {
@@ -57,20 +69,17 @@ func RunPipeline(ctx context.Context, d Deps) (*PipelineResult, error) {
 	}
 	res.Discover = ds
 
+	if d.LLM != nil && !budgetHit("描述翻译") {
+		setPhase("translate")
+		if n, err := TranslateProjectDescriptions(ctx, d); err != nil && !errors.Is(err, ErrBudgetExceeded) {
+			fmt.Printf("[pipeline] 描述翻译失败（跳过，展示英文原文）: %v\n", err)
+		} else if n > 0 {
+			fmt.Printf("[pipeline] 翻译项目描述 %d 条\n", n)
+		}
+	}
+
 	if d.LLM == nil {
 		return res, fmt.Errorf("LLM 必选：请配置 LLM_API_KEY / LLM_BASE_URL（OpenAI 兼容）后重试；本次采集与发现结果已入库，重跑不会浪费")
-	}
-	setPhase := func(phase string) {
-		if ps, ok := d.LLM.(PhaseSetter); ok {
-			ps.SetPhase(phase)
-		}
-	}
-	budgetHit := func(stage string) bool {
-		if bc, ok := d.LLM.(BudgetChecker); ok && bc.BudgetExceeded() {
-			fmt.Printf("[pipeline] 预算熔断：跳过 %s 阶段（已有数据照常出榜出日报）\n", stage)
-			return true
-		}
-		return false
 	}
 
 	setPhase("prefilter")

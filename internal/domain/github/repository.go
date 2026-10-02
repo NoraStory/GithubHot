@@ -17,4 +17,6 @@ type Repository interface {
 	AllSnapshotsSince(ctx context.Context, since time.Time) (map[string][]Snapshot, error)
 	// Touch 更新最近发现时间与 trending 排名等派生字段。
 	Touch(ctx context.Context, p Project) error
+	// SaveDescriptionZh 更新中文描述（翻译阶段回写）。
+	SaveDescriptionZh(ctx context.Context, fullName, zh string) error
 }

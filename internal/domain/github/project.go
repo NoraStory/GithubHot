@@ -16,16 +16,17 @@ var fullNameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 // Project 仓库项目实体。FullName（owner/repo）是身份标识。
 type Project struct {
-	FullName     string
-	HTMLURL      string
-	Description  string
-	Language     string
-	Topics       []string
-	Stars        int
-	Forks        int
-	TrendingRank int // 最近一次 trending 页排名（0=未上榜）
-	FirstSeenAt  time.Time
-	LastSeenAt   time.Time
+	FullName      string
+	HTMLURL       string
+	Description   string
+	DescriptionZh string // 中文描述（LLM 翻译，发现阶段批量补全）
+	Language      string
+	Topics        []string
+	Stars         int
+	Forks         int
+	TrendingRank  int // 最近一次 trending 页排名（0=未上榜）
+	FirstSeenAt   time.Time
+	LastSeenAt    time.Time
 }
 
 // New 校验并构造项目。
