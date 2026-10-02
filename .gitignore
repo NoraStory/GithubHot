@@ -1,6 +1,6 @@
-# 二进制
-githubhot
-githubhot.exe
+# 二进制（根锚定，避免误伤 cmd/githubhot/ 目录）
+/githubhot
+/githubhot.exe
 *.exe
 
 # 本地数据（日报与站点产物由流水线生成，是否入库由你决定：
