@@ -36,10 +36,17 @@ const groups = [
 
 // 申请友链：模板复制 → GitHub Issue 提交（参考站 addFriendLink 的改造版）
 const applyText = computed(() => '昵称（请勿包含博客等字样）：\n网站地址（要求博客地址，请勿提交个人主页）：\n头像图片url（请提供尽可能清晰的图片）：\n描述：\n站点截图（可选）：')
+const siteInfo = computed(() => '名称：GithubHot\n网址：https://github.com/NoraStory/GithubHot\n描述：GitHub 开源项目热点 × AI 资讯热点 · 自动采集 / LLM 精选 / 双榜日报')
 async function copyApply() {
   try {
     await navigator.clipboard.writeText(applyText.value)
     window.anzhiyu && window.anzhiyu.snackbarShow('申请模板已复制，去 GitHub Issue 提交', false, 2500)
+  } catch (e) { /* 忽略 */ }
+}
+async function copySiteInfo() {
+  try {
+    await navigator.clipboard.writeText(siteInfo.value)
+    window.anzhiyu && window.anzhiyu.snackbarShow('本站信息已复制，欢迎互链～', false, 2000)
   } catch (e) { /* 忽略 */ }
 }
 function goSubmit() { applyOpen.value = false; window.open('https://github.com/NoraStory/GithubHot/issues/new', '_blank') }
@@ -51,10 +58,22 @@ function goSubmit() { applyOpen.value = false; window.open('https://github.com/N
     <div id="post">
       <div id="article-container" class="article">
         <div class="flink flink-apply">
-          <h2>申请友链（0）</h2>
-          <div class="apply-bar">
-            <span class="apply-tip">把本站加入你的友链后，复制模板内容提交到 GitHub Issue 即可互链～</span>
-            <button class="apply-btn" @click="applyOpen = true">+ 申请友链</button>
+          <h2>友链与互链</h2>
+          <div class="apply-grid">
+            <div class="apply-card">
+              <div class="apply-card-title">🤝 互链本站</div>
+              <div class="apply-card-desc">把本站加入你的友链后，复制下方信息粘贴即可：名称 / 网址 / 描述。</div>
+              <button class="apply-btn" @click="copySiteInfo">复制本站信息</button>
+            </div>
+            <div class="apply-card">
+              <div class="apply-card-title">📮 申请加入</div>
+              <div class="apply-card-desc">按模板填写你的站点信息，提交到 GitHub Issue；审核通过后互链展示。</div>
+              <button class="apply-btn" @click="applyOpen = true">+ 申请友链</button>
+            </div>
+            <div class="apply-card">
+              <div class="apply-card-title">📋 审核流程</div>
+              <div class="apply-card-desc">① 你的站点先加上本站链接 → ② 提交 Issue 申请 → ③ 审核通过后本站展示你的站点。</div>
+            </div>
           </div>
         </div>
         <div v-for="g in groups" :key="g.title" class="flink">
@@ -106,8 +125,11 @@ function goSubmit() { applyOpen.value = false; window.open('https://github.com/N
 .site-card-desc { color: var(--anzhiyu-gray); font-size: .8rem; }
 
 /* 申请友链 */
-.apply-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; background: var(--anzhiyu-background); border-radius: var(--anzhiyu-radius); padding: 14px 18px; }
-.apply-tip { color: var(--anzhiyu-gray); font-size: .86rem; }
+.apply-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.apply-card { background: var(--anzhiyu-background); border: 1px solid var(--anzhiyu-card-border); border-radius: var(--anzhiyu-radius); padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+.apply-card-title { font-weight: 700; font-size: .98rem; color: var(--anzhiyu-fontcolor); }
+.apply-card-desc { color: var(--anzhiyu-gray); font-size: .84rem; line-height: 1.7; flex: 1; }
+.apply-card .apply-btn { align-self: flex-start; }
 .apply-btn { background: var(--anzhiyu-theme); color: #fff; border: none; border-radius: 20px; padding: 7px 18px; font-size: .88rem; cursor: pointer; }
 .apply-btn:hover { background: var(--anzhiyu-hover); }
 .apply-btn.plain { background: transparent; color: var(--anzhiyu-main); border: 1px solid var(--anzhiyu-main); }

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { api, setToken, getToken } from './lib/api'
 import SiteFooter from './components/SiteFooter.vue'
@@ -219,6 +219,16 @@ async function doSearch() {
   const d = await api.get(`/api/v1/search?q=${encodeURIComponent(searchQ.value)}`)
   searchResults.value = d.results || []
 }
+
+// 打开搜索遮罩时自动聚焦输入框
+watch(searchMask, (v) => {
+  if (v) {
+    nextTick(() => {
+      const i = document.querySelector('#search-mask .search-dialog-input input')
+      if (i) i.focus()
+    })
+  }
+})
 
 // 中控台标签云
 const tagCloud = computed(() => {
@@ -477,8 +487,13 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
     </div>
   </nav>
 
-  <!-- AnZhiYu 中控台面板（#console.show 主题机制：遮罩 + 卡片组 + 底部工具条） -->
+  <!-- AnZhiYu 中控台面板（#console.show 主题机制：标题栏 + 卡片组 + 底部工具条 + 遮罩） -->
   <div id="console" :class="{ show: consoleOpen }">
+    <div class="console-title">
+      <span>GithubHot 中控台</span>
+      <span class="sub">热点 · 兴趣点 · 期刊 · 快捷开关</span>
+      <span class="console-close" @click="consoleOpen = false">✕</span>
+    </div>
     <div class="console-card-group">
       <div class="console-card-group-left">
         <div class="console-card" id="card-newest-stories">
@@ -760,7 +775,51 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
 html.hide-aside #aside-content { display: none; }
 html.hide-aside .layout { max-width: 1000px; }
 
+/* ===== 导航栏：昼夜两套都保证可读（不透明底 + 毛玻璃 + 分隔线），组件间距放宽 ===== */
+#nav { background: var(--anzhiyu-background); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); border-bottom: 1px solid var(--anzhiyu-card-border); }
+html[data-theme="dark"] #nav { background: rgba(24, 23, 29, 0.9); }
+#nav .site-page, #nav a, #nav #nav-right .nav-button { color: var(--anzhiyu-fontcolor); }
+#nav #nav-group { gap: 22px; }
+#nav #nav-right { gap: 14px; }
+#nav #nav-right .nav-button { margin: 0 2px; }
+#nav .menus_items { gap: 2px; }
+#nav .menus_item > a.site-page { padding: 8px 12px; }
+#nav .nav-button .site-page { padding: 8px 13px; }
+#nav #nav-totop .totopbtn span { margin-left: 4px; }
+
+/* ===== 中控台：浮层提到内容之上，加标题栏说明这是什么 ===== */
+#console { z-index: 1001; }
+#console .console-title { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px 0 6px; font-size: 1.05rem; font-weight: 700; color: var(--anzhiyu-fontcolor); }
+#console .console-title .sub { font-weight: 400; font-size: .8rem; color: var(--anzhiyu-gray); }
+#console .console-title .console-close { cursor: pointer; color: var(--anzhiyu-gray); font-size: 1rem; padding: 2px 8px; border-radius: 6px; }
+#console .console-title .console-close:hover { color: var(--anzhiyu-hover); }
+
+/* ===== 站内搜索遮罩：主题 #search-mask 默认 display:none，这里完整接管样式 ===== */
+#search-mask { display: flex !important; align-items: flex-start; justify-content: center; padding-top: 14vh; z-index: 1002; }
+#search-mask .search-dialog { display: block; width: min(640px, 92vw); background: var(--anzhiyu-card-bg); border: 1px solid var(--anzhiyu-card-border); border-radius: 14px; padding: 20px 24px 24px; box-shadow: var(--anzhiyu-shadow-main, 0 12px 48px rgba(0,0,0,.25)); animation: slide-in .3s ease; }
+#search-mask .search-dialog-title { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 1.05rem; margin-bottom: 12px; color: var(--anzhiyu-fontcolor); }
+#search-mask .search-dialog-title .close { cursor: pointer; color: var(--anzhiyu-gray); font-size: .9rem; padding: 2px 8px; }
+#search-mask .search-dialog-title .close:hover { color: var(--anzhiyu-hover); }
+#search-mask .search-dialog-input { display: flex; gap: 8px; }
+#search-mask .search-dialog-input input { flex: 1; background: var(--anzhiyu-background); border: 1px solid var(--anzhiyu-card-border); border-radius: 10px; padding: 10px 16px; font: inherit; font-size: .95rem; color: var(--anzhiyu-fontcolor); outline: none; }
+#search-mask .search-dialog-input input:focus { border-color: var(--anzhiyu-theme); }
+#search-mask .search-dialog-input button { background: var(--anzhiyu-theme); color: #fff; border: none; border-radius: 10px; padding: 0 20px; cursor: pointer; font-size: .92rem; }
+#search-mask .search-dialog-input button:hover { background: var(--anzhiyu-hover); }
+#search-mask .search-dialog-results { margin-top: 14px; max-height: 52vh; overflow-y: auto; }
+#search-mask .result-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: var(--anzhiyu-fontcolor); font-size: .92rem; }
+#search-mask .result-item:hover { background: var(--anzhiyu-theme-op); }
+#search-mask .result-item .chip { flex-shrink: 0; background: var(--anzhiyu-theme-op); color: #a8766f; border-radius: 6px; padding: 0 8px; font-size: .74rem; }
+#search-mask .empty { color: var(--anzhiyu-gray); font-size: .88rem; padding: 12px 4px; }
+
 /* 快讯弹幕：容器不拦截点击，条目可交互 */
 .comment-barrage { pointer-events: none; }
 .comment-barrage-item { pointer-events: auto; }
+
+/* 分类条与卡片对齐：同左缘、同右缘（卡片在 20px 内容缩进处） */
+#categoryBar { padding: 0 20px; box-sizing: border-box; }
+
+/* 窄屏隐藏首页横幅组（参考站行为：banner + 音乐播放器在窄屏放不下） */
+@media (max-width: 991px) {
+  #home_top { display: none !important; }
+}
 </style>
