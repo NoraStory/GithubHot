@@ -8,15 +8,14 @@ const router = useRouter()
 const view = ref({ github: [], news: [], fusion: [] })
 const loading = ref(true)
 const filter = ref('all')
-const page = ref(1)
-const pageSize = 8
 
 const digestsAll = ref([])
-const digests = computed(() =>
-  (digestsAll.value || []).filter((d) => filter.value === 'all' || d.kind === filter.value)
+const filteredDigests = computed(() =>
+  (digestsAll.value || []).filter((d) => filter.value === 'all' || d.kind === filter.value).slice(0, 4)
 )
-const paged = computed(() => digests.value.slice((page.value - 1) * pageSize, page.value * pageSize))
-const total = computed(() => digests.value.length)
+// 三栏榜：GitHub / AI 热点前五
+const topGithub = computed(() => (view.value.github || []).slice(0, 5))
+const topNews = computed(() => (view.value.news || []).slice(0, 5))
 
 // ===== 横幅背景视频（AnZhiYu #home-media-container 同构：随机选片/竖横屏/视差由 index_media.js 处理）=====
 const LANDSCAPE_VIDEOS = [
@@ -243,7 +242,7 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
             <div id="catalog-bar">
               <div id="catalog-list">
                 <div v-for="k in [{ v: 'all', l: '全部' }, { v: 'daily', l: '日报' }, { v: 'weekly', l: '周报' }, { v: 'monthly', l: '月报' }]" :key="k.v" class="catalog-list-item" :id="k.v" :class="{ selected: filter === k.v }">
-                  <a href="javascript:void(0)" @click="filter = k.v; page = 1">{{ k.l }}</a>
+                  <a href="javascript:void(0)" @click="filter = k.v">{{ k.l }}</a>
                 </div>
               </div>
               <a class="catalog-more" href="javascript:void(0)" @click="$router.push('/categories')">更多</a>
@@ -252,41 +251,68 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
         </div>
 
         <div v-if="loading" class="loading">加载中 </div>
-        <div v-else-if="!paged.length" class="empty">暂无期刊</div>
 
-        <div v-for="d in paged" :key="d.date" class="recent-post-item fade-up" @click="router.push(`/digest/${d.date}`)">
-          <div class="post_cover left">
-            <router-link :to="`/digest/${d.date}`" :title="d.date">
-              <img class="post_bg" :src="coverOf(d.date)" alt="cover" style="pointer-events: none">
-            </router-link>
-          </div>
-          <div class="recent-post-info">
-            <div class="recent-post-info-top">
-              <div class="recent-post-info-top-tips">
-                <div class="article-categories-original">{{ d.kind === 'weekly' ? '周报' : d.kind === 'monthly' ? '月报' : '日报' }}</div>
+        <!-- 三栏：期刊 / GitHub 热点 / AI 热点 -->
+        <div class="home-columns">
+          <!-- 栏一：期刊（受分类条筛选） -->
+          <section class="home-col">
+            <div class="home-col-head">
+              <span class="home-col-title"><i class="anzhiyufont anzhiyu-icon-book"></i> 期刊报告</span>
+              <router-link class="home-col-more" to="/digests">全部期刊 ›</router-link>
+            </div>
+            <div v-if="!filteredDigests.length" class="empty">暂无期刊</div>
+            <router-link v-for="d in filteredDigests" :key="d.date" class="col-item digest-item" :to="`/digest/${d.date}`" :title="d.date">
+              <img class="col-item-cover" :src="coverOf(d.date)" alt="cover">
+              <div class="col-item-body">
+                <div class="col-item-kind">{{ d.kind === 'weekly' ? '周报' : d.kind === 'monthly' ? '月报' : '日报' }}</div>
+                <div class="col-item-title">{{ d.date }} 双热点报告</div>
+                <div class="col-item-meta">
+                  <span>🔥 {{ d.stats ? d.stats.githubItems : 0 }} 项目</span>
+                  <span>🤖 {{ d.stats ? d.stats.newsItems : 0 }} 资讯</span>
+                  <span class="col-item-date">{{ d.date }}</span>
+                </div>
               </div>
-              <router-link class="article-title" :to="`/digest/${d.date}`" :title="d.date">{{ d.date }} 双热点报告</router-link>
-            </div>
-            <div class="article-meta-wrap">
-              <span class="post-meta-date">
-                <i class="anzhiyufont anzhiyu-icon-calendar-days" style="font-size: 15px"></i>
-                <span class="article-meta-label">发表于</span>
-                <time>{{ d.date }}</time>
-              </span>
-              <span class="article-meta tags" v-if="d.stats">
-                <a class="article-meta__tags"><span>🔥 {{ d.stats.githubItems }} 项目</span></a>
-                <a class="article-meta__tags"><span>🤖 {{ d.stats.newsItems }} 资讯</span></a>
-              </span>
-            </div>
-          </div>
-        </div>
+            </router-link>
+          </section>
 
-        <div id="pagination">
-          <div class="pagination">
-            <span class="page-item" :class="{ disabled: page === 1 }" @click="page > 1 && page--">‹</span>
-            <span v-for="pn in Math.max(1, Math.ceil(total / pageSize))" :key="pn" class="page-item" :class="{ active: pn === page }" @click="pn !== page && (page = pn)">{{ pn }}</span>
-            <span class="page-item" :class="{ disabled: page >= Math.ceil(total / pageSize) }" @click="page < Math.ceil(total / pageSize) && page++">›</span>
-          </div>
+          <!-- 栏二：GitHub 热点榜 -->
+          <section class="home-col">
+            <div class="home-col-head">
+              <span class="home-col-title gh"><i class="anzhiyufont anzhiyu-icon-fire"></i> GitHub 热点</span>
+              <router-link class="home-col-more" to="/github">完整榜单 ›</router-link>
+            </div>
+            <div v-if="!topGithub.length" class="empty">暂无项目</div>
+            <a v-for="(p, i) in topGithub" :key="p.fullName" class="col-item rank-item" :href="p.url" target="_blank" rel="noopener" :title="p.fullName">
+              <span class="rank-num" :class="{ top: i < 3 }">{{ i + 1 }}</span>
+              <div class="col-item-body">
+                <div class="col-item-title">{{ p.fullName }}</div>
+                <div class="col-item-meta">
+                  <span class="hot">+{{ p.starsGained }} ★</span>
+                  <span class="desc">热度 {{ p.hotness.toFixed(1) }}</span>
+                  <span v-if="p.language" class="lang-chip">{{ p.language }}</span>
+                </div>
+              </div>
+            </a>
+          </section>
+
+          <!-- 栏三：AI 热点榜 -->
+          <section class="home-col">
+            <div class="home-col-head">
+              <span class="home-col-title ai"><i class="anzhiyufont anzhiyu-icon-shapes"></i> AI 热点</span>
+              <router-link class="home-col-more" to="/news">完整榜单 ›</router-link>
+            </div>
+            <div v-if="!topNews.length" class="empty">暂无资讯</div>
+            <router-link v-for="(n, i) in topNews" :key="n.storyId" class="col-item rank-item" :to="`/story/${n.storyId}`" :title="n.titleZh">
+              <span class="rank-num" :class="{ top: i < 3 }">{{ i + 1 }}</span>
+              <div class="col-item-body">
+                <div class="col-item-title">{{ n.titleZh }}</div>
+                <div class="col-item-meta">
+                  <span class="hot">热度 {{ n.hotness.toFixed(1) }}</span>
+                  <span class="desc">{{ n.sourceCount }} 个来源</span>
+                </div>
+              </div>
+            </router-link>
+          </section>
         </div>
       </div>
 
@@ -354,3 +380,33 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
     </div>
   </main>
 </template>
+
+<style scoped>
+/* ===== 首页三栏：期刊 / GitHub 热点 / AI 热点 ===== */
+.home-columns { width: 100%; display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 1200px) { .home-columns { grid-template-columns: 1fr; } }
+.home-col { background: var(--anzhiyu-maskbg); border: 1px solid var(--anzhiyu-card-border); border-radius: 14px; padding: 14px 16px 10px; }
+.home-col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px dashed var(--anzhiyu-card-border); }
+.home-col-title { font-weight: 700; font-size: 1rem; color: var(--anzhiyu-fontcolor); }
+.home-col-title i { color: var(--anzhiyu-hover); margin-right: 2px; }
+.home-col-title.gh i { color: #58a6ff; }
+.home-col-title.ai i { color: #bc8cff; }
+.home-col-more { color: var(--anzhiyu-gray); font-size: .8rem; }
+.home-col-more:hover { color: var(--anzhiyu-hover); }
+.col-item { display: flex; gap: 10px; align-items: center; padding: 8px 6px; border-radius: 10px; color: var(--anzhiyu-fontcolor); transition: background .2s; }
+.col-item:hover { background: var(--anzhiyu-theme-op); }
+.col-item + .col-item { border-top: 1px dashed var(--anzhiyu-card-border); border-top-left-radius: 0; border-top-right-radius: 0; }
+.digest-item .col-item-cover { width: 86px; height: 56px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
+.col-item-body { flex: 1; min-width: 0; }
+.col-item-kind { display: inline-block; background: var(--anzhiyu-theme-op); color: #a8766f; border-radius: 6px; padding: 0 7px; font-size: .7rem; margin-bottom: 3px; }
+.col-item-title { font-weight: 600; font-size: .9rem; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-item:hover .col-item-title { color: var(--anzhiyu-hover); }
+.col-item-meta { display: flex; gap: 10px; align-items: center; margin-top: 3px; font-size: .76rem; color: var(--anzhiyu-gray); flex-wrap: wrap; }
+.col-item-meta .hot { color: var(--anzhiyu-hover); font-weight: 700; }
+.col-item-date { margin-left: auto; }
+.rank-num { width: 24px; height: 24px; border-radius: 7px; background: var(--anzhiyu-background); color: var(--anzhiyu-gray); display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 700; flex-shrink: 0; }
+.rank-num.top { background: var(--anzhiyu-theme); color: #fff; }
+.rank-item:nth-child(2) .rank-num.top { background: #ff7242; }
+.rank-item:nth-child(3) .rank-num.top { background: #fbbc4c; }
+.lang-chip { background: var(--anzhiyu-background); border-radius: 6px; padding: 0 7px; font-size: .72rem; }
+</style>
