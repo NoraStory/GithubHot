@@ -133,7 +133,20 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 	}
 	rb, _ := json.Marshal(rtc)
 	fb, _ := json.Marshal(knownFlags)
-	cb, _ := json.Marshal(components)
+	// components 渐进合并：新分量非空才覆盖，空值保留旧值（APP WebView 分多次补齐四维）
+	oldComponents := map[string]string{}
+	if err == nil {
+		var oldCompJSON string
+		_ = db.QueryRowContext(ctx,
+			"SELECT components FROM ip_fingerprints WHERE fp = ?", fp).Scan(&oldCompJSON)
+		_ = json.Unmarshal([]byte(oldCompJSON), &oldComponents)
+	}
+	for k, v := range components {
+		if v != "" {
+			oldComponents[k] = v
+		}
+	}
+	cb, _ := json.Marshal(oldComponents)
 	if err == sql.ErrNoRows {
 		ips = []string{ip}
 		b, _ := json.Marshal(ips)

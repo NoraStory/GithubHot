@@ -5,7 +5,10 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -34,6 +37,7 @@ const (
 	appFpHeader   = "X-Device-Fingerprint"
 	appModelHeader = "X-Device-Model"
 	appThreatHeader = "X-Threat-Report"
+	appBrowserFpHeader = "X-Browser-Fp" // APP WebView 浏览器指纹（base64url JSON）
 
 	appSignWindow    = 300 * time.Second // 时间戳容差 ±5min（设备时钟漂移）
 	appNonceTTL      = 10 * time.Minute
@@ -121,7 +125,7 @@ func (a *AppGuard) Middleware(next http.Handler) http.Handler {
 		// （客户端据此拿到 session_seed 派生密钥，后续数据接口才走强校验）。
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/site/config" {
 			if fp != "" {
-				a.recordFingerprint(ctx, ip, fp, r.Header.Get(appModelHeader), r.Header.Get(appThreatHeader))
+				a.recordFingerprint(ctx, ip, fp, r.Header.Get(appModelHeader), r.Header.Get(appThreatHeader), r.Header.Get(appBrowserFpHeader))
 			}
 			next.ServeHTTP(w, r)
 			return
@@ -181,7 +185,7 @@ func (a *AppGuard) Middleware(next http.Handler) http.Handler {
 
 		// 校验通过：指纹/型号/威胁报告归档（限频 1 次/分/指纹），
 		// 管理端 /admin/ipguard 单 IP 下钻可见 APP 设备档案。
-		a.recordFingerprint(ctx, ip, fp, r.Header.Get(appModelHeader), r.Header.Get(appThreatHeader))
+		a.recordFingerprint(ctx, ip, fp, r.Header.Get(appModelHeader), r.Header.Get(appThreatHeader), r.Header.Get(appBrowserFpHeader))
 		next.ServeHTTP(w, r)
 	})
 }
@@ -208,18 +212,19 @@ func (a *AppGuard) nonceSeen(nonce string) bool {
 	return false
 }
 
-// recordFingerprint APP 设备指纹归档进 IP 防护体系（带型号与威胁命中）。
-func (a *AppGuard) recordFingerprint(ctx context.Context, ip, fp, model, threat string) {
+// recordFingerprint APP 设备指纹归档进 IP 防护体系（带型号、威胁命中与 WebView 浏览器分量）。
+func (a *AppGuard) recordFingerprint(ctx context.Context, ip, fp, model, threat, browserFp string) {
 	if a.store == nil {
 		return
 	}
 	a.mu.Lock()
-	last := a.fpLast[fp+"|"+ip]
+	// 限频键含 payload 摘要：完全相同的上报 1 次/分，携带新分量（渐进补齐）的不限
+	last := a.fpLast[fp+"|"+ip+"|"+payloadTag(model, threat, browserFp)]
 	if time.Since(last) < appFpRecordTTL {
 		a.mu.Unlock()
 		return
 	}
-	a.fpLast[fp+"|"+ip] = time.Now()
+	a.fpLast[fp+"|"+ip+"|"+payloadTag(model, threat, browserFp)] = time.Now()
 	a.mu.Unlock()
 
 	threat = strings.TrimSpace(threat)
@@ -242,7 +247,60 @@ func (a *AppGuard) recordFingerprint(ctx context.Context, ip, fp, model, threat 
 	if threat != "" {
 		components["threat"] = threat
 	}
+	// WebView 浏览器指纹分量（Canvas/WebGL/音频/字体/显卡/屏幕），键白名单 + 长度截断
+	for k, v := range parseBrowserFp(browserFp) {
+		components[k] = v
+	}
 	if _, err := a.store.UpsertFingerprint(ctx, fp, ip, ua, FingerprintMeta{Components: components, Flags: flags}); err != nil {
 		log.Printf("[appguard] 指纹归档失败 %s: %v", fp, err)
 	}
+}
+
+// payloadTag 限频键的 payload 摘要（FNV-1a，非加密用途）。
+func payloadTag(s ...string) string {
+	h := uint32(2166136261)
+	for _, part := range s {
+		for i := 0; i < len(part); i++ {
+			h ^= uint32(part[i])
+			h *= 16777619
+		}
+		h ^= 0xff
+	}
+	return fmt.Sprintf("%08x", h)
+}
+
+// browserFpKeys APP 可上报的浏览器分量键白名单（与管理端指纹表列对应）。
+var browserFpKeys = map[string]bool{
+	"canvas": true, "webgl": true, "audio": true, "fonts": true,
+	"renderer": true, "screen": true,
+}
+
+// parseBrowserFp 解析 X-Browser-Fp（base64url JSON）为分量 map；非法输入返回空。
+func parseBrowserFp(raw string) map[string]string {
+	out := map[string]string{}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return out
+	}
+	b, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		if b, err = base64.URLEncoding.DecodeString(raw); err != nil {
+			return out
+		}
+	}
+	var m map[string]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		return out
+	}
+	for k, v := range m {
+		if !browserFpKeys[k] {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if v == "" || len(v) > 160 {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
