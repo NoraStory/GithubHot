@@ -88,6 +88,7 @@ go build -o githubhot ./cmd/githubhot
 | `DATA_DIR` | | 数据目录，默认 `./data` |
 | `PORT` | | serve 端口，默认 `8787` |
 | `HOT_CRON` | | serve 内置调度（cron 表达式，本地时区），默认 `30 7 * * *` |
+| `PROBE_INTERVAL_HOURS` | | 健康探针轮询间隔（小时），默认 `6`：全部启用信源 + LLM 网关 / GitHub API / 音乐上游 / 背景对象存储 / 本地库 |
 | `MUSIC_PLAYLIST` | | 音乐馆（`/music`）默认歌单 id；歌单经 `/api/v1/music/playlist` 代理加载 |
 | `CORS_ORIGINS` | | 允许跨域的来源（逗号分隔），默认不开放 |
 
@@ -112,7 +113,7 @@ go build -o githubhot ./cmd/githubhot
   歌单经后端代理）、工具库（`/tools`，MCP 接入说明就地展开）、
   统计/相册/标签云/分类/友链/空调等 AnZhiYu 复刻页、关于；
 - 管理端（`/admin/*`，密码鉴权登录门）：Token 用量、内容诊断、运行历史、信源管理
-  （增删/试抓）、事件锁定、期刊、**IP 防护面板**（`/admin/ipguard`：三层防护概览、
+  （增删/试抓）、事件锁定、期刊、**健康探针**（`/admin/probes`：信源与端点 6 小时定时探测、历史记录、手动触发）、**IP 防护面板**（`/admin/ipguard`：三层防护概览、
   Top 访客筛选、按时间筛选、单 IP 下钻详情——档案/封禁记录/设备指纹（Canvas、WebGL、
   UA、字体、时区等逐项列出）/违规事件、手动封禁与解封）；
 - AnZhiyu 复刻元素：霞鹜文楷字体、粉主题令牌、毛玻璃吸顶导航、卡片投影悬停、彩色旋转标题符、
