@@ -139,6 +139,9 @@ func RunPipeline(ctx context.Context, d Deps) (*PipelineResult, error) {
 			fmt.Printf("[pipeline] 原文本地存档（AI 译文）%d 条\n", ts.Translated)
 		}
 	}
+	// 国内热榜 Top10 综述：单次小调用，幂等，失败不阻断
+	setPhase("domestic-summary")
+	GenerateDomesticSummary(ctx, d)
 	return finishPipeline(ctx, d, res, started)
 }
 

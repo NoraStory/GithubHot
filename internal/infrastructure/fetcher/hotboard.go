@@ -58,9 +58,30 @@ func (HotBoard) Fetch(ctx context.Context, s source.Source, now time.Time) ([]ap
 		return fetchWeiboHot(ctx, limit)
 	case "bilibili":
 		return fetchBilibiliHot(ctx, limit)
+	case "rss":
+		return fetchHotRSS(ctx, s, limit)
 	default:
-		return nil, fmt.Errorf("信源 %s 缺少有效 board 配置（baidu/weibo/bilibili）", s.ID)
+		return nil, fmt.Errorf("信源 %s 缺少有效 board 配置（baidu/weibo/bilibili/rss）", s.ID)
 	}
+}
+
+// fetchHotRSS 榜单型 RSS：复用 RSS 抓取器解析 feed，按条目标榜位（feed 顺序即排名）。
+// 用于国内资讯源（IT之家/36氪等）接入轻管道：不走 LLM，直接进国内热榜聚簇。
+func fetchHotRSS(ctx context.Context, s source.Source, limit int) ([]application.FetchedItem, error) {
+	items, err := (RSS{}).Fetch(ctx, s, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("RSS 榜单 %s 无条目", s.ID)
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	for i := range items {
+		items[i].Meta = map[string]string{"rank": strconv.Itoa(i + 1)}
+	}
+	return items, nil
 }
 
 // hotHeaders 各家需要的反爬请求头（国内榜单 API 校验 UA/Referer）。

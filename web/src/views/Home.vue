@@ -18,6 +18,11 @@ const filteredDigests = computed(() =>
 const topGithub = computed(() => (view.value.github || []).slice(0, 5))
 const topNews = computed(() => (view.value.news || []).slice(0, 5))
 
+// 国内热点区（轻管道多源共振榜）：首页展示前 12 条，占满两列网格
+const domestic = ref({ items: [], summary: '' })
+const domesticTop = computed(() => (domestic.value.items || []).slice(0, 12))
+const domesticSummary = computed(() => domestic.value.summary || '')
+
 // ===== 横幅背景视频（AnZhiYu #home-media-container 同构：随机选片/竖横屏/视差由 index_media.js 处理）=====
 // 横屏：前 6 个为远程源；x1~x6 与远程重复已剔除，本地只放新增（x7/x8/x10/x11/x12）
 const LANDSCAPE_VIDEOS = [
@@ -167,6 +172,7 @@ onMounted(async () => {
   loading.value = false
   const d = await api.get('/api/v1/hot/news')
   stories.value = d.items || []
+  api.get('/api/v1/hot/domestic').then((dd) => { domestic.value = dd }).catch(() => {})
   const dg = await api.get('/api/v1/digests?pageSize=50')
   digestsAll.value = dg.items || []
   const cfg = await api.get('/api/v1/site/config').catch(() => null)
@@ -330,6 +336,29 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
           </section>
           </div>
         </div>
+
+        <!-- 国内热点区：多源共振热榜（轻管道，无 LLM 评分），整宽面板、内部两列，排在日报等面板下方 -->
+        <div class="home-panel domestic-panel">
+          <div class="home-col-head">
+            <span class="home-col-title domestic"><i class="anzhiyufont anzhiyu-icon-map-marker"></i> 国内热点</span>
+            <router-link class="home-col-more" to="/domestic">完整热榜 ›</router-link>
+          </div>
+          <div v-if="domesticSummary" class="domestic-summary">{{ domesticSummary }}</div>
+          <div class="domestic-grid">
+            <a v-for="(it, i) in domesticTop" :key="it.url || it.title" class="domestic-item" :href="it.url" target="_blank" rel="noopener" :title="it.title">
+              <span class="rank-num" :class="{ top: i < 3 }">{{ i + 1 }}</span>
+              <div class="col-item-body">
+                <div class="col-item-title">{{ it.title }}</div>
+                <div class="col-item-meta">
+                  <span class="hot">热度 {{ Number(it.hotness).toFixed(1) }}</span>
+                  <span class="desc">{{ it.sourceCount }} 源</span>
+                  <span v-for="s in (it.sources || []).slice(0, 3)" :key="s" class="lang-chip">{{ s }}</span>
+                </div>
+              </div>
+            </a>
+          </div>
+          <div v-if="!domesticTop.length" class="empty">暂无热榜数据，等待下一轮抓取</div>
+        </div>
       </div>
 
       <!-- 右侧边栏（参考站 home 同构）：个人信息 / 小板报 / 倒计时 / 最新评论 / 标签云 -->
@@ -422,8 +451,20 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
 .home-col-title i { color: var(--anzhiyu-hover); margin-right: 2px; }
 .home-col-title.gh i { color: #58a6ff; }
 .home-col-title.ai i { color: #bc8cff; }
+.home-col-title.domestic i { color: #e25555; }
 .home-col-more { color: var(--anzhiyu-gray); font-size: .8rem; }
 .home-col-more:hover { color: var(--anzhiyu-hover); }
+
+/* ===== 国内热点区：整宽面板 + 双列网格 ===== */
+.domestic-panel { margin-bottom: 16px; }
+.domestic-panel .home-col-head { margin-bottom: 6px; }
+.domestic-summary { font-size: .84rem; color: var(--anzhiyu-secondary); line-height: 1.8; padding: 4px 6px 10px; border-bottom: 1px dashed var(--anzhiyu-card-border); margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.domestic-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 20px; }
+@media (max-width: 1200px) { .domestic-grid { grid-template-columns: 1fr; } }
+.domestic-item { display: flex; gap: 10px; align-items: center; padding: 8px 6px; border-radius: 10px; color: var(--anzhiyu-fontcolor); transition: background .2s; min-width: 0; }
+.domestic-item:hover { background: var(--anzhiyu-theme-op); }
+.domestic-grid .domestic-item:nth-child(n+3) { border-top: 1px dashed var(--anzhiyu-card-border); border-top-left-radius: 0; border-top-right-radius: 0; }
+@media (max-width: 1200px) { .domestic-grid .domestic-item:nth-child(n+3) { border-top: none; } .domestic-grid .domestic-item:nth-child(n+2) { border-top: 1px dashed var(--anzhiyu-card-border); border-top-left-radius: 0; border-top-right-radius: 0; } }
 .col-item { display: flex; gap: 10px; align-items: center; padding: 8px 6px; border-radius: 10px; color: var(--anzhiyu-fontcolor); transition: background .2s; }
 .col-item:hover { background: var(--anzhiyu-theme-op); }
 .col-item + .col-item { border-top: 1px dashed var(--anzhiyu-card-border); border-top-left-radius: 0; border-top-right-radius: 0; }

@@ -4,7 +4,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { api } from '../lib/api'
 
-const view = ref({ items: [], generatedAt: '' })
+const view = ref({ items: [], generatedAt: '', summary: '' })
 const loading = ref(true)
 const q = ref('')
 const sort = ref('hot')
@@ -79,6 +79,11 @@ onMounted(async () => {
           </select>
         </div>
 
+        <div v-if="view.summary" class="summary-card">
+          <div class="summary-title">📰 今日热点综述</div>
+          <p class="summary-text">{{ view.summary }}</p>
+        </div>
+
         <div v-if="loading" class="loading">加载中</div>
         <div v-else-if="!filtered.length" class="empty">暂无热榜数据，等待下一轮换抓取</div>
 
@@ -145,4 +150,9 @@ onMounted(async () => {
 .badge { display: inline-block; border-radius: 6px; padding: 0 7px; font-size: .72rem; }
 .badge.hot { background: var(--anzhiyu-red, #ff7242); color: #fff; }
 .badge.multi { background: var(--anzhiyu-theme-op); color: #a8766f; }
+
+/* ===== 今日综述卡片 ===== */
+.summary-card { background: var(--anzhiyu-maskbg); border: 1px solid var(--anzhiyu-card-border); border-left: 3px solid var(--anzhiyu-theme); border-radius: 12px; padding: 14px 18px; margin-bottom: 14px; }
+.summary-title { font-weight: 700; font-size: .95rem; margin-bottom: 6px; color: var(--anzhiyu-fontcolor); }
+.summary-text { color: var(--anzhiyu-secondary); font-size: .9rem; line-height: 1.9; white-space: pre-line; margin: 0; }
 </style>

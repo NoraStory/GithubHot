@@ -28,7 +28,7 @@ const (
 	// domesticResonanceSources 多源共振门槛：至少 2 个独立信源同报一件事才入榜。
 	domesticResonanceSources = 2
 	// domesticMinBoard 单源兜底：共振结果太少时用单源高分条目补足，保证板块不空。
-	domesticMinBoard = 10
+	domesticMinBoard = 15
 	// domesticDecayHalfLifeHours 热度衰减半衰期：6h。
 	domesticDecayHalfLifeHours = 6.0
 	// domesticSourceBonus 每多一个独立信源的加成系数（×(1+0.15·(n-1))）。

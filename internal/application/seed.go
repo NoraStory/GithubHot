@@ -124,10 +124,21 @@ func DefaultSources(now time.Time) []source.Source {
 			CreatedAt:       now,
 		}
 	}
+	// 榜单型 RSS（board=rss）：国内资讯站官方 feed，feed 顺序即榜位，同样走轻管道。
+	mkHotRSS := func(id, name, url string, minutes int) source.Source {
+		s := mkHot(id, name, "rss", minutes)
+		s.Config["url"] = url
+		return s
+	}
 	domestic := []source.Source{
 		mkHot("hot-baidu-realtime", "百度热搜", "baidu", 15),
 		mkHot("hot-weibo-search", "微博热搜", "weibo", 15),
 		mkHot("hot-bilibili-ranking", "B站热门", "bilibili", 30),
+		mkHotRSS("hot-ithome", "IT之家", "https://www.ithome.com/rss/", 30),
+		mkHotRSS("hot-tmtpost", "钛媒体", "https://www.tmtpost.com/rss.xml", 30),
+		mkHotRSS("hot-ifanr", "爱范儿", "https://www.ifanr.com/feed", 30),
+		mkHotRSS("hot-geekpark", "极客公园", "https://www.geekpark.net/rss", 60),
+		mkHotRSS("hot-iplaysoft", "异次元软件", "https://feed.iplaysoft.com/", 60),
 	}
 
 	return append(append(rss, hn, ghSearch, ghTrend, scriptPush), domestic...)

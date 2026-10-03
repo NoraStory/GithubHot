@@ -54,6 +54,7 @@ func build(cfg *config.Config) (application.Deps, *sqlite.DB, error) {
 		Fetchers:       fetcher.NewRegistry(),
 		DigestRenderer: render.NewMarkdown(),
 		Notifier:       notify.Webhook{URL: cfg.NotifyWebhookURL, Format: cfg.NotifyWebhookFormat},
+		Settings:       sqlite.NewSettingsRepo(db),
 		Clock:          shared.SystemClock{},
 	}
 	if cfg.LLMAPIKey != "" && cfg.LLMBaseURL != "" && cfg.LLMModelA != "" {

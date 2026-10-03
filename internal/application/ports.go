@@ -194,6 +194,18 @@ type Notifier interface {
 	Notify(ctx context.Context, title, text string) error
 }
 
+// SettingsRepo 站点设置与每日摘要的持久化端口。
+type SettingsRepo interface {
+	// Get 读设置值，不存在返回空串（调用方决定默认值）。
+	Get(ctx context.Context, key string) (string, error)
+	// Set 写设置值（覆盖）。
+	Set(ctx context.Context, key, value string) error
+	// DomesticSummary 读某日国内热榜摘要，不存在返回空串。
+	DomesticSummary(ctx context.Context, date string) (string, error)
+	// SaveDomesticSummary 写某日国内热榜摘要（覆盖）。
+	SaveDomesticSummary(ctx context.Context, date, summary string) error
+}
+
 // Deps 应用层依赖的最小端口集合（全部在领域层或上方声明，基础设施层实现）。
 type Deps struct {
 	Sources        source.Repository
@@ -208,5 +220,6 @@ type Deps struct {
 	Fetchers       FetcherRegistry
 	Notifier       Notifier
 	DigestRenderer DigestRenderer
+	Settings       SettingsRepo
 	Clock          shared.Clock
 }

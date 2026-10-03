@@ -47,6 +47,9 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 			r.Post("/ipguard/ban", s.ipGuardBanAPI)
 			r.Post("/ipguard/unban", s.ipGuardUnbanAPI)
 			r.Get("/ipguard/ip", s.ipGuardIPDetailAPI)
+			// 国内热榜 Top10 综述开关
+			r.Get("/domestic-summary", s.domesticSummaryStatus)
+			r.Post("/domestic-summary", s.domesticSummaryToggle)
 		})
 	})
 }
@@ -188,6 +191,46 @@ func (s *Server) pushItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "id": it.ID})
+}
+
+// domesticSummaryStatus 国内热榜综述开关状态。
+func (s *Server) domesticSummaryStatus(w http.ResponseWriter, _ *http.Request) {
+	if s.Deps.Settings == nil {
+		writeErr(w, 500, errorString("设置仓储不可用"))
+		return
+	}
+	date := time.Now().Format("2006-01-02")
+	has, _ := s.Deps.Settings.DomesticSummary(s.ctx(), date)
+	writeJSON(w, 200, map[string]any{
+		"enabled":     application.DomesticSummaryEnabled(s.ctx(), s.Deps),
+		"date":        date,
+		"hasSummary":  has != "",
+		"summaryDate": date,
+	})
+}
+
+// domesticSummaryToggle 开/关国内热榜综述（不改变已生成的历史摘要）。
+func (s *Server) domesticSummaryToggle(w http.ResponseWriter, r *http.Request) {
+	if s.Deps.Settings == nil {
+		writeErr(w, 500, errorString("设置仓储不可用"))
+		return
+	}
+	var p struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	v := "0"
+	if p.Enabled {
+		v = "1"
+	}
+	if err := s.Deps.Settings.Set(s.ctx(), application.SettingDomesticSummaryEnabled, v); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "enabled": p.Enabled})
 }
 
 // lockStory 人工锁定/解锁事件（锁定后聚簇不再自动合并，AIHOT 同款保护）。

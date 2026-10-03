@@ -111,6 +111,12 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS ip_profiles (ip TEXT PRIMARY KEY, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, reqs INTEGER NOT NULL DEFAULT 0, ua_set TEXT NOT NULL DEFAULT '[]', ua_last TEXT NOT NULL DEFAULT '')"); err != nil {
 		return fmt.Errorf("建表 ip_profiles: %w", err)
 	}
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"); err != nil {
+		return fmt.Errorf("建表 settings: %w", err)
+	}
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS domestic_summaries (date TEXT PRIMARY KEY, summary TEXT NOT NULL, created_at TEXT NOT NULL)"); err != nil {
+		return fmt.Errorf("建表 domestic_summaries: %w", err)
+	}
 	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_usage_created ON llm_usage(created_at)"); err != nil {
 		return fmt.Errorf("建索引 usage: %w", err)
 	}

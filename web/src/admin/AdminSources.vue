@@ -8,9 +8,27 @@ const msg = ref('')
 const loading = ref(true)
 const form = ref({ id: '', name: '', kind: 'rss', tier: 'T2', url: '', intervalMinutes: 120 })
 const pushForm = ref({ sourceId: 'script-push', url: '', title: '', summary: '' })
-const kinds = ['rss', 'json_api', 'web_list', 'hacker_news', 'github_search', 'github_trending', 'script']
+const kinds = ['rss', 'json_api', 'web_list', 'hacker_news', 'github_search', 'github_trending', 'hot_board', 'script']
 
 const scriptSources = computed(() => sources.value.filter((s) => s.kind === 'script'))
+
+// 国内热榜 Top10 综述开关
+const summaryCfg = ref({ enabled: true, hasSummary: false, date: '' })
+async function loadSummaryCfg() {
+  try {
+    summaryCfg.value = await api.get('/api/v1/admin/domestic-summary')
+  } catch { /* 忽略，展示默认 */ }
+}
+async function toggleSummary() {
+  const next = !summaryCfg.value.enabled
+  try {
+    await api.post('/api/v1/admin/domestic-summary', { enabled: next })
+    summaryCfg.value.enabled = next
+    msg.value = `国内热榜综述已${next ? '开启' : '关闭'}`
+  } catch (e) {
+    msg.value = '失败: ' + e.message
+  }
+}
 
 async function load() {
   loading.value = true
@@ -21,7 +39,7 @@ async function load() {
   }
   loading.value = false
 }
-onMounted(load)
+onMounted(() => { load(); loadSummaryCfg() })
 
 async function add() {
   msg.value = '保存中…'
@@ -99,6 +117,17 @@ function displayInterval(s) {
     </div>
 
     <div class="card">
+      <h3>国内热榜 Top10 综述</h3>
+      <div class="summary-toggle-row">
+        <span class="desc">
+          每天流水线为<a href="/domestic" target="_blank">国内热榜</a>Top10 生成一段 AI 综述（单次调用，预算很小）。
+          今日（{{ summaryCfg.date || '—' }}）状态：<b>{{ summaryCfg.hasSummary ? '已生成' : '未生成' }}</b>
+        </span>
+        <button class="primary" @click="toggleSummary">{{ summaryCfg.enabled ? '关闭综述' : '开启综述' }}</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div v-if="loading" class="loading">加载中 </div>
       <table v-if="!loading && sources.length">
         <thead><tr><th>ID</th><th>名称</th><th>种类</th><th>当前间隔</th><th>连空</th><th>最近抓取</th><th>状态</th><th>操作</th></tr></thead>
@@ -159,4 +188,7 @@ button.primary:hover { color: #fff; }
 .badge { padding: 1px 10px; border-radius: 50px; font-size: .74rem; }
 .okbadge { background: #238636; color: #fff; }
 .offbadge { background: var(--anzhiyu-theme-op); color: #a8766f; }
+.summary-toggle-row { display: flex; align-items: center; gap: 14px; justify-content: space-between; flex-wrap: wrap; }
+.summary-toggle-row .desc { flex: 1; min-width: 260px; line-height: 1.7; }
+.summary-toggle-row a { color: var(--anzhiyu-hover); }
 </style>

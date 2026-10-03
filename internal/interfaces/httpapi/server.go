@@ -98,14 +98,18 @@ func (s *Server) hotNews(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{"generatedAt": v.Generated, "items": v.News})
 }
 
-// hotDomestic 国内热榜：实时计算的轻管道视图（多源共振，无 LLM）。
+// hotDomestic 国内热榜：实时计算的轻管道视图（多源共振，无 LLM）+ 当日综述。
 func (s *Server) hotDomestic(w http.ResponseWriter, _ *http.Request) {
 	v, err := application.BuildDomesticView(s.ctx(), s.Deps, 0)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, v)
+	writeJSON(w, 200, map[string]any{
+		"generatedAt": v.Generated,
+		"items":       v.Items,
+		"summary":     application.TodayDomesticSummary(s.ctx(), s.Deps),
+	})
 }
 
 func (s *Server) hotFusion(w http.ResponseWriter, _ *http.Request) {
