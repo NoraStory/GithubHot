@@ -1,15 +1,20 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../lib/api'
+import { api, adminLogout } from '../lib/api'
 const router = useRouter()
+async function logout() {
+  await adminLogout()
+  router.push('/admin/login')
+}
 const menus = [
   { path: '/admin/usage', label: '💰 Token 用量' },
   { path: '/admin/stories', label: '📌 事件管理' },
   { path: '/admin/diagnostics', label: '🩺 内容诊断' },
   { path: '/admin/runs', label: '🖥 运行历史' },
   { path: '/admin/sources', label: '🛠 信源管理' },
-  { path: '/admin/digests', label: '📰 期刊' }
+  { path: '/admin/digests', label: '📰 期刊' },
+  { path: '/admin/ipguard', label: '🛡 IP 防护' }
 ]
 const health = ref(null)
 onMounted(async () => {
@@ -29,6 +34,7 @@ onMounted(async () => {
         服务正常 · v{{ health.version }}
       </div>
       <router-link class="menu-item back" to="/">← 返回用户端</router-link>
+      <button class="menu-item logout" @click="logout">⏻ 退出登录</button>
     </aside>
     <main class="content">
       <router-view v-slot="{ Component }">
@@ -55,6 +61,8 @@ onMounted(async () => {
 .menu-item.router-link-active { background: var(--anzhiyu-theme-op); color: var(--anzhiyu-fontcolor); font-weight: 600; }
 .spacer { flex: 1; }
 .back { color: var(--anzhiyu-gray); }
+.logout { background: none; border: none; text-align: left; font: inherit; cursor: pointer; color: var(--anzhiyu-red); }
+.logout:hover { background: var(--anzhiyu-background); }
 .content { flex: 1; padding: 1.6rem 2rem; min-width: 0; }
 @media (max-width: 800px) { .admin-shell { flex-direction: column; } .sidebar { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; } .brand { width: 100%; } .spacer { display: none; } }
 </style>

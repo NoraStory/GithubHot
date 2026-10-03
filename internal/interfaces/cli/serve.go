@@ -19,6 +19,7 @@ func newScheduler(spec string, job func()) *scheduler {
 		sched, _ = cron.ParseStandard("30 7 * * *")
 	}
 	c.Schedule(sched, cron.FuncJob(job))
+	fmt.Printf("[cron] 已注册，下一次触发: %s（now=%s）\n", sched.Next(time.Now()).Format("2006-01-02 15:04:05"), time.Now().Format("15:04:05"))
 	return &scheduler{c: c, spec: spec}
 }
 

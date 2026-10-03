@@ -1,13 +1,15 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { api, setToken, getToken } from './lib/api'
+import { api, adminAuthed, adminLogout } from './lib/api'
 import { copyText } from './lib/clipboard'
 import SiteFooter from './components/SiteFooter.vue'
 
 const router = useRouter()
 const route = useRoute()
 const scrolled = ref(false)
+// 管理端不弹快讯弹幕（后端界面保持安静）
+const isAdminRoute = computed(() => route.path.startsWith('/admin'))
 const dark = ref(localStorage.getItem('githubhot_theme') === 'dark')
 const searchMask = ref(false)
 const searchQ = ref('')
@@ -391,7 +393,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
                 <a class="back-menu-item" href="/music"><span class="back-menu-item-text">音乐馆</span></a>
                 <a class="back-menu-item" href="/about"><span class="back-menu-item-text">关于本站</span></a>
                 <a class="back-menu-item" href="https://github.com/NoraStory/GithubHot" target="_blank"><span class="back-menu-item-text">源码仓库</span></a>
-                <a class="back-menu-item" v-if="getToken()" href="/admin/usage"><span class="back-menu-item-text">管理端</span></a>
+                <a class="back-menu-item" v-if="adminAuthed" href="/admin/usage"><span class="back-menu-item-text">管理端</span></a>
               </div>
             </div>
           </div>
@@ -440,7 +442,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
             <li><a class="site-page child faa-parent animated-hover" href="javascript:void(0)" @click="toRandom"><i class="anzhiyufont anzhiyu-icon-dice faa-tada" style="font-size: 0.9em;"></i><span> 随便逛逛</span></a></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/privacy"><i class="anzhiyufont anzhiyu-icon-file-contract faa-tada" style="font-size: 0.9em;"></i><span> 隐私协议</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/about"><i class="anzhiyufont anzhiyu-icon-github faa-tada" style="font-size: 0.9em;"></i><span> 关于本站</span></router-link></li>
-            <li v-if="getToken()"><router-link class="site-page child faa-parent animated-hover" to="/admin/usage"><i class="anzhiyufont anzhiyu-icon-gear faa-tada" style="font-size: 0.9em;"></i><span> 管理端</span></router-link></li>
+            <li v-if="adminAuthed"><router-link class="site-page child faa-parent animated-hover" to="/admin/usage"><i class="anzhiyufont anzhiyu-icon-gear faa-tada" style="font-size: 0.9em;"></i><span> 管理端</span></router-link></li>
           </ul>
         </div>
       </div>
@@ -589,7 +591,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
       <div class="console-btn-item" id="consoleRandomPost" title="随机逛逛" @click="toRandom">
         <a href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-dice"></i></a>
       </div>
-      <div class="console-btn-item" id="consoleAdmin" v-if="getToken()" title="管理端">
+      <div class="console-btn-item" id="consoleAdmin" v-if="adminAuthed" title="管理端">
         <router-link to="/admin/usage"><i class="anzhiyufont anzhiyu-icon-gear"></i></router-link>
       </div>
       <div id="console-naoDark" @click="dark = !dark; applyTheme()">
@@ -630,8 +632,8 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
     </div>
   </div>
 
-  <!-- AI 热点快讯弹幕（参考站 .comment-barrage 同构，数据来自资讯榜；最多 3 条轮播，9 秒淡出） -->
-  <div class="comment-barrage" v-if="barrageOn">
+  <!-- AI 热点快讯弹幕（参考站 .comment-barrage 同构，数据来自资讯榜；最多 3 条轮播，9 秒淡出；管理端不弹） -->
+  <div class="comment-barrage" v-if="barrageOn && !isAdminRoute">
     <div
       v-for="(b, i) in barrageItems" :key="b.id" :id="'barrage-item-' + b.id"
       class="comment-barrage-item"
@@ -715,7 +717,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
         <router-link class="site-page child" to="/link"><span> 资源</span></router-link>
         <router-link class="site-page child" to="/music"><span> 音乐馆</span></router-link>
         <router-link class="site-page child" to="/about"><span> 关于</span></router-link>
-        <router-link v-if="getToken()" class="site-page child" to="/admin/usage"><span> 管理端</span></router-link>
+        <router-link v-if="adminAuthed" class="site-page child" to="/admin/usage"><span> 管理端</span></router-link>
       </div>
     </div>
   </div>

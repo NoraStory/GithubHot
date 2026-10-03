@@ -128,13 +128,15 @@ func Serve(cfg *config.Config) error {
 	}
 	defer db.Close()
 
-	srv := &httpapi.Server{Deps: deps, Runs: runsRepo{db}, Version: Version}
+	srv := &httpapi.Server{Deps: deps, Runs: runsRepo{db}, Admin: adminSessions{db}, Version: Version}
+	srv.Guard = httpapi.NewIPGuard(guardStore{db}) // 三层 IP 身份防护
 	addr := "0.0.0.0:" + cfg.Port
 	fmt.Printf("GithubHot %s · API+双榜页监听 http://localhost:%s\n", Version, cfg.Port)
 	fmt.Printf("APP/前端契约：/api/v1/hot/github · /api/v1/hot/news · /api/v1/hot/fusion · /api/v1/digest/latest\n")
 
 	// 内置调度：到点自动跑流水线（服务器常驻模式）
 	scheduler := newScheduler(cfg.CronSpec, func() {
+		fmt.Printf("[cron] 到点触发，开始跑流水线（%s）\n", time.Now().Format("15:04:05"))
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		if _, err := application.RunPipeline(ctx, deps); err != nil {
@@ -247,6 +249,29 @@ func (r runsRepo) List(ctx context.Context, limit int) ([]application.RunRow, er
 		})
 	}
 	return out, nil
+}
+
+// adminSessions 适配 sqlite 会话存储到 httpapi.AdminSessions 端口。
+type adminSessions struct{ db *sqlite.DB }
+
+func (a adminSessions) CreateAdminSession(ctx context.Context, id, ip string, ttl time.Duration) error {
+	return a.db.CreateAdminSession(ctx, id, ip, ttl)
+}
+
+func (a adminSessions) FindAdminSession(ctx context.Context, id string) (created, expires time.Time, ip string, found bool, err error) {
+	s, err := a.db.FindAdminSession(ctx, id)
+	if err != nil || s == nil {
+		return time.Time{}, time.Time{}, "", false, err
+	}
+	return s.CreatedAt, s.ExpiresAt, s.IP, true, nil
+}
+
+func (a adminSessions) RenewAdminSession(ctx context.Context, id string, ttl time.Duration) error {
+	return a.db.RenewAdminSession(ctx, id, ttl)
+}
+
+func (a adminSessions) DeleteAdminSession(ctx context.Context, id string) error {
+	return a.db.DeleteAdminSession(ctx, id)
 }
 
 func printResult(res *application.PipelineResult, digestPath string) {

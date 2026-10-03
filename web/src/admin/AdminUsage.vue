@@ -9,7 +9,7 @@ onMounted(async () => {
   usage.value = await api.get('/api/v1/admin/usage')
   loading.value = false
 })
-const pct = () => usage.value.budgetTokensPerDay ? Math.min(100, Math.round(usage.value.usedTotal / usage.value.budgetTokensPerDay * 100)) : 0
+const pct = () => usage.value.budgetTokensPerDay ? Math.min(100, Math.round(usage.value.todayTotalTokens / usage.value.budgetTokensPerDay * 100)) : 0
 </script>
 
 <template>
@@ -18,10 +18,10 @@ const pct = () => usage.value.budgetTokensPerDay ? Math.min(100, Math.round(usag
     <div v-if="loading" class="loading">加载中 </div>
     <template v-if="usage">
       <div class="card stat-row">
-        <div class="stat"><div class="v">{{ usage.usedPrompt.toLocaleString() }}</div><div class="k">输入 tokens</div></div>
-        <div class="stat"><div class="v">{{ usage.usedCompletion.toLocaleString() }}</div><div class="k">输出 tokens</div></div>
-        <div class="stat"><div class="v hot">{{ usage.usedTotal.toLocaleString() }}</div><div class="k">合计</div></div>
-        <div class="stat"><div class="v">¥{{ usage.estimatedCost.toFixed(4) }}</div><div class="k">估算成本</div></div>
+        <div class="stat"><div class="v">{{ usage.todayPromptTokens.toLocaleString() }}</div><div class="k">输入 tokens</div></div>
+        <div class="stat"><div class="v">{{ usage.todayCompletionTokens.toLocaleString() }}</div><div class="k">输出 tokens</div></div>
+        <div class="stat"><div class="v hot">{{ usage.todayTotalTokens.toLocaleString() }}</div><div class="k">合计</div></div>
+        <div class="stat"><div class="v">¥{{ usage.estimatedCostToday.toFixed(4) }}</div><div class="k">估算成本</div></div>
         <div class="stat">
           <div class="v">{{ usage.budgetExceeded ? '已熔断' : (usage.budgetTokensPerDay ? '正常' : '未启用') }}</div>
           <div class="k">预算状态</div>
