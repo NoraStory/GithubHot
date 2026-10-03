@@ -456,10 +456,11 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
 .home-col-more:hover { color: var(--anzhiyu-hover); }
 
 /* ===== 国内热点区：整宽面板 + 双列网格 ===== */
-.domestic-panel { margin-bottom: 16px; }
+.domestic-panel { margin-top: 20px; margin-bottom: 0; flex: 1; display: flex; flex-direction: column; }
+.recent-posts { display: flex; flex-direction: column; }
 .domestic-panel .home-col-head { margin-bottom: 6px; }
-.domestic-summary { font-size: .84rem; color: var(--anzhiyu-secondary); line-height: 1.8; padding: 4px 6px 10px; border-bottom: 1px dashed var(--anzhiyu-card-border); margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.domestic-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 20px; }
+.domestic-summary { font-size: .84rem; color: var(--anzhiyu-secondary); line-height: 1.8; padding: 4px 6px 10px; border-bottom: 1px dashed var(--anzhiyu-card-border); margin-bottom: 4px; white-space: pre-line; }
+.domestic-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 20px; grid-auto-rows: 1fr; flex: 1; }
 @media (max-width: 1200px) { .domestic-grid { grid-template-columns: 1fr; } }
 .domestic-item { display: flex; gap: 10px; align-items: center; padding: 8px 6px; border-radius: 10px; color: var(--anzhiyu-fontcolor); transition: background .2s; min-width: 0; }
 .domestic-item:hover { background: var(--anzhiyu-theme-op); }

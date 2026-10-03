@@ -200,7 +200,7 @@ func (s *Server) domesticSummaryStatus(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	date := time.Now().Format("2006-01-02")
-	has, _ := s.Deps.Settings.DomesticSummary(s.ctx(), date)
+	has, _, _ := s.Deps.Settings.DomesticSummary(s.ctx(), date)
 	writeJSON(w, 200, map[string]any{
 		"enabled":     application.DomesticSummaryEnabled(s.ctx(), s.Deps),
 		"date":        date,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 )
 
 // SettingDomesticSummaryEnabled 国内热榜 Top10 摘要开关的设置键（"1"=开，"0"=关，缺省开）。
@@ -24,16 +25,16 @@ func DomesticSummaryEnabled(ctx context.Context, d Deps) bool {
 }
 
 // GenerateDomesticSummary 为国内热榜 Top10 生成一段每日综述（LLM 一次调用）。
-// 幂等：当天已有摘要或条目为空时直接跳过；开关关闭时跳过。
-// 任何错误都只记日志不致命——摘要不是榜单的依赖。
+// 幂等：当天已有摘要且生成时间未超过 12 小时则直接跳过（当天热点变化时自动重刷覆盖）；
+// 开关关闭时跳过。任何错误都只记日志不致命——摘要不是榜单的依赖。
 func GenerateDomesticSummary(ctx context.Context, d Deps) {
 	if d.Settings == nil || d.LLM == nil {
 		return
 	}
 	now := d.Clock.Now()
 	date := now.Format("2006-01-02")
-	if existing, _ := d.Settings.DomesticSummary(ctx, date); existing != "" {
-		return // 今天已生成
+	if existing, createdAt, _ := d.Settings.DomesticSummary(ctx, date); existing != "" && createdAt.IsZero() == false && now.Sub(createdAt) < 12*time.Hour {
+		return // 今天已生成且未过期
 	}
 	if !DomesticSummaryEnabled(ctx, d) {
 		return
@@ -73,6 +74,6 @@ func TodayDomesticSummary(ctx context.Context, d Deps) string {
 	if d.Settings == nil {
 		return ""
 	}
-	v, _ := d.Settings.DomesticSummary(ctx, d.Clock.Now().Format("2006-01-02"))
+	v, _, _ := d.Settings.DomesticSummary(ctx, d.Clock.Now().Format("2006-01-02"))
 	return v
 }

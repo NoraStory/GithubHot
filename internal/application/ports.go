@@ -200,8 +200,8 @@ type SettingsRepo interface {
 	Get(ctx context.Context, key string) (string, error)
 	// Set 写设置值（覆盖）。
 	Set(ctx context.Context, key, value string) error
-	// DomesticSummary 读某日国内热榜摘要，不存在返回空串。
-	DomesticSummary(ctx context.Context, date string) (string, error)
+	// DomesticSummary 读某日国内热榜摘要，不存在返回空串；createdAt 为生成时间（用于判断是否过期重刷）。
+	DomesticSummary(ctx context.Context, date string) (string, time.Time, error)
 	// SaveDomesticSummary 写某日国内热榜摘要（覆盖）。
 	SaveDomesticSummary(ctx context.Context, date, summary string) error
 }

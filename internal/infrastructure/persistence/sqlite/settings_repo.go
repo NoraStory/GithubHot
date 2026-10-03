@@ -31,14 +31,19 @@ func (r *SettingsRepo) Set(_ context.Context, key, value string) error {
 	return err
 }
 
-// DomesticSummary 读某日摘要，不存在返回空串。
-func (r *SettingsRepo) DomesticSummary(_ context.Context, date string) (string, error) {
+// DomesticSummary 读某日摘要，不存在返回空串；同时返回生成时间。
+func (r *SettingsRepo) DomesticSummary(_ context.Context, date string) (string, time.Time, error) {
 	var v string
-	err := r.db.QueryRow("SELECT summary FROM domestic_summaries WHERE date = ?", date).Scan(&v)
+	var createdAt string
+	err := r.db.QueryRow("SELECT summary, created_at FROM domestic_summaries WHERE date = ?", date).Scan(&v, &createdAt)
 	if err != nil {
-		return "", nil
+		return "", time.Time{}, nil // 不存在按空串处理
 	}
-	return v, nil
+	t, perr := time.Parse(time.RFC3339, createdAt)
+	if perr != nil {
+		t = time.Time{}
+	}
+	return v, t, nil
 }
 
 // SaveDomesticSummary 写某日摘要（覆盖）。
