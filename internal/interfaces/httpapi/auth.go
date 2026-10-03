@@ -98,6 +98,10 @@ func (s *Server) checkAdminSession(w http.ResponseWriter, r *http.Request) bool 
 		}
 		cancel3()
 	}
+	// 有效管理会话的 IP 加入防护白名单（免封禁，TTL 与会话一致）
+	if s.Guard != nil {
+		s.Guard.Whitelist(clientIPFromRequest(r), ttl)
+	}
 	return true
 }
 

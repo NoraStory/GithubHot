@@ -20,13 +20,22 @@ import (
 //
 // 第一层（IP 记忆）：全站中间件按 IP 建滑动窗口档案（速率/404 率/UA 集合），
 //   异常记入违规事件并轻量落库 ip_profiles。
-// 第二层（设备指纹）：浏览器采集 Canvas/WebGL/WebRTC/屏幕/环境特征上报，
-//   服务端维护 ip_fingerprints 的 fp↔IP↔UA 多对多关系。
+// 第二层（设备指纹）：浏览器采集 Canvas/WebGL/音频/字体/WebRTC/屏幕/环境特征上报，
+//   服务端维护 ip_fingerprints 的 fp↔IP↔UA↔分量指纹多对多关系。
 // 第三层（特殊标识 + 一致性核验）：对通过初检的访客签发 HMAC 身份令牌
 //   （gh_id Cookie，绑定 IP+指纹+有效期）；此后每次 API 请求带 X-Device-Fp，
-//   服务端核验签名完整性、IP↔设备绑定、环境自洽；被封 IP 的指纹在新 IP 出现
-//   自动连坐。10 分钟违规积分 ≥100 触发升级封禁（30m→24h→7d→30d），
-//   被封 IP 全站 404。
+//   服务端核验签名完整性、IP↔设备绑定、环境自洽；10 分钟违规积分 ≥100 触发
+//   升级封禁（30m→24h→7d→30d，30 天无违规衰减回初犯档），被封 IP 全站 404。
+//
+// 防误封算法（出差/换网络场景，双因子原则）：
+//   1. 换 IP/换网络本身永不直接封禁——身份类信号（drift/churn/连坐）必须与
+//      "该设备自身有劣迹"叠加才升级；干净设备连到被封的共享出口（酒店/机场/
+//      运营商 NAT）只记低分观察。
+//   2. 速率类信号按 UA 分档：真人浏览器共享出口（公司 NAT）30 分，脚本 UA 60 分，
+//      超 3 倍阈值不分档。
+//   3. 同一设备换网络（指纹与令牌绑定一致）的 IP 漂移只记录不计分；
+//      无指纹/指纹不符（Cookie 被搬）才按高危 60 分。
+//   4. 首犯一律 30 分钟短封自动解封（误封成本有上限），管理端会话 IP 临时白名单。
 //
 // 回环/内网默认白名单（IP_GUARD_LOCAL=1），公网部署设 IP_GUARD_LOCAL=0。
 
@@ -50,7 +59,13 @@ const (
 	adminRatePerMin  = 30
 	scannerMinReqs   = 50
 	scanner404Ratio  = 0.4
-	fpChurnMaxIPs    = 8
+	// 指纹全生命周期关联 IP 数超此值记漂移观察（出差多年累积也难触及）
+	fpChurnMaxIPs = 12
+	// 连坐/漂移判定"设备劣迹"的时间窗与抽查 IP 数
+	fpViolationLookback = 7 * 24 * 3600
+	fpViolationProbe    = 5
+	// 封禁累犯衰减期：超过该时长无违规，strike 回初犯档
+	banStrikeDecay = 30 * 24 * time.Hour
 )
 
 // GuardStore 防护存储端口（sqlite.DB 实现，cli 层适配）。
@@ -155,6 +170,8 @@ type IPGuard struct {
 	dedupe   map[string]time.Time // ip+kind → 上次事件时间
 	banCache map[string]banCacheEntry
 	fpReport map[string][]time.Time // 指纹上报限频
+	// whitelist 管理端会话 IP 临时免封禁（登录/会话校验时刷新，TTL 与会话一致）
+	whitelist map[string]time.Time
 }
 
 type banCacheEntry struct {
@@ -182,6 +199,7 @@ func NewIPGuard(store GuardStore) *IPGuard {
 		dedupe:       map[string]time.Time{},
 		banCache:     map[string]banCacheEntry{},
 		fpReport:     map[string][]time.Time{},
+		whitelist:    map[string]time.Time{},
 	}
 }
 
@@ -278,12 +296,41 @@ func (g *IPGuard) isBanned(ctx context.Context, ip string) bool {
 	return banned
 }
 
-// ban 执行封禁（升级制：查旧记录 strikes+1）；severe 直接不低于 7 天档。
+// Whitelist 将 IP 加入临时免封禁白名单（管理端会话有效期间）。
+func (g *IPGuard) Whitelist(ip string, ttl time.Duration) {
+	if ip == "" {
+		return
+	}
+	g.mu.Lock()
+	g.whitelist[ip] = time.Now().Add(ttl)
+	g.mu.Unlock()
+}
+
+// isWhitelisted 管理端白名单判定（顺带清理过期项）。
+func (g *IPGuard) isWhitelisted(ip string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	exp, ok := g.whitelist[ip]
+	if !ok {
+		return false
+	}
+	if time.Now().After(exp) {
+		delete(g.whitelist, ip)
+		return false
+	}
+	return true
+}
+
+// ban 执行封禁（升级制：查旧记录 strikes+1，超 30 天衰减回初犯档）；severe 直接不低于 7 天档。
 func (g *IPGuard) ban(ctx context.Context, ip, reason string, severe bool) {
 	old, err := g.store.FindBan(ctx, ip)
 	strikes := 1
 	if old != nil && err == nil {
 		strikes = old.Strikes + 1
+		// 累犯衰减：历史封禁超 30 天未再犯，按初犯处理（防止旧误封长期连坐）
+		if time.Since(old.BannedAt) > banStrikeDecay {
+			strikes = 1
+		}
 	}
 	if severe && strikes < 3 {
 		strikes = 3
@@ -346,10 +393,11 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 		local := g.localOK && isLocalIP(ip)
 
 		// ① 封禁检查：全站 404。
-		// 例外：管理端 ipguard 端点放行给后面的 adminAuth（需有效管理会话），
-		// 保证被封管理员有自救解封通道，又不给攻击者任何未授权入口。
+		// 例外：回环/内网、管理端白名单会话、管理端 ipguard 端点（放行给
+		// 后面的 adminAuth，保证被封管理员有自救解封通道，又不给攻击者任何
+		// 未授权入口）。
 		if g.isBanned(ctx, ip) {
-			if local || strings.HasPrefix(r.URL.Path, "/api/v1/admin/ipguard/") {
+			if local || g.isWhitelisted(ip) || strings.HasPrefix(r.URL.Path, "/api/v1/admin/ipguard/") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -446,6 +494,21 @@ func (g *IPGuard) record(ip, ua string) *ipWindow {
 	return w
 }
 
+// isMachineUA 脚本/机器 UA 判定（真人浏览器共享出口 vs 爬虫的分档依据）。
+func isMachineUA(ua string) bool {
+	if ua == "" {
+		return true
+	}
+	low := strings.ToLower(ua)
+	for _, m := range []string{"curl", "wget", "python", "scrapy", "httpclient", "go-http",
+		"java/", "okhttp", "node", "axios", "postman", "httpie", "libwww"} {
+		if strings.Contains(low, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // evaluate 第一层/第三层违规判定（速率、爬虫、扫描器）。
 func (g *IPGuard) evaluate(ctx context.Context, ip, path, ua string, w *ipWindow) {
 	g.mu.Lock()
@@ -466,9 +529,14 @@ func (g *IPGuard) evaluate(ctx context.Context, ip, path, ua string, w *ipWindow
 		g.event(ctx, ip, "traffic-attack", sprintf("%d req/min", rate1m), 100, true)
 		return
 	}
-	// 普通速率超限
+	// 普通速率超限：按 UA 分档——真人浏览器（公司 NAT/飞机 WiFi 共享出口聚合
+	// 大量正常用户）30 分，脚本 UA 60 分；超 3 倍阈值不分档直接 60。
 	if rate1m >= warnRatePerMin {
-		g.event(ctx, ip, "rate", sprintf("%d req/min", rate1m), 60, false)
+		score := 30
+		if isMachineUA(ua) || rate1m >= warnRatePerMin*3 {
+			score = 60
+		}
+		g.event(ctx, ip, "rate", sprintf("%d req/min", rate1m), score, false)
 	}
 	// 管理端探测
 	if strings.HasPrefix(path, "/api/v1/admin") && rate1m >= adminRatePerMin {
@@ -508,9 +576,15 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 		g.event(ctx, ip, "id-forgery", "身份令牌签名无效", 100, true)
 		return
 	}
-	// 令牌绑定的 IP 与当前不符：Cookie 被搬到别的网络（也可能是宽带换 IP）
+	// 令牌绑定的 IP 与当前不符：Cookie 被搬到别的网络。
+	// 出差宽限：设备指纹与令牌绑定一致 = 同一台设备换了网络，只记录不计分；
+	// 无指纹或指纹不符（Cookie 被盗搬到别的设备/网络）才按高危计分。
 	if tokIP != ip {
-		g.event(ctx, ip, "id-ip-drift", sprintf("令牌绑定 %s，当前 %s", tokIP, ip), 60, false)
+		if fp != "" && fp == tokFp {
+			g.event(ctx, ip, "id-ip-drift", sprintf("同一设备换网络 %s → %s（宽限）", tokIP, ip), 0, false)
+		} else {
+			g.event(ctx, ip, "id-ip-drift", sprintf("令牌绑定 %s，当前 %s", tokIP, ip), 60, false)
+		}
 		g.issue(w, ip, fp)
 		return
 	}
@@ -576,19 +650,46 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	if local {
 		return out, false
 	}
-	// 连坐：该指纹历史上关联的 IP 有在封禁期内的 → 本 IP 同档封禁
+	// 连坐双因子：干净设备连到被封的共享出口（酒店/机场/运营商 NAT 被前任搞封）
+	// 不算违规，只记低分观察；只有"该指纹名下其他 IP 近期也有劣迹"（代理池轮换
+	// 特征）才升级封禁。防误封核心：身份信号必须与设备劣迹叠加。
 	bannedKin, err := g.store.BannedAmong(ctx, knownIPs)
 	if err == nil && len(bannedKin) > 0 && !contains(knownIPs[:len(knownIPs)-1], ip) {
-		// 只在"本 IP 新出现在该指纹下"时连坐，避免已封 IP 反复上报刷日志
-		g.event(ctx, ip, "fp-linked", sprintf("指纹曾关联封禁 IP %s", strings.Join(bannedKin, ",")), 100, true)
-		out["banned"] = true
-		return out, true
+		// 只在"本 IP 新出现在该指纹下"时判定，避免已封 IP 反复上报刷日志
+		if g.fpHasRecentViolations(ctx, knownIPs, ip) {
+			g.event(ctx, ip, "fp-linked", sprintf("指纹曾关联封禁 IP %s 且设备有劣迹", strings.Join(bannedKin, ",")), 100, true)
+			out["banned"] = true
+			return out, true
+		}
+		g.event(ctx, ip, "fp-linked-watch", sprintf("指纹曾关联封禁 IP %s（干净设备宽限）", strings.Join(bannedKin, ",")), 15, false)
 	}
-	// 漂移：指纹 24h 内换 IP 过多 → 代理池
+	// 漂移：指纹全生命周期关联 IP 过多 → 代理池特征。
+	// 干净设备（无劣迹）仅低分观察，有劣迹才按 40 分计。
 	if len(knownIPs) > fpChurnMaxIPs {
-		g.event(ctx, ip, "fp-churn", sprintf("指纹关联 %d 个 IP", len(knownIPs)), 40, false)
+		score := 10
+		if g.fpHasRecentViolations(ctx, knownIPs, ip) {
+			score = 40
+		}
+		g.event(ctx, ip, "fp-churn", sprintf("指纹关联 %d 个 IP", len(knownIPs)), score, false)
 	}
 	return out, false
+}
+
+// fpHasRecentViolations 抽查指纹名下其他 IP 近期（7 天）是否有违规记录：
+// 区分"出差换网络的干净设备"与"代理池轮换的指纹"。
+func (g *IPGuard) fpHasRecentViolations(ctx context.Context, knownIPs []string, exceptIP string) bool {
+	probed := 0
+	for i := len(knownIPs) - 2; i >= 0 && probed < fpViolationProbe; i-- {
+		other := knownIPs[i]
+		if other == exceptIP {
+			continue
+		}
+		probed++
+		if score, err := g.store.RecentIPEventsScore(ctx, other, fpViolationLookback); err == nil && score > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func contains(xs []string, v string) bool {
