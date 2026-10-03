@@ -1,10 +1,12 @@
 name: Daily Hot
 
-# 每天 07:30（UTC 23:30 前一日 ≈ 北京时间 07:30）跑一轮完整流水线，
-# 日报与站点产物提交回仓库。无服务器也能运转；有服务器时可用 serve 模式替代。
+# 每天 05:30（北京时间，21:30 UTC）在 GitHub Actions 跑一轮完整流水线：
+# 国际出口可抓境外 RSS，国内服务器 07:30 的常驻 cron 再补国内热榜。
+# 流程：拉服务器数据库为基座（全量信源+历史）→ 跑流水线 → 内容表合并回服务器。
+# 无服务器也能运转（日报与站点产物提交回仓库）。
 on:
   schedule:
-    - cron: "30 23 * * *"
+    - cron: "30 21 * * *"
   workflow_dispatch:
 
 permissions:
@@ -19,6 +21,29 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      # 以服务器数据库为基座：36 个信源配置 + 全部历史内容都在库里，
+      # Actions  fresh checkout 自带的种子只有 17 个默认信源，不拉库会丢配置
+      - name: 拉取服务器数据库作基座
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+        run: |
+          set -e
+          ssh -i ~/.ssh/deploy -p $PORT ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "sudo python3 /opt/githubhot/scripts/db_export.py"
+          mkdir -p data
+          scp -i ~/.ssh/deploy -P $PORT \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/ghot-base.db data/githubhot.db
+          ssh -i ~/.ssh/deploy -p $PORT ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "rm -f /tmp/ghot-base.db"
+
       - name: Run pipeline
         env:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
@@ -29,6 +54,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
           DATA_DIR: ./data
         run: go run ./cmd/githubhot run
+
+      # 内容表回灌服务器：境外源新采集的 items/stories/digests 入库，
+      # 风控表（ip_*）、会话、探针结果不触碰
+      - name: 内容表合并回服务器
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+        run: |
+          set -e
+          scp -i ~/.ssh/deploy -P $PORT data/githubhot.db \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/actions-ghot.db
+          ssh -i ~/.ssh/deploy -p $PORT ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "sudo python3 /opt/githubhot/scripts/sync_merge.py /tmp/actions-ghot.db && rm -f /tmp/actions-ghot.db"
+
       - name: Commit digests & site
         run: |
           git config user.name "github-actions[bot]"
