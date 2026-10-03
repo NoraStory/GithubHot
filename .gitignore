@@ -21,6 +21,8 @@ web/dist/
 
 # 本地背景视频（体积大，由磁盘目录 VIDEOS_DIR 提供，不入库不进 embed）
 /videos/
+# APP 更新包（APK_DIR 直出目录，由 CI 推送，不入库）
+/apks/
 web/public/anzhiyu/js/main.js
 web/public/anzhiyu/js/utils.js
 web/public/anzhiyu/js/waterfall.js

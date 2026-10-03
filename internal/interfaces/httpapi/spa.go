@@ -35,6 +35,12 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 		}
 		// 磁盘没有该文件 → 继续走 embed（兼容旧部署）
 	}
+	// APP 安装包直出：/app/xxx.apk 走磁盘目录（APK_DIR，默认 ./apks），
+	// 供 force_upgrade_url 指向本机（如 /app/githubhot-latest.apk）做 APP 内自动更新。
+	if strings.HasPrefix(p, "app/") {
+		serveDiskApk(w, r, strings.TrimPrefix(p, "app/"))
+		return
+	}
 	if data, err := fs.ReadFile(dist, p); err == nil {
 		w.Header().Set("Content-Type", contentType(p))
 		// 带哈希的资源可长缓存；其余静态资源与页面禁用缓存（embed 无 Last-Modified，
@@ -122,6 +128,46 @@ func serveDiskVideo(w http.ResponseWriter, r *http.Request, name string) bool {
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeFile(w, r, full)
 	return true
+}
+
+// serveDiskApk 从 apksDir() 提供 /app/ 下的 APK 安装包（APP 内自动更新下载源）。
+// 只允许 .apk 文件；不存在返回 404。
+func serveDiskApk(w http.ResponseWriter, r *http.Request, name string) {
+	if filepath.IsAbs(name) || strings.Contains(name, "..") || !strings.HasSuffix(name, ".apk") {
+		http.NotFound(w, r)
+		return
+	}
+	dir := apksDir()
+	if dir == "" {
+		http.NotFound(w, r)
+		return
+	}
+	full := filepath.Join(dir, filepath.FromSlash(name))
+	info, err := os.Stat(full)
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(full)+"\"")
+	http.ServeFile(w, r, full)
+}
+
+// apksDir APP 安装包目录：APK_DIR 环境变量优先（相对路径锚定可执行文件目录），
+// 默认取可执行文件旁的 apks/。
+func apksDir() string {
+	dir := strings.TrimSpace(os.Getenv("APK_DIR"))
+	if dir != "" && filepath.IsAbs(dir) {
+		return dir
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if dir == "" {
+		dir = "apks"
+	}
+	return filepath.Join(filepath.Dir(exe), dir)
 }
 
 // favicon 站点图标：dist 只内嵌 SVG 图标，老式客户端硬请求 /favicon.ico 时以同内容回退。

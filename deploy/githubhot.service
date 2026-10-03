@@ -1,29 +1,21 @@
-# GithubHot systemd 服务（服务器常驻模式）
-#
-# 安装：
-#   1. go build -o /opt/githubhot/githubhot ./cmd/githubhot
-#   2. 把 .env 放到 /opt/githubhot/.env
-#   3. cp deploy/githubhot.service /etc/systemd/system/
-#   4. systemctl daemon-reload && systemctl enable --now githubhot
-#
-# 日志：journalctl -u githubhot -f
-
 [Unit]
-Description=GithubHot - GitHub x AI dual hot tracker
-After=network-online.target
-Wants=network-online.target
+Description=GithubHot 后端（API + 前端静态 + 双榜探针）
+After=network.target
 
 [Service]
 Type=simple
+# 部署目录（与 workflow 的 DEPLOY_DIR 一致）
 WorkingDirectory=/opt/githubhot
 ExecStart=/opt/githubhot/githubhot serve
-Restart=on-failure
-RestartSec=5
-# 加固
-NoNewPrivileges=true
-ProtectSystem=strict
-ReadWritePaths=/opt/githubhot
-PrivateTmp=true
+Restart=always
+RestartSec=3
+# 环境变量写入 /etc/systemd/system/githubhot.service.d/override.conf：
+#   DOUBAO_API_KEY=sk-...        （LLM 翻译/资讯解析，必需）
+#   GHOT_DIR=/opt/githubhot      （数据目录，可选）
+#   VIDEOS_DIR=/opt/githubhot/videos
+#   APK_DIR=/opt/githubhot/apks  （APP 自动更新包目录）
+#   APP_FORCE_UPGRADE_URL=/app/githubhot-latest.apk  （一次配置，永久自动更新）
+Environment=GHOT_DIR=/opt/githubhot
 
 [Install]
 WantedBy=multi-user.target

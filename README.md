@@ -237,6 +237,39 @@ MCP 接入说明也可在前端工具库 `/tools` 页面就地展开查看。
 `application.SourceFetcher` 接口并在 `fetcher.Registry.Register` 注册即可接入，
 领域模型无需任何改动。
 
+## 自动化运维（CI/CD，两套流水线）
+
+| 仓库 | 触发 | 流水线 |
+|---|---|---|
+| `GithubHot`（本仓库） | push main（前后端任一变） | 构建 web + 编译 linux/windows 二进制 → SSH 部署到服务器（上传、解包 dist、`systemctl restart githubhot`、healthz 自检）→ 发 `repository_dispatch` 通知 APP 仓库 |
+| `GithubHot-App` | push main / 收到后端部署通知 | gradle 构建 APK → 产物归档 → SSH 推到服务器 `apks/` 目录 |
+
+所需 GitHub 配置（两个仓库的 Settings → Secrets and variables）：
+
+- `DEPLOY_HOST` / `DEPLOY_USER` / `DEPLOY_KEY`（SSH 私钥）/ `DEPLOY_PORT`（可选，默认 22）—— 两套流水线共用
+- `DEPLOY_DIR`（Repository variable，默认 `/opt/githubhot`）
+- `APP_REPO_PAT`（仅后端仓库；fine-grained token，需对 APP 仓库有 Actions 写权限，用于跨仓库触发）
+- 未配置 `DEPLOY_HOST` 时部署步骤自动跳过，只做构建验证
+
+服务器一次性准备：
+
+```bash
+sudo mkdir -p /opt/githubhot/{apks,videos} && sudo chown -R $USER /opt/githubhot
+sudo cp deploy/githubhot.service /etc/systemd/system/githubhot.service
+sudo systemctl daemon-reload && sudo systemctl enable githubhot
+# 密钥等敏感环境变量写入 override.conf：
+sudo systemctl edit githubhot   # DOUBAO_API_KEY=... 等
+```
+
+**APP 自动更新闭环**（一次配置，永久生效）：
+
+1. 后端环境变量 `APP_FORCE_UPGRADE_URL=/app/githubhot-latest.apk`；
+2. `/app/*.apk` 由后端从 `APK_DIR`（默认可执行文件旁 `apks/`）直出；
+3. APP 启动握手拿到 `force_upgrade_url` → 弹不可跳过的更新框 → DownloadManager 下载 → FileProvider 调起系统安装器；
+4. 之后每次 APP 仓库 push，新 APK 自动覆盖 `githubhot-latest.apk`，所有旧客户端下次启动即收到强制更新。
+
+取消强制更新：去掉 `APP_FORCE_UPGRADE_URL` 环境变量重启即可。
+
 ## 开发
 
 ```bash

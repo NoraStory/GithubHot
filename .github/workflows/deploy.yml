@@ -1,0 +1,140 @@
+name: 前后端构建部署
+
+# 触发：main 分支代码变动（前后端任一变即全量重建部署）
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'web/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  # 密钥探测：secrets 不能直接在 if 条件里用，先经 env 落到 outputs
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      has_deploy: ${{ steps.s.outputs.has_deploy }}
+      has_pat: ${{ steps.s.outputs.has_pat }}
+    steps:
+      - id: s
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          APP_REPO_PAT: ${{ secrets.APP_REPO_PAT }}
+        run: |
+          echo "has_deploy=$([ -n "$DEPLOY_HOST" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "has_pat=$([ -n "$APP_REPO_PAT" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # 前端构建 → 同步到 Go 嵌入目录
+      - name: 构建前端
+        run: |
+          cd web
+          npm ci
+          npm run build
+          cd ..
+          rm -rf internal/interfaces/webui/dist
+          cp -r web/dist internal/interfaces/webui/dist
+
+      # 服务器用 linux/amd64；windows/amd64 作为发布产物
+      - name: 编译二进制
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build -trimpath -ldflags "-s -w" -o dist/githubhot-linux-amd64 ./cmd/githubhot
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+            go build -trimpath -ldflags "-s -w" -o dist/githubhot-windows-amd64.exe ./cmd/githubhot
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14
+
+  deploy:
+    needs: [build, check]
+    if: needs.check.outputs.has_deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 重建前端 + linux 二进制
+        run: |
+          cd web && npm ci && npm run build && cd ..
+          rm -rf internal/interfaces/webui/dist
+          cp -r web/dist internal/interfaces/webui/dist
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build -trimpath -ldflags "-s -w" -o githubhot ./cmd/githubhot
+          tar czf webdist.tar.gz -C internal/interfaces/webui dist
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 上传并重启服务
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
+        run: |
+          scp -P $PORT githubhot webdist.tar.gz \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$DIR/
+          ssh -p $PORT ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
+            set -e
+            cd $DIR
+            tar xzf webdist.tar.gz
+            rm -f webdist.tar.gz
+            chmod +x githubhot
+            sudo systemctl restart githubhot
+            sleep 2
+            curl -fsS http://127.0.0.1:8787/api/v1/healthz
+          "
+
+  # 后端部署完成后通知 APP 仓库重建（API 契约变动时 APP 跟随出新包）
+  notify-app:
+    needs: [deploy, check]
+    if: always() && needs.deploy.result == 'success' && needs.check.outputs.has_pat == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 触发 APP 仓库构建
+        run: |
+          curl -fsS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.APP_REPO_PAT }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/${{ github.repository_owner }}/GithubHot-App/dispatches \
+            -d '{"event_type":"backend-deployed","client_payload":{"sha":"${{ github.sha }}","repo":"${{ github.repository }}"}}'
