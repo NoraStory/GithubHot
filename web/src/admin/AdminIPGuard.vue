@@ -22,7 +22,47 @@ const match = (ip) => !ipFilter.value || (ip || '').includes(ipFilter.value.trim
 const talkers = computed(() => (data.value?.talkers || []).filter(t => match(t.ip)))
 const bansFiltered = computed(() => (data.value?.bans || []).filter(b => match(b.IP)))
 const eventsFiltered = computed(() => (data.value?.events || []).filter(e => match(e.IP)))
-const fpsFiltered = computed(() => (data.value?.fingerprints || []).filter(f => match(f.IPs.join(' '))))
+// 指纹筛选：除 IP 外同时匹配型号/显卡/UA/指纹串
+const fpsFiltered = computed(() => (data.value?.fingerprints || []).filter(f => {
+  const q = ipFilter.value.trim()
+  if (!q) return true
+  const hay = [...f.IPs, f.UA, f.Components?.model || '', f.Components?.renderer || '', f.Fingerprint].join(' ')
+  return hay.includes(q)
+}))
+
+// ---------- 设备识别与统计 ----------
+// APP 行的 UA 形如 "GithubHot-APP (vivo V2505A)"、components.client=android；
+// 网页行解析浏览器名 + 系统。
+function clientInfo(f) {
+  const ua = f.UA || ''
+  const comp = f.Components || {}
+  if (ua.startsWith('GithubHot-APP') || comp.client === 'android') {
+    const model = comp.model || ua.match(/GithubHot-APP \((.+)\)/)?.[1] || 'Android 设备'
+    return { kind: 'app', icon: '📱', label: model }
+  }
+  const m = ua.match(/(Edg|Chrome|Firefox|Safari)\/([\d.]+)/)
+  const browser = m ? ({ Edg: 'Edge', Chrome: 'Chrome', Firefox: 'Firefox', Safari: 'Safari' })[m[1]] : '浏览器'
+  const os = ua.includes('Windows') ? 'Windows' : ua.includes('Mac OS') ? 'macOS'
+    : ua.includes('iPhone') || ua.includes('iPad') ? 'iOS'
+    : ua.includes('Android') ? 'Android' : ua.includes('Linux') ? 'Linux' : ''
+  return { kind: 'web', icon: '🌐', label: browser + (os ? ' · ' + os : '') }
+}
+
+const stats = computed(() => {
+  const fps = data.value?.fingerprints || []
+  let app = 0
+  for (const f of fps) if (clientInfo(f).kind === 'app') app++
+  return {
+    total: fps.length,
+    app,
+    web: fps.length - app,
+    multiIp: fps.filter(f => f.IPs.length > 1).length,
+    hot: fps.filter(f => f.IPs.length > 8).length,
+  }
+})
+
+// 风险行：高频换 IP 或命中 APP 威胁
+const isRisk = f => f.IPs.length > 8 || (f.Flags || []).some(x => x.startsWith('app-'))
 
 async function load() {
   error.value = ''
@@ -104,9 +144,23 @@ const FLAG_LABELS = {
   'ua-ch-mismatch': ['Client Hints 与 UA 矛盾', 'Sec-CH-UA-Platform 与 UA 声明系统不一致'],
   'lang-tz-mismatch': ['语言与时区矛盾', '语言环境与系统时区不匹配，常见于伪造 header'],
   'no-plugins': ['桌面环境无插件', '桌面 Chrome 无插件接口，无头/精简环境特征'],
-  'env-incoherent': ['环境不自洽', '客户端上报环境参数存在矛盾']
+  'env-incoherent': ['环境不自洽', '客户端上报环境参数存在矛盾'],
+  // APP 威胁检测（components.threat 落入 flags 的 app-* 前缀键）
+  'app-root': ['Root 环境', 'APP 自检检测到设备已 Root'],
+  'app-emulator': ['模拟器/云机', 'APP 自检检测到模拟器特征'],
+  'app-debugger': ['调试器附加', 'APP 自检检测到调试器'],
+  'app-hook': ['Hook 框架', 'APP 自检检测到 Xposed/Frida'],
+  'app-installer': ['非可信安装渠道', 'APP 安装来源不在可信渠道列表']
 }
 const flagInfo = f => FLAG_LABELS[f] || [f, '']
+
+// 显卡名截断：ANGLE 长串取括号内首段（如 "ANGLE (AMD, AMD Radeon ...)" → "AMD Radeon ..." 截断）
+const shortGpu = s => {
+  if (!s) return '-'
+  const m = s.match(/^ANGLE \(([^,]+), (.+?)\)/)
+  const t = m ? m[2] : s
+  return t.length > 26 ? t.slice(0, 26) + '…' : t
+}
 
 onMounted(load)
 </script>
@@ -138,7 +192,16 @@ onMounted(load)
           <option v-for="[h, label] in RANGES" :key="h" :value="h">{{ label }}</option>
         </select>
         <button v-if="ipFilter" class="btn small" @click="ipFilter = ''">清除</button>
-        <span class="hint">点击任意 IP 可下钻查看完整档案与指纹；时间筛选作用于违规事件</span>
+        <span class="hint">点击任意 IP 可下钻查看完整档案与指纹；筛选同时匹配型号/显卡/UA；时间筛选作用于违规事件</span>
+      </div>
+
+      <!-- 统计概览 -->
+      <div v-if="data" class="stat-row">
+        <div class="stat"><b class="num">{{ stats.total }}</b><span>活跃指纹</span></div>
+        <div class="stat"><b>📱 {{ stats.app }}</b><span>APP 设备</span></div>
+        <div class="stat"><b>🌐 {{ stats.web }}</b><span>浏览器访客</span></div>
+        <div class="stat" :class="{ warn: stats.multiIp }"><b class="num">⚠ {{ stats.multiIp }}</b><span>多 IP 指纹</span></div>
+        <div class="stat" :class="{ hot: stats.hot }"><b class="num">🔥 {{ stats.hot }}</b><span>高频换 IP</span></div>
       </div>
 
       <!-- IP 下钻详情 -->
@@ -195,16 +258,20 @@ onMounted(load)
           <h4>关联设备指纹（{{ detail.fingerprints.length }}）</h4>
           <table v-if="detail.fingerprints.length" class="fp-table">
             <thead><tr>
-              <th>融合指纹</th><th>Canvas</th><th>WebGL</th><th>音频</th><th>字体</th>
+              <th>融合指纹</th><th>设备</th><th>屏幕</th><th>显卡</th>
+              <th>Canvas</th><th>WebGL</th><th>音频</th><th>字体</th>
               <th>关联 IP 数</th><th>WebRTC 真实 IP</th><th>最近使用</th><th>上报次数</th>
             </tr></thead>
             <tbody>
-              <tr v-for="f in detail.fingerprints" :key="f.Fingerprint">
+              <tr v-for="f in detail.fingerprints" :key="f.Fingerprint" :class="{ 'row-risk': isRisk(f) }">
                 <td class="mono" :title="f.Fingerprint + '\n' + f.UA">
-                  {{ short(f.Fingerprint) }}<span v-if="(f.Flags || []).length" class="warn" :title="'核验命中: ' + f.Flags.join(', ')">⚠</span>
+                  {{ short(f.Fingerprint) }}<span v-if="(f.Flags || []).length" class="warn" :title="'核验命中: ' + f.Flags.map(x => flagInfo(x)[0]).join('、')">⚠</span>
                 </td>
+                <td><span class="dev" :class="clientInfo(f).kind" :title="f.UA"><span class="dev-icon">{{ clientInfo(f).icon }}</span>{{ clientInfo(f).label }}</span></td>
+                <td class="mono comp">{{ f.Components?.screen || '-' }}</td>
+                <td class="mono comp" :title="f.Components?.renderer">{{ shortGpu(f.Components?.renderer) }}</td>
                 <td class="mono comp" :title="f.Components?.canvas">{{ comp(f.Components?.canvas) }}</td>
-                <td class="mono comp" :title="'WebGL 分量: ' + (f.Components?.webgl || '') + '\n显卡: ' + (f.Components?.renderer || '-')">{{ comp(f.Components?.webgl) }}</td>
+                <td class="mono comp" :title="'WebGL 分量: ' + (f.Components?.webgl || '')">{{ comp(f.Components?.webgl) }}</td>
                 <td class="mono comp" :title="f.Components?.audio">{{ comp(f.Components?.audio) }}</td>
                 <td class="mono comp" :title="f.Components?.fonts">{{ comp(f.Components?.fonts) }}</td>
                 <td class="num" :class="{ hot: f.IPs.length > 8 }">{{ f.IPs.length }}</td>
@@ -292,16 +359,20 @@ onMounted(load)
         <div v-if="!fpsFiltered.length" class="empty">暂无指纹记录（访客上报后出现）</div>
         <table v-else class="fp-table">
           <thead><tr>
-            <th>融合指纹</th><th>Canvas</th><th>WebGL</th><th>音频</th><th>字体</th>
+            <th>融合指纹</th><th>设备</th><th>屏幕</th><th>显卡</th>
+            <th>Canvas</th><th>WebGL</th><th>音频</th><th>字体</th>
             <th>关联 IP 数</th><th>WebRTC 真实 IP</th><th>最近使用</th><th>上报次数</th>
           </tr></thead>
           <tbody>
-            <tr v-for="f in fpsFiltered" :key="f.Fingerprint">
+            <tr v-for="f in fpsFiltered" :key="f.Fingerprint" :class="{ 'row-risk': isRisk(f) }">
               <td class="mono" :title="f.Fingerprint + '\n' + f.UA">
-                {{ short(f.Fingerprint) }}<span v-if="(f.Flags || []).length" class="warn" :title="'核验命中: ' + f.Flags.join(', ')">⚠</span>
+                {{ short(f.Fingerprint) }}<span v-if="(f.Flags || []).length" class="warn" :title="'核验命中: ' + f.Flags.map(x => flagInfo(x)[0]).join('、')">⚠</span>
               </td>
+              <td><span class="dev" :class="clientInfo(f).kind" :title="f.UA"><span class="dev-icon">{{ clientInfo(f).icon }}</span>{{ clientInfo(f).label }}</span></td>
+              <td class="mono comp">{{ f.Components?.screen || '-' }}</td>
+              <td class="mono comp" :title="f.Components?.renderer">{{ shortGpu(f.Components?.renderer) }}</td>
               <td class="mono comp" :title="f.Components?.canvas">{{ comp(f.Components?.canvas) }}</td>
-              <td class="mono comp" :title="'WebGL 分量: ' + (f.Components?.webgl || '') + '\n显卡: ' + (f.Components?.renderer || '-')">{{ comp(f.Components?.webgl) }}</td>
+              <td class="mono comp" :title="'WebGL 分量: ' + (f.Components?.webgl || '')">{{ comp(f.Components?.webgl) }}</td>
               <td class="mono comp" :title="f.Components?.audio">{{ comp(f.Components?.audio) }}</td>
               <td class="mono comp" :title="f.Components?.fonts">{{ comp(f.Components?.fonts) }}</td>
               <td class="num" :class="{ hot: f.IPs.length > 8 }">
@@ -364,6 +435,17 @@ th { color: var(--anzhiyu-gray); font-weight: 500; }
 .ua-set ul { margin: 6px 0 0; padding-left: 18px; word-break: break-all; white-space: normal; }
 .ip-link { color: var(--anzhiyu-theme); cursor: pointer; text-decoration: none; }
 .ip-link:hover { text-decoration: underline; }
+.stat-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 1rem; }
+.stat { background: var(--anzhiyu-card-bg); border-radius: var(--anzhiyu-radius); box-shadow: var(--card-box-shadow); padding: 10px 20px; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 96px; }
+.stat b { font-size: 1.15rem; font-weight: 700; }
+.stat span { color: var(--anzhiyu-gray); font-size: .76rem; }
+.stat.warn b { color: #d48806; }
+.stat.hot b { color: var(--anzhiyu-red); }
+.dev { display: inline-flex; align-items: center; gap: 5px; font-size: .84rem; }
+.dev-icon { font-size: .95rem; }
+.dev.app { color: var(--anzhiyu-theme); font-weight: 600; }
+.dev.web { color: var(--anzhiyu-secondary); }
+.row-risk { box-shadow: inset 3px 0 0 var(--anzhiyu-red); }
 .detail-panel { border: 1px solid var(--anzhiyu-theme); }
 .detail-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
 .detail-head h3 { margin: 0; }
