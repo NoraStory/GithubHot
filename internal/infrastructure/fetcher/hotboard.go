@@ -2,19 +2,18 @@ package fetcher
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/NoraStory/GithubHot/internal/application"
 	"github.com/NoraStory/GithubHot/internal/domain/source"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/safehttp"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 // flexibleBool 兼容各家榜单字段类型漂移（bool / 0|1 / "0"|"1"）。
@@ -38,7 +37,7 @@ func (b *flexibleBool) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// HotBoard 国内热榜抓取器：百度热搜 / 微博热搜 / B站热门。
+// HotBoard 国内热榜抓取器：百度热搜 / 微博热搜 / 网易新闻 / 腾讯新闻。
 // 全部国内直连、无需代理；config.board 选择榜单，config.max_items 限制条数。
 // 每个榜单解析器同时产出 rank（榜上名次，从 1 开始）与 heat（平台热度值，无则空），
 // 存入 FetchedItem.Meta 供后续多源共振热度算法使用。
@@ -56,12 +55,14 @@ func (HotBoard) Fetch(ctx context.Context, s source.Source, now time.Time) ([]ap
 		return fetchBaiduHot(ctx, limit)
 	case "weibo":
 		return fetchWeiboHot(ctx, limit)
-	case "bilibili":
-		return fetchBilibiliHot(ctx, limit)
+	case "netease":
+		return fetchNeteaseHot(ctx, limit)
+	case "tencent":
+		return fetchTencentHot(ctx, limit)
 	case "rss":
 		return fetchHotRSS(ctx, s, limit)
 	default:
-		return nil, fmt.Errorf("信源 %s 缺少有效 board 配置（baidu/weibo/bilibili/rss）", s.ID)
+		return nil, fmt.Errorf("信源 %s 缺少有效 board 配置（baidu/weibo/netease/tencent/rss）", s.ID)
 	}
 }
 
@@ -85,7 +86,7 @@ func fetchHotRSS(ctx context.Context, s source.Source, limit int) ([]application
 }
 
 // hotHeaders 各家需要的反爬请求头（国内榜单 API 校验 UA/Referer）。
-// UA 必须像真实浏览器，B站对空/脚本 UA 直接返回 -352 风控。
+// UA 必须像真实浏览器，空/脚本 UA 容易被风控直接拒绝。
 func hotHeaders(referer string) map[string]string {
 	h := map[string]string{
 		"Accept":          "application/json, text/plain, */*",
@@ -218,125 +219,169 @@ func weiboItem(word string, rank int) application.FetchedItem {
 	}
 }
 
-// ---------- B站热门 ----------
+// ---------- 网易新闻排行榜 ----------
 
-// MixinKeyEncTab B 站 WBI 签名混淆表（官方算法，公开稳定）。
-var MixinKeyEncTab = []int{
-	46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
-	27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
-	37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
-	22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
-}
-
-// wbiMixinKey 由 img_key + sub_key 生成 32 位混淆密钥。
-func wbiMixinKey(imgKey, subKey string) string {
-	raw := imgKey + subKey
-	var b [64]byte
-	for i, idx := range MixinKeyEncTab {
-		b[i] = raw[idx]
-	}
-	return string(b[:32])
-}
-
-// wbiSignParams 对参数做 WBI 签名：加 wts、按键排序、值过滤 !'()*，末位附 w_rid。
-func wbiSignParams(params map[string]string, mixinKey string, now time.Time) string {
-	q := make(url.Values)
-	for k, v := range params {
-		// 值中移除 !'()*（官方要求）
-		filtered := strings.Map(func(r rune) rune {
-			switch r {
-			case '!', '\'', '(', ')', '*':
-				return -1
-			}
-			return r
-		}, v)
-		q.Set(k, filtered)
-	}
-	q.Set("wts", strconv.FormatInt(now.Unix(), 10))
-	encoded := q.Encode()
-	sum := md5.Sum([]byte(encoded + mixinKey))
-	return encoded + "&w_rid=" + hex.EncodeToString(sum[:])
-}
-
-// bilibiliWBIKeys 从 nav 接口取 WBI img/sub 公钥。
-func bilibiliWBIKeys(ctx context.Context) (imgKey, subKey string, err error) {
-	const api = "https://api.bilibili.com/x/web-interface/nav"
-	body, _, err := safehttp.Fetch(ctx, api, hotHeaders("https://www.bilibili.com/"))
-	if err != nil {
-		return "", "", err
-	}
-	var root struct {
-		Code int `json:"code"`
-		Data struct {
-			WbiImg struct {
-				ImgURL string `json:"img_url"`
-				SubURL string `json:"sub_url"`
-			} `json:"wbi_img"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &root); err != nil {
-		return "", "", fmt.Errorf("解析B站 nav 响应: %w", err)
-	}
-	imgKey = path.Base(strings.TrimSuffix(root.Data.WbiImg.ImgURL, ".png"))
-	subKey = path.Base(strings.TrimSuffix(root.Data.WbiImg.SubURL, ".png"))
-	if imgKey == "" || subKey == "" || imgKey == "." || subKey == "." {
-		return "", "", fmt.Errorf("B站 nav 未返回 WBI 公钥（code=%d）", root.Code)
-	}
-	return imgKey, subKey, nil
-}
-
-func fetchBilibiliHot(ctx context.Context, limit int) ([]application.FetchedItem, error) {
-	imgKey, subKey, err := bilibiliWBIKeys(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("获取B站 WBI 公钥: %w", err)
-	}
-	signed := wbiSignParams(map[string]string{"rid": "0", "type": "all"}, wbiMixinKey(imgKey, subKey), time.Now())
-	api := "https://api.bilibili.com/x/web-interface/ranking/v2?" + signed
-	body, _, err := safehttp.Fetch(ctx, api, hotHeaders("https://www.bilibili.com/"))
+// fetchNeteaseHot 抓取网易新闻排行榜（24小时点击榜，HTML 页面，GBK 编码）。
+// 页面结构稳定多年：第一个 tabContents.active 表格内
+// <td class="red"><span>名次</span><a href="链接">标题</a></td><td class="cBlue">点击数</td>。
+func fetchNeteaseHot(ctx context.Context, limit int) ([]application.FetchedItem, error) {
+	const page = "https://news.163.com/special/0001386F/rank_whole.html"
+	body, _, err := safehttp.Fetch(ctx, page, hotHeaders("https://news.163.com/"))
 	if err != nil {
 		return nil, err
 	}
-	var root struct {
-		Code int `json:"code"`
-		Data struct {
-			List []struct {
-				Title   string `json:"title"`
-				Bvid    string `json:"bvid"`
-				Tname   string `json:"tname"`
-				Pubdate int64  `json:"pubdate"`
-				Owner   struct {
-					Name string `json:"name"`
-				} `json:"owner"`
-			} `json:"list"`
-		} `json:"data"`
+	// 页面 meta 声明 GBK 但实际返回 UTF-8（实测 2026-10），按 UTF-8 直接解析，
+	// 同时保留 GBK 兜底以应对编码回滚。
+	text := string(body)
+	if !utf8.ValidString(text) {
+		if decoded, derr := decodeGBK(body); derr == nil {
+			text = decoded
+		}
 	}
-	if err := json.Unmarshal(body, &root); err != nil {
-		return nil, fmt.Errorf("解析B站热门响应: %w", err)
+	// 只取第一个榜单表格（24小时点击榜），到表格结束为止。
+	start := strings.Index(text, `class="tabContents active"`)
+	if start < 0 {
+		return nil, fmt.Errorf("网易排行榜解析不到榜单区域（结构可能已变更）")
 	}
-	if root.Code != 0 {
-		return nil, fmt.Errorf("B站热门接口返回 code=%d（风控或结构变更）", root.Code)
+	rest := text[start:]
+	end := strings.Index(rest, "</table>")
+	if end > 0 {
+		rest = rest[:end]
 	}
-	out := make([]application.FetchedItem, 0, len(root.Data.List))
-	for i, it := range root.Data.List {
-		if len(out) >= limit || it.Title == "" || it.Bvid == "" {
+	out := make([]application.FetchedItem, 0, limit)
+	seen := map[string]bool{}
+	// 逐个解析 <span>名次</span><a href="url">标题</a> …… <td class="cBlue">点击数</td>
+	for len(rest) > 0 && len(out) < limit {
+		sp := strings.Index(rest, "<span>")
+		if sp < 0 {
 			break
 		}
-		fi := application.FetchedItem{
-			URL:    "https://www.bilibili.com/video/" + it.Bvid,
-			Title:  it.Title,
-			Author: it.Owner.Name,
-			Meta:   map[string]string{"rank": strconv.Itoa(i + 1)},
+		rest = rest[sp+len("<span>"):]
+		se := strings.Index(rest, "</span>")
+		if se < 0 {
+			break
 		}
-		if it.Tname != "" {
-			fi.Summary = "分区：" + it.Tname
+		rank, _ := strconv.Atoi(strings.TrimSpace(rest[:se]))
+		rest = rest[se+len("</span>"):]
+		ap := strings.Index(rest, "<a href=\"")
+		if ap < 0 {
+			break
 		}
-		if it.Pubdate > 0 {
-			fi.PublishedAt = time.Unix(it.Pubdate, 0)
+		rest = rest[ap+len("<a href=\""):]
+		ae := strings.Index(rest, "\"")
+		if ae < 0 {
+			break
+		}
+		u := rest[:ae]
+		rest = rest[ae+1:]
+		gt := strings.Index(rest, ">")
+		if gt < 0 {
+			break
+		}
+		rest = rest[gt+1:]
+		te := strings.Index(rest, "</a>")
+		if te < 0 {
+			break
+		}
+		title := strings.TrimSpace(rest[:te])
+		rest = rest[te+len("</a>"):]
+		// 点击数（下一行 <td class="cBlue">数字</td>，拿不到不影响）。
+		heat := ""
+		if hp := strings.Index(rest, `class="cBlue">`); hp >= 0 && hp < 200 {
+			seg := rest[hp+len(`class="cBlue">`):]
+			if he := strings.Index(seg, "<"); he > 0 {
+				heat = strings.TrimSpace(seg[:he])
+			}
+		}
+		if title == "" || u == "" || !strings.HasPrefix(u, "http") || seen[title] {
+			continue
+		}
+		seen[title] = true
+		if rank <= 0 {
+			rank = len(out) + 1
+		}
+		fi := application.FetchedItem{URL: u, Title: title, Meta: map[string]string{"rank": strconv.Itoa(rank)}}
+		if heat != "" {
+			fi.Meta["heat"] = heat
 		}
 		out = append(out, fi)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("B站热门解析不到条目（结构可能已变更）")
+		return nil, fmt.Errorf("网易排行榜解析不到条目（结构可能已变更）")
+	}
+	return out, nil
+}
+
+// decodeGBK GBK/GB2312 字节流转 UTF-8，非法字节替换为 U+FFFD 不失败。
+func decodeGBK(b []byte) (string, error) {
+	out, err := simplifiedchinese.GBK.NewDecoder().Bytes(b)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// ---------- 腾讯新闻热点榜 ----------
+
+// fetchTencentHot 抓取腾讯新闻热点榜（官方 JSON 接口，约每 10 分钟更新）。
+// 首条常为 TIP 运营占位（articletype=560 / id 前缀 TIP），必须过滤。
+func fetchTencentHot(ctx context.Context, limit int) ([]application.FetchedItem, error) {
+	const api = "https://r.inews.qq.com/gw/event/pc_hot_ranking_list?limit=100&offset=0"
+	body, _, err := safehttp.Fetch(ctx, api, hotHeaders("https://news.qq.com/"))
+	if err != nil {
+		return nil, err
+	}
+	var root struct {
+		Ret     int `json:"ret"`
+		IDList []struct {
+			NewsList []struct {
+				ID          string `json:"id"`
+				Title       string `json:"title"`
+				URL         string `json:"url"`
+				Surl        string `json:"surl"`
+				Abstract    string `json:"abstract"`
+				ArticleType string `json:"articletype"`
+				Time        string `json:"time"`
+			} `json:"newslist"`
+		} `json:"idlist"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return nil, fmt.Errorf("解析腾讯热点榜响应: %w", err)
+	}
+	if root.Ret != 0 || len(root.IDList) == 0 {
+		return nil, fmt.Errorf("腾讯热点榜接口返回 ret=%d（结构可能已变更）", root.Ret)
+	}
+	out := make([]application.FetchedItem, 0, limit)
+	seen := map[string]bool{}
+	for _, it := range root.IDList[0].NewsList {
+		if len(out) >= limit {
+			break
+		}
+		// TIP 运营位 / 非新闻条目 / 广告位过滤
+		if it.Title == "" || strings.HasPrefix(it.ID, "TIP") || it.ArticleType != "0" {
+			continue
+		}
+		u := it.URL
+		if u == "" {
+			u = it.Surl
+		}
+		if u == "" || seen[it.Title] {
+			continue
+		}
+		seen[it.Title] = true
+		fi := application.FetchedItem{
+			URL:     u,
+			Title:   it.Title,
+			Summary: it.Abstract,
+			Meta:    map[string]string{"rank": strconv.Itoa(len(out) + 1)},
+		}
+		if ts, perr := time.ParseInLocation("2006-01-02 15:04:05", it.Time, time.Local); perr == nil {
+			fi.PublishedAt = ts
+		}
+		out = append(out, fi)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("腾讯热点榜解析不到条目（结构可能已变更）")
 	}
 	return out, nil
 }

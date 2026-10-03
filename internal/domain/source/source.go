@@ -19,7 +19,7 @@ const (
 	KindGitHubSearch   Kind = "github_search"
 	KindGitHubTrending Kind = "github_trending"
 	KindScript         Kind = "script"
-	KindHotBoard       Kind = "hot_board" // 国内热榜（百度/微博/B站，国内直连无需代理）
+	KindHotBoard       Kind = "hot_board" // 国内热榜（百度/微博/网易/腾讯，国内直连无需代理）
 	KindXAccount       Kind = "x_account"
 	KindWechatOA       Kind = "wechat_oa"
 )

@@ -106,7 +106,7 @@ func DefaultSources(now time.Time) []source.Source {
 		CreatedAt:       now,
 	}
 
-	// 国内热榜（hot_board 抓取器，国内直连无需代理）：百度/微博/B站三源冗余，
+	// 国内热榜（hot_board 抓取器，国内直连无需代理）：百度/微博/网易/腾讯四源冗余，
 	// rank/heat 元数据随条目入库，供多源共振热度算法使用。
 	mkHot := func(id, name, board string, minutes int) source.Source {
 		return source.Source{
@@ -133,7 +133,8 @@ func DefaultSources(now time.Time) []source.Source {
 	domestic := []source.Source{
 		mkHot("hot-baidu-realtime", "百度热搜", "baidu", 15),
 		mkHot("hot-weibo-search", "微博热搜", "weibo", 15),
-		mkHot("hot-bilibili-ranking", "B站热门", "bilibili", 30),
+		mkHot("hot-netease-rank", "网易新闻榜", "netease", 15),
+		mkHot("hot-tencent-rank", "腾讯新闻榜", "tencent", 15),
 		mkHotRSS("hot-ithome", "IT之家", "https://www.ithome.com/rss/", 30),
 		mkHotRSS("hot-tmtpost", "钛媒体", "https://www.tmtpost.com/rss.xml", 30),
 		mkHotRSS("hot-ifanr", "爱范儿", "https://www.ifanr.com/feed", 30),
