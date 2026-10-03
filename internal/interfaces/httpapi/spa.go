@@ -26,11 +26,12 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 	}
 	if data, err := fs.ReadFile(dist, p); err == nil {
 		w.Header().Set("Content-Type", contentType(p))
-		// 带哈希的资源可长缓存；其余静态资源与页面必须回源，避免部署后拿到旧版
+		// 带哈希的资源可长缓存；其余静态资源与页面禁用缓存（embed 无 Last-Modified，
+		// no-cache 无法真正回源校验，必须 no-store），避免部署后浏览器拿到旧版入口页
 		if strings.HasPrefix(p, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
-			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Cache-Control", "no-store")
 		}
 		_, _ = w.Write(data)
 		return
@@ -48,6 +49,23 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(index)
 }
 
+// favicon 站点图标：dist 只内嵌 SVG 图标，老式客户端硬请求 /favicon.ico 时以同内容回退。
+func (s *Server) favicon(w http.ResponseWriter, r *http.Request) {
+	dist, err := fs.Sub(webui.FS(), "dist")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := fs.ReadFile(dist, "favicon.svg")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(data)
+}
+
 func contentType(p string) string {
 	switch {
 	case strings.HasSuffix(p, ".html"):
@@ -60,6 +78,8 @@ func contentType(p string) string {
 		return "image/svg+xml"
 	case strings.HasSuffix(p, ".png"):
 		return "image/png"
+	case strings.HasSuffix(p, ".webp"):
+		return "image/webp"
 	case strings.HasSuffix(p, ".woff2"):
 		return "font/woff2"
 	default:

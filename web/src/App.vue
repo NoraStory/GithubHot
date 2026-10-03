@@ -44,8 +44,17 @@ function toggleMusic() {
   musicOn.value = ap ? !ap.audio.paused : !musicOn.value
 }
 
-function toggleRightside() {
-  // 参考站 main.js rightSideFn["rightside-config"] 同构：.show 展开配置行，.status 保持 300ms 渐隐
+// 背景视频滚动渐变虚化（不支持 scroll 时间线的浏览器走 JS 兜底；支持的浏览器
+// 由 App.vue 的 gh-media-blur 动画接管，动画值覆盖内联变量，二者不冲突）
+function mediaMaskFade() {
+  const el = document.getElementById('home-media-container')
+  if (!el) return
+  const pct = Math.min(1, Math.max(0, window.scrollY / window.innerHeight))
+  el.style.setProperty('--media-blur', (pct * 26).toFixed(2) + 'px')
+  el.style.setProperty('--media-dim', (pct * .75).toFixed(3))
+}
+
+function toggleRightside() {  // 参考站 main.js rightSideFn["rightside-config"] 同构：.show 展开配置行，.status 保持 300ms 渐隐
   const hide = document.getElementById('rightside-config-hide')
   if (!hide) return
   if (hide.classList.contains('show')) {
@@ -272,6 +281,10 @@ const monthLabel = (ym) => {
 onMounted(async () => {
   applyTheme()
   window.addEventListener('scroll', onScroll, { passive: true })
+  // 背景视频滚动渐变虚化：主题 JS 的滚动效果在本 SPA 里没跑起来，这里补一个
+  // --media-blur/--media-dim 驱动器（公式同 index_media.js：scrollY / innerHeight）
+  window.addEventListener('scroll', mediaMaskFade, { passive: true })
+  mediaMaskFade()
   updateRightside()
   try {
     const [sn, dg] = await Promise.all([api.get('/api/v1/hot/news'), api.get('/api/v1/digests?pageSize=50')])
@@ -815,6 +828,14 @@ html[data-theme="dark"] #nav, html[data-theme="dark"] #page-header #nav { backgr
 
 /* ===== 中控台：浮层提到内容之上，加标题栏说明这是什么 ===== */
 #console { z-index: 1001; }
+/* 主题的 #console-naoDark .container{font-size:.85px} 选择器写成 #nav-right 前缀
+   （参考站把它放在导航里），中控台内的实例匹配不到，em 单位按 16px 基数失控占满全屏 */
+#console-naoDark .container { font-size: .85px; }
+/* 同一份主题定制里有一条无条件的 #console .console-card-group{display:none}
+   （参考站隐藏卡片组的残留），导致中控台内容区空白——恢复 flex 布局。
+   标签卡片高度按"右栏高 - 172px"计算，只给 max-height 不会撑开（子元素 height:100%
+   需要确定高度）——显式给高度，让中控台接近主题设计的纵向空间 */
+#console .console-card-group { display: flex; height: min(560px, 72vh); max-height: 88%; }
 #console .console-title { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px 0 6px; font-size: 1.05rem; font-weight: 700; color: var(--anzhiyu-fontcolor); }
 #console .console-title .sub { font-weight: 400; font-size: .8rem; color: var(--anzhiyu-gray); }
 #console .console-title .console-close { cursor: pointer; color: var(--anzhiyu-gray); font-size: 1rem; padding: 2px 8px; border-radius: 6px; }
@@ -872,6 +893,88 @@ section h2::before { content: none !important; }
    主题里 #home_top 只有 20px 内边距、全宽铺开，与 1200px 居中的 .layout 错位。
    收窄到 1192px 居中后：banner 左缘 = 分类条左缘（24+20 对齐），播放器右缘 = 侧栏右缘。 */
 #blog-container > #home_top { max-width: 1192px; margin: 0 auto; }
+
+/* ===== 首页横幅视频兜底背景：视频（外部 CDN）未加载/失败时，白字标题贴在
+   近白星空底上几乎不可见——给媒体容器铺一层主题渐变，视频就绪后自然盖住 ===== */
+#home-media-container {
+  background: linear-gradient(160deg, #c3cee9 0%, #d8cdec 48%, #c2d2ee 100%);
+}
+html[data-theme="dark"] #home-media-container {
+  background: linear-gradient(160deg, #262a45 0%, #1a1c30 55%, #141728 100%);
+}
+/* 背景视频是全页氛围背景：fixed 铺满 + 层级压到内容之下（web_bg -2 之上）。
+   原版 index_media.css 是 fixed z-index:0——定位元素会盖在所有静态内容上面，
+   期刊/榜单三栏整个被压没；absolute 锁回横幅又让滚动背景变得惨白。
+   z-index:-1 两全：视频始终在内容之下当背景（frosted 卡片浮在上面）。
+   滚动「渐变虚化」：随下拉视频渐进模糊 + 亮度/饱和收敛 + 轻薄纱罩保证可读性，
+   但始终保持全屏可见——是常驻的磨砂全屏背景，不是滚动后溶解消失。
+   （用户反馈：溶解成页面底色会让"背景浮动"不再全屏） */
+#home-media-container {
+  position: fixed;
+  z-index: -1;
+  overflow: hidden;
+  --media-blur: 0px;
+  --media-dim: 0;
+}
+#home-media-container .home-media {
+  position: absolute;
+  /* index_media.js 创建元素时写死内联 width/height:100%（inline 优先级高于
+     普通样式表）——这里必须 !important 覆盖；主题 index.css 还有一条
+     audio,video{max-width:100%} 会把宽钳回容器宽（高无此限制，所以之前
+     出现"高生效、宽被钳"的右侧 4% 露底）——max 复位同样必须 !important。
+     108% 外扩后视差平移 ±2.5% 始终落在覆盖范围内 */
+  inset: -4%;
+  width: 108% !important;
+  height: 108% !important;
+  max-width: none !important;
+  max-height: none !important;
+  opacity: 1 !important; /* index_media.js 的滚动 opacity 渐隐由本处 blur 接管 */
+  transform: scale(1.04); /* 外扩兜底，blur 不会露出透明边 */
+  filter: blur(var(--media-blur)) brightness(calc(1 - var(--media-dim) * .3)) saturate(calc(1 - var(--media-dim) * .45));
+  will-change: filter;
+}
+/* 轻纱罩：均匀微渐变，只压暗提亮文字对比，不遮没背景视频 */
+#home-media-container::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+    rgba(240, 245, 252, .5) 0%,
+    rgba(240, 245, 252, .58) 100%);
+  opacity: var(--media-dim);
+}
+html[data-theme="dark"] #home-media-container::after {
+  background: linear-gradient(to bottom,
+    rgba(14, 15, 22, .48) 0%,
+    rgba(14, 15, 22, .56) 100%);
+}
+/* 滚动虚化（主实现）：scroll 时间线驱动 --media-blur/--media-dim，
+   第一个视口的滚动内达到全屏磨砂态并保持——纯 CSS，不依赖 JS，
+   标签页缓存旧 bundle 也不影响 */
+/* 注意：继承必须为 true——.home-media 与 ::after 是子元素，靠继承拿到
+   容器上动画/JS 写入的变量值；inherits:false 会让它们永远读到初始值 */
+@property --media-blur {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+@property --media-dim {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+@keyframes gh-media-blur {
+  from { --media-blur: 0px; --media-dim: 0; }
+  to { --media-blur: 26px; --media-dim: .75; }
+}
+@supports (animation-timeline: scroll(root)) {
+  #home-media-container {
+    animation: gh-media-blur linear both;
+    animation-timeline: scroll(root);
+    animation-range: 0px 100vh;
+  }
+}
 
 /* ===== 子页横幅：统一基底 + 光斑装饰 + 每页差异化配色（告别千篇一律）===== */
 .post-bg {
