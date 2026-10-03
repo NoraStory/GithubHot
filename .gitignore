@@ -32,3 +32,4 @@ serve-err.log
 serve-out.log
 android-app/
 tools/
+.ci_deploy_key*
