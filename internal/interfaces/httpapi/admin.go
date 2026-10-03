@@ -261,10 +261,11 @@ func (s *Server) llmsTxt(w http.ResponseWriter, _ *http.Request) {
 	}
 	var b strings.Builder
 	b.WriteString("# GithubHot\n\n")
-	b.WriteString("GitHub 开源项目热点 × AI 资讯热点：双热度追踪站。本地流水线自动采集，LLM 预筛+双评分+中文写作，事件聚簇融合。\n\n")
+	b.WriteString("GitHub 开源项目热点 × AI 资讯热点 × 国内热榜：三热度追踪站。本地流水线自动采集，LLM 预筛+双评分+中文写作，事件聚簇融合；国内热榜走多源共振轻管道。\n\n")
 	b.WriteString("## 数据端点\n\n")
 	b.WriteString("- GET /api/v1/hot/github — GitHub 项目热度榜（JSON）\n")
 	b.WriteString("- GET /api/v1/hot/news — AI 资讯热度榜（JSON）\n")
+	b.WriteString("- GET /api/v1/hot/domestic — 国内热榜（JSON）\n")
 	b.WriteString("- GET /api/v1/hot/fusion — 资讯×项目融合配对\n")
 	b.WriteString("- GET /api/v1/hot — 三榜合一\n")
 	b.WriteString("- GET /api/v1/search?q= — 站内搜索\n")
