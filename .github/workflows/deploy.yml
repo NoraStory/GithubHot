@@ -111,14 +111,18 @@ jobs:
           PORT: ${{ secrets.DEPLOY_PORT || 22 }}
           DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
         run: |
-          scp -i ~/.ssh/deploy -P $PORT githubhot webdist.tar.gz \
+          # 二进制传临时名：运行中的文件被 scp 直接覆盖会 ETXTBSY（text file busy）
+          scp -i ~/.ssh/deploy -P $PORT githubhot \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$DIR/githubhot.new
+          scp -i ~/.ssh/deploy -P $PORT webdist.tar.gz \
             ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$DIR/
           ssh -i ~/.ssh/deploy -p $PORT ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
             set -e
             cd $DIR
             tar xzf webdist.tar.gz
             rm -f webdist.tar.gz
-            chmod +x githubhot
+            chmod +x githubhot.new
+            mv -f githubhot.new githubhot
             sudo systemctl restart githubhot
             sleep 2
             curl -fsS http://127.0.0.1:8787/api/v1/healthz
