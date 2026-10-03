@@ -84,4 +84,9 @@ router.beforeEach((to) => {
   }
 })
 
+// 背景视频本地缓存：SW 把远端 mp4 落 Cache Storage，重播/刷新不再卡网
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {})
+}
+
 createApp(App).use(router).mount('#app')

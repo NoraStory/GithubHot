@@ -19,12 +19,21 @@ const topGithub = computed(() => (view.value.github || []).slice(0, 5))
 const topNews = computed(() => (view.value.news || []).slice(0, 5))
 
 // ===== 横幅背景视频（AnZhiYu #home-media-container 同构：随机选片/竖横屏/视差由 index_media.js 处理）=====
+// 横屏：前 6 个为远程源；x1~x6 与远程重复已剔除，本地只放新增（x7/x8/x10/x11/x12）
 const LANDSCAPE_VIDEOS = [
   'https://pic.lololowe.com/video/x/1.mp4', 'https://pic.lololowe.com/video/x/2.mp4',
   'https://pic.lololowe.com/video/x/3.mp4', 'https://pic.lololowe.com/video/x/4.mp4',
-  'https://pic.lololowe.com/video/x/5.mp4', 'https://pic.lololowe.com/video/x/6.mp4'
+  'https://pic.lololowe.com/video/x/5.mp4', 'https://pic.lololowe.com/video/x/6.mp4',
+  '/video/x/7.mp4', '/video/x/8.mp4', '/video/x/10.mp4', '/video/x/11.mp4', '/video/x/12.mp4'
+].join('|')
+// 竖屏：本地 y 系列（y1~y12，无 y9）
+const PORTRAIT_VIDEOS = [
+  '/video/y/1.mp4', '/video/y/2.mp4', '/video/y/3.mp4', '/video/y/4.mp4',
+  '/video/y/5.mp4', '/video/y/6.mp4', '/video/y/7.mp4', '/video/y/8.mp4',
+  '/video/y/10.mp4', '/video/y/11.mp4', '/video/y/12.mp4'
 ].join('|')
 const videoList = ref(LANDSCAPE_VIDEOS)
+const portraitList = ref(PORTRAIT_VIDEOS)
 
 // ===== 古诗词（今日诗词 jinrishici，Typed 循环打字进横幅正中心 #subtitle）=====
 const typed = ref('')
@@ -162,6 +171,7 @@ onMounted(async () => {
   digestsAll.value = dg.items || []
   const cfg = await api.get('/api/v1/site/config').catch(() => null)
   if (cfg && cfg.homeVideos) videoList.value = cfg.homeVideos
+  if (cfg && cfg.homePortraitVideos) portraitList.value = cfg.homePortraitVideos
   // 自定义音乐播放器（music-index 改造版）与 peoplecanvas 画布挂载同步
   bootPeopleCanvas()
   setTimeout(() => document.dispatchEvent(new Event('pjax:complete')), 120)
@@ -189,7 +199,7 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
     <div
       id="home-media-container"
       :data-landscape-video="videoList"
-      :data-portrait-video="videoList"
+      :data-portrait-video="portraitList"
     ></div>
     <div id="site-info">
       <h1 id="site-title">GithubHot</h1>

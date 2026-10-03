@@ -18,6 +18,9 @@ data/*.db-wal
 web/node_modules/
 web/dist/
 .ref/
+
+# 本地背景视频（体积大，由磁盘目录 VIDEOS_DIR 提供，不入库不进 embed）
+/videos/
 web/public/anzhiyu/js/main.js
 web/public/anzhiyu/js/utils.js
 web/public/anzhiyu/js/waterfall.js
