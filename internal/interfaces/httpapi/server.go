@@ -25,6 +25,9 @@ type Server struct {
 	Runs    application.RunRepo
 	Admin   AdminSessions // 管理端会话存储（nil 时管理端仅支持旧令牌/开放模式）
 	Guard   *IPGuard      // 三层 IP 身份防护（nil = 不启用）
+	AppGuard *AppGuard    // APP 签名校验/指纹归档/远程封禁执行（nil = 不启用）
+	Images  *ImageResolver  // 卡片封面 og:image 懒抓取缓存（nil = 不下发图片）
+	Favicons *FaviconService // 信源 favicon 瓦片代理（nil = 无图卡片不回退图标）
 	Probes  ProbeReader   // 健康探针（nil = 未启用，管理端探针页不可用）
 	Version string
 }
@@ -36,6 +39,9 @@ func (s *Server) Router() http.Handler {
 	r.Use(cors)
 	if s.Guard != nil {
 		r.Use(s.Guard.Middleware) // 三层 IP 防护：封禁 404 → 速率记录 → 身份核验
+	}
+	if s.AppGuard != nil {
+		r.Use(s.AppGuard.Middleware) // APP 请求：签名校验 + 指纹归档 + 远程封禁/强更
 	}
 	r.Use(middleware.Timeout(15 * time.Second))
 
@@ -70,6 +76,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/agent/hot.md", s.agentMD)
 		r.Get("/story/{id}", s.storyAPI)
 		r.Get("/stories", s.storiesArchiveAPI)
+		r.Get("/favicon", s.faviconAPI)
 		s.registerAdminRoutes(r)
 		s.registerIPGuardRoutes(r)
 	})
@@ -97,6 +104,9 @@ func (s *Server) hotNews(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
+	for i := range v.News {
+		v.News[i].Image = s.Images.Resolve(v.News[i].URL)
+	}
 	writeJSON(w, 200, map[string]any{"generatedAt": v.Generated, "items": v.News})
 }
 
@@ -106,6 +116,9 @@ func (s *Server) hotDomestic(w http.ResponseWriter, _ *http.Request) {
 	if err != nil {
 		writeErr(w, 500, err)
 		return
+	}
+	for i := range v.Items {
+		v.Items[i].Image = s.Images.Resolve(v.Items[i].URL)
 	}
 	writeJSON(w, 200, map[string]any{
 		"generatedAt": v.Generated,

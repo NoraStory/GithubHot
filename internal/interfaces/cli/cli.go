@@ -132,6 +132,9 @@ func Serve(cfg *config.Config) error {
 
 	srv := &httpapi.Server{Deps: deps, Runs: runsRepo{db}, Admin: adminSessions{db}, Version: Version}
 	srv.Guard = httpapi.NewIPGuard(guardStore{db}) // 三层 IP 身份防护
+	srv.AppGuard = httpapi.NewAppGuard(guardStore{db}, srv.Guard) // APP 签名/指纹/远程封禁
+	srv.Images = httpapi.NewImageResolver(linkImageStore{db}) // 卡片封面 og:image 懒抓取
+	srv.Favicons = httpapi.NewFaviconService(linkImageStore{db}) // 无图卡片回退信源 favicon 瓦片
 
 	// 健康探针：启动后首轮探测，之后每 ProbeIntervalHours（默认 6h）一轮。
 	// 覆盖全部启用信源 + 关键端点（LLM 网关 / GitHub API / 音乐上游 / 背景对象存储 / 本地库）。

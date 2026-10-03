@@ -47,6 +47,7 @@ type DomesticRow struct {
 	Badges      []string  `json:"badges,omitempty"`
 	FirstSeenAt time.Time `json:"firstSeenAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+	Image       string    `json:"image,omitempty"` // 封面图（og:image 懒抓取缓存，可能为空）
 }
 
 // DomesticView 国内热榜视图。

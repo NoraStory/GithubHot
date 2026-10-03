@@ -209,7 +209,20 @@ func (s *Server) siteConfig(w http.ResponseWriter, _ *http.Request) {
 		"poweredBy":          "Go + Vue3",
 		"homeVideos":         homeVideos,
 		"homePortraitVideos": homePortraitVideos,
+		// ---- APP 风控下发（启动握手通道）----
+		"session_seed":        appSessionSeed(),
+		"banned":              os.Getenv("APP_BANNED") == "1" || strings.EqualFold(os.Getenv("APP_BANNED"), "true"),
+		"force_upgrade_url":   os.Getenv("APP_FORCE_UPGRADE_URL"),
 	})
+}
+
+// appSessionSeed APP 会话种子：HMAC 派生根密钥，服务端签名校验与客户端派生
+// 必须一致（生产经 KMS/CI 注入，绝不进仓库；本地缺省用开发默认值）。
+func appSessionSeed() string {
+	if v := strings.TrimSpace(os.Getenv("APP_SESSION_SEED")); v != "" {
+		return v
+	}
+	return "gh-dev-seed-v1"
 }
 
 // digestsAPI 期刊分页列表（用户端期刊页 + 管理端期刊页）。

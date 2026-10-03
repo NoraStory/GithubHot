@@ -26,3 +26,7 @@ web/public/anzhiyu/js/utils.js
 web/public/anzhiyu/js/waterfall.js
 web/public/anzhiyu/js/welcome.js
 web/public/anzhiyu/js/countdown.js
+serve-err.log
+serve-out.log
+android-app/
+tools/

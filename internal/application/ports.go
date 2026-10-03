@@ -174,6 +174,7 @@ type StoryRow struct {
 	FirstSeenAt time.Time `json:"firstSeenAt"`
 	Badges      []string `json:"badges"`
 	Projects    []string `json:"projects"`
+	Image       string   `json:"image,omitempty"` // 封面图（og:image 懒抓取缓存，可能为空）
 }
 
 // FusionRow 融合观察行：一条资讯 × 一个互相印证的项目。

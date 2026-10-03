@@ -120,6 +120,10 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS probe_results (id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, kind TEXT NOT NULL, ok INTEGER NOT NULL, latency_ms INTEGER NOT NULL, detail TEXT NOT NULL, checked_at TEXT NOT NULL)"); err != nil {
 		return fmt.Errorf("建表 probe_results: %w", err)
 	}
+	// 链接封面图缓存（og:image 懒抓取结果，APP 卡片封面用）
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS link_images (url TEXT PRIMARY KEY, image TEXT NOT NULL, fetched_at TEXT NOT NULL)"); err != nil {
+		return fmt.Errorf("建表 link_images: %w", err)
+	}
 	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_usage_created ON llm_usage(created_at)"); err != nil {
 		return fmt.Errorf("建索引 usage: %w", err)
 	}
