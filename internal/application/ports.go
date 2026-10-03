@@ -171,6 +171,7 @@ type StoryRow struct {
 	SourceNames []string `json:"sourceNames"`
 	Score       float64  `json:"score"`
 	Hotness     float64  `json:"hotness"`
+	FirstSeenAt time.Time `json:"firstSeenAt"`
 	Badges      []string `json:"badges"`
 	Projects    []string `json:"projects"`
 }

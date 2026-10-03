@@ -135,14 +135,15 @@ func projectBadges(row ProjectBoardRow, now time.Time) []string {
 // buildStoryRow 组装资讯榜单行（含评分、徽章、来源名、事件综述）。
 func buildStoryRow(ctx context.Context, d Deps, s *story.Story, rank int, sourceNames map[string]string, now time.Time) StoryRow {
 	row := StoryRow{
-		Rank:      rank,
-		StoryID:   s.ID,
-		TitleZh:   s.TitleZh,
-		SummaryZh: s.SummaryZh,
-		Overview:  s.Overview,
-		URL:       s.URL,
-		Hotness:   s.Hotness,
-		Projects:  s.Projects,
+		Rank:        rank,
+		StoryID:     s.ID,
+		TitleZh:     s.TitleZh,
+		SummaryZh:   s.SummaryZh,
+		Overview:    s.Overview,
+		URL:         s.URL,
+		Hotness:     s.Hotness,
+		FirstSeenAt: s.FirstSeenAt,
+		Projects:    s.Projects,
 	}
 	seenSrc := map[string]bool{}
 	for _, m := range s.Members {

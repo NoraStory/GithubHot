@@ -19,6 +19,8 @@ const sorted = computed(() => {
   }
   for (const s of view.value.stories || []) {
     const ds = (s.firstSeenAt || '').slice(0, 10)
+    // 日期缺失/无效的条目不进时间线，避免渲染出"年 0 月"残缺的月份组
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ds)) continue
     all.push({ kind: '事件', title: s.titleZh, date: ds, url: `/story/${s.storyId}`, y: ds.slice(0, 4), m: ds.slice(5, 7) })
   }
   all.sort((a, b) => (a.date < b.date ? 1 : -1))
