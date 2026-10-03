@@ -93,6 +93,24 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS llm_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, phase TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, prompt_tokens INTEGER NOT NULL, completion_tokens INTEGER NOT NULL, created_at TEXT NOT NULL)"); err != nil {
 		return fmt.Errorf("建表 llm_usage: %w", err)
 	}
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS admin_sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, ip TEXT NOT NULL)"); err != nil {
+		return fmt.Errorf("建表 admin_sessions: %w", err)
+	}
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS ip_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, score INTEGER NOT NULL, created_at TEXT NOT NULL)"); err != nil {
+		return fmt.Errorf("建表 ip_events: %w", err)
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_ip_events_time ON ip_events(created_at)"); err != nil {
+		return fmt.Errorf("建索引 ip_events: %w", err)
+	}
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS ip_fingerprints (fp TEXT PRIMARY KEY, ips TEXT NOT NULL DEFAULT '[]', ua TEXT NOT NULL DEFAULT '', first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, hits INTEGER NOT NULL DEFAULT 0)"); err != nil {
+		return fmt.Errorf("建表 ip_fingerprints: %w", err)
+	}
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS ip_bans (ip TEXT PRIMARY KEY, strikes INTEGER NOT NULL DEFAULT 0, level INTEGER NOT NULL DEFAULT 1, reason TEXT NOT NULL DEFAULT '', banned_at TEXT NOT NULL, expires_at TEXT NOT NULL)"); err != nil {
+		return fmt.Errorf("建表 ip_bans: %w", err)
+	}
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS ip_profiles (ip TEXT PRIMARY KEY, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, reqs INTEGER NOT NULL DEFAULT 0, ua_set TEXT NOT NULL DEFAULT '[]', ua_last TEXT NOT NULL DEFAULT '')"); err != nil {
+		return fmt.Errorf("建表 ip_profiles: %w", err)
+	}
 	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_usage_created ON llm_usage(created_at)"); err != nil {
 		return fmt.Errorf("建索引 usage: %w", err)
 	}

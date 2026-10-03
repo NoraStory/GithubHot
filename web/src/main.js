@@ -1,8 +1,7 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
-import { getToken } from './lib/api'
-
+import { checkAdminSession } from './lib/api'
 import Home from './views/Home.vue'
 import Board from './views/Board.vue'
 import Fusion from './views/Fusion.vue'
@@ -29,6 +28,7 @@ import AdminRuns from './admin/AdminRuns.vue'
 import AdminSources from './admin/AdminSources.vue'
 import AdminStories from './admin/AdminStories.vue'
 import AdminDigests from './admin/AdminDigests.vue'
+import AdminIPGuard from './admin/AdminIPGuard.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -67,7 +67,8 @@ const router = createRouter({
         { path: 'runs', component: AdminRuns },
         { path: 'sources', component: AdminSources },
         { path: 'stories', component: AdminStories },
-        { path: 'digests', component: AdminDigests }
+        { path: 'digests', component: AdminDigests },
+        { path: 'ipguard', component: AdminIPGuard }
       ]
     },
     { path: '/:pathMatch(.*)*', redirect: '/' }
@@ -77,10 +78,15 @@ const router = createRouter({
   }
 })
 
-// 管理端登录门：无令牌时引导到登录页
-router.beforeEach((to) => {
-  if (to.path.startsWith('/admin') && to.path !== '/admin/login' && !getToken()) {
-    return { path: '/admin/login', query: { redirect: to.fullPath } }
+// 管理端登录门：无有效会话时引导到登录页
+router.beforeEach(async (to) => {
+  if (to.path.startsWith('/admin') && to.path !== '/admin/login') {
+    if (!(await checkAdminSession())) {
+      return { path: '/admin/login', query: { redirect: to.fullPath } }
+    }
+  }
+  if (to.path === '/admin/login' && (await checkAdminSession())) {
+    return { path: '/admin/usage' }
   }
 })
 
@@ -88,5 +94,13 @@ router.beforeEach((to) => {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {})
 }
+
+// 设备指纹采集上报（第三层身份核验的原料）：异步静默执行
+import { reportFingerprint } from './lib/fingerprint'
+reportFingerprint()
+
+// 用户端屏蔽 F12 / Ctrl+Shift+I 等开发者工具快捷键（管理端放行）
+import { installDevtoolsGuard } from './lib/devtools-guard'
+installDevtoolsGuard()
 
 createApp(App).use(router).mount('#app')

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -23,28 +22,32 @@ func contextWithTimeout(parent context.Context) (context.Context, context.Cancel
 // sprintf fmt.Sprintf 别名（本文件内部使用）。
 func sprintf(format string, args ...any) string { return fmt.Sprintf(format, args...) }
 
-// adminAuth 变更类管理端点的可选令牌保护：
-// 设置 ADMIN_TOKEN 环境变量后，请求必须带 X-Admin-Token 头。
-func adminAuth(next http.Handler) http.Handler {
-	token := os.Getenv("ADMIN_TOKEN")
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if token != "" && r.Header.Get("X-Admin-Token") != token {
-			writeErr(w, 401, errorString("需要 X-Admin-Token（ADMIN_TOKEN 已启用）"))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
+// adminAuth 的旧版独立函数已移除，统一用 Server.adminAuth（见 auth.go）。
 
-// registerAdminRoutes 管理端点：信源 CRUD + 试抓、脚本推送、事件锁定。
+// registerAdminRoutes 管理端点：登录/退出/会话检查 + 信源 CRUD + 试抓、脚本推送、事件锁定。
+// 鉴权中间件统一为 Server.adminAuth（密码会话模式 / 旧令牌模式 / 开放模式）。
 func (s *Server) registerAdminRoutes(r chi.Router) {
 	r.Route("/admin", func(r chi.Router) {
-		r.Use(adminAuth)
-		r.Post("/sources", s.createSource)
-		r.Delete("/sources/{id}", s.deleteSource)
-		r.Post("/sources/test", s.testSource)
-		r.Post("/push", s.pushItem)
-		r.Post("/story/{id}/lock", s.lockStory)
+		r.Post("/login", s.adminLogin)
+		r.Get("/session", s.adminSessionCheck)
+		r.Group(func(r chi.Router) {
+			r.Use(s.adminAuth)
+			r.Post("/logout", s.adminLogout)
+			r.Post("/sources", s.createSource)
+			r.Delete("/sources/{id}", s.deleteSource)
+			r.Post("/sources/test", s.testSource)
+			r.Post("/push", s.pushItem)
+			r.Post("/story/{id}/lock", s.lockStory)
+			// 控制台数据（Token 用量 / 诊断 / 运行历史）
+			r.Get("/usage", s.usageAPI)
+			r.Get("/diagnostics", s.diagnosticsAPI)
+			r.Get("/runs", s.runsAPI)
+			// IP 防护（封禁墙对这组端点放行，给被封管理员自救通道）
+			r.Get("/ipguard/summary", s.ipGuardSummaryAPI)
+			r.Post("/ipguard/ban", s.ipGuardBanAPI)
+			r.Post("/ipguard/unban", s.ipGuardUnbanAPI)
+			r.Get("/ipguard/ip", s.ipGuardIPDetailAPI)
+		})
 	})
 }
 

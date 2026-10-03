@@ -23,6 +23,8 @@ import (
 type Server struct {
 	Deps    application.Deps
 	Runs    application.RunRepo
+	Admin   AdminSessions // 管理端会话存储（nil 时管理端仅支持旧令牌/开放模式）
+	Guard   *IPGuard      // 三层 IP 身份防护（nil = 不启用）
 	Version string
 }
 
@@ -31,6 +33,9 @@ func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(cors)
+	if s.Guard != nil {
+		r.Use(s.Guard.Middleware) // 三层 IP 防护：封禁 404 → 速率记录 → 身份核验
+	}
 	r.Use(middleware.Timeout(15 * time.Second))
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -63,13 +68,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/agent/hot.md", s.agentMD)
 		r.Get("/story/{id}", s.storyAPI)
 		s.registerAdminRoutes(r)
-		// 控制台数据（管理端专属，与变更接口同样受 X-Admin-Token 保护）
-		r.Group(func(r chi.Router) {
-			r.Use(adminAuth)
-			r.Get("/admin/usage", s.usageAPI)
-			r.Get("/admin/diagnostics", s.diagnosticsAPI)
-			r.Get("/admin/runs", s.runsAPI)
-		})
+		s.registerIPGuardRoutes(r)
 	})
 	return r
 }
