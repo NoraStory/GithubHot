@@ -134,6 +134,17 @@ jobs:
     if: always() && needs.deploy.result == 'success' && needs.check.outputs.has_pat == 'true'
     runs-on: ubuntu-latest
     steps:
+      # 先校验 token 有效性：401=值不对/过期，403=权限不足，200=可用
+      # （secret 首尾混入空白/说明文字会让 dispatch 直接 400，此处提前暴露）
+      - name: 校验通知凭据
+        run: |
+          set -e
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.APP_REPO_PAT }}" \
+            https://api.github.com/user)
+          echo "token /user 状态码: $CODE"
+          [ "$CODE" = "200" ] || { echo "::error::APP_REPO_PAT 不可用（$CODE），请到仓库 Settings→Secrets 更新"; exit 1; }
+
       - name: 触发 APP 仓库构建
         run: |
           curl -fsS -X POST \
