@@ -4,6 +4,7 @@
 
 const FP_KEY = 'gh_fp'
 const REPORTED_KEY = 'gh_fp_reported'
+let reportRetry = 0
 
 export function deviceFp() {
   try { return localStorage.getItem(FP_KEY) || '' } catch { return '' }
@@ -51,19 +52,26 @@ async function webglFp() {
   } catch { return '' }
 }
 
-// WebRTC 本地 IP（第二层深度特征；现代浏览器可能只给 mDNS 名，同样可入指纹）
+// WebRTC IP（第二层深度特征）：host 候选 + STUN 反射（srflx）拿 NAT 后的真实公网 IP。
+// 现代浏览器本地候选常给 mDNS 名（同样入指纹），srflx 候选暴露真实公网 IP。
 function webrtcIPs() {
   return new Promise(resolve => {
     const ips = []
     if (!window.RTCPeerConnection) return resolve(ips)
     let done = false
     const finish = () => { if (!done) { done = true; try { pc.close() } catch {}; resolve(ips) } }
-    const pc = new RTCPeerConnection({ iceServers: [] })
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' }
+      ]
+    })
     try { pc.createDataChannel('x') } catch { return resolve(ips) }
-    const timer = setTimeout(finish, 2000)
+    const timer = setTimeout(finish, 2500)
     pc.onicecandidate = e => {
       if (!e.candidate) { clearTimeout(timer); finish(); return }
-      const m = /candidate:.+? (\S+?) (?:\d+|\S+) typ host/.exec(e.candidate.candidate || '')
+      // candidate:<foundation> <component> <protocol> <priority> <address> <port> typ <type>
+      const m = /candidate:\S+ \d+ \S+ \d+ (\S+) \d+ typ (host|srflx)/.exec(e.candidate.candidate || '')
       if (m && ips.indexOf(m[1]) < 0) ips.push(m[1])
     }
     pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => { clearTimeout(timer); finish() })
@@ -98,14 +106,14 @@ function coherent() {
   } catch { return true }
 }
 
-// 采集 + 上报（每会话一次）；若服务端因连坐刚封禁本 IP，刷新进 404
+// 采集 + 上报（每会话一次，成功后打标；失败 8 秒后重试一次）。
+// 旧版本先打标再请求，遇到服务重启等瞬时失败会整会话不再上报——这里修正。
 export async function reportFingerprint() {
   try {
     if (sessionStorage.getItem(REPORTED_KEY)) return
     const [canvas, webgl, rtc] = await Promise.all([canvasFp(), webglFp(), webrtcIPs()])
     const fp = await sha256([canvas, webgl, envSignals()].join('~'))
     try { localStorage.setItem(FP_KEY, fp) } catch {}
-    sessionStorage.setItem(REPORTED_KEY, '1')
     const res = await fetch('/api/v1/fp/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -115,7 +123,14 @@ export async function reportFingerprint() {
         coherent: coherent()
       })
     })
+    if (!res.ok) throw new Error('http ' + res.status)
+    sessionStorage.setItem(REPORTED_KEY, '1')
     const d = await res.json().catch(() => ({}))
     if (d.banned) location.reload()
-  } catch { /* 指纹失败不阻塞站点 */ }
+  } catch {
+    // 上报失败（如服务重启瞬间）不阻塞站点，稍后重试（最多 3 次）
+    if (!sessionStorage.getItem(REPORTED_KEY) && reportRetry++ < 3) {
+      setTimeout(() => reportFingerprint(), 8000)
+    }
+  }
 }

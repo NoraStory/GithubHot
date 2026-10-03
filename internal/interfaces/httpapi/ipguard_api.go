@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -35,7 +36,7 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r.Context())
 	defer cancel()
 	ip := clientIPFromRequest(r)
-	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint)
+	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, p.WebRTC)
 	// 环境自洽性差的指纹：作弊/改机工具常留此类矛盾（第三层·环境核验）
 	if !p.Coherent {
 		s.Guard.Event(ctx, ip, "env-incoherent", "UA 与 platform 不一致", 30, false)
@@ -53,7 +54,12 @@ func (s *Server) ipGuardSummaryAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := contextWithTimeout(r.Context())
 	defer cancel()
-	events, _ := s.Guard.Store().ListIPEvents(ctx, 50)
+	// ?hours= 只取近 N 小时的事件（0/缺省 = 不限制）
+	var since time.Time
+	if h := parseHours(r.URL.Query().Get("hours")); h > 0 {
+		since = time.Now().Add(-time.Duration(h) * time.Hour)
+	}
+	events, _ := s.Guard.Store().ListIPEventsSince(ctx, 50, since)
 	fps, _ := s.Guard.Store().ListFingerprints(ctx, 20)
 	bans, _ := s.Guard.Store().ListBans(ctx)
 	writeJSON(w, 200, map[string]any{
@@ -133,6 +139,17 @@ func (s *Server) ipGuardIPDetailAPI(w http.ResponseWriter, r *http.Request) {
 	ban, _ := store.FindBan(ctx, ip)
 	fps, _ := store.ListFingerprintsByIP(ctx, ip, 20)
 	events, _ := store.ListIPEventsByIP(ctx, ip, 30)
+	// ?hours= 只保留近 N 小时事件
+	if h := parseHours(r.URL.Query().Get("hours")); h > 0 {
+		cut := time.Now().Add(-time.Duration(h) * time.Hour)
+		kept := events[:0]
+		for _, e := range events {
+			if e.At.After(cut) {
+				kept = append(kept, e)
+			}
+		}
+		events = kept
+	}
 	writeJSON(w, 200, map[string]any{
 		"ip":           ip,
 		"profile":      profile,
@@ -140,6 +157,25 @@ func (s *Server) ipGuardIPDetailAPI(w http.ResponseWriter, r *http.Request) {
 		"fingerprints": fps,
 		"events":       events,
 	})
+}
+
+// parseHours 解析 ?hours= 参数为整数小时（非法/超界返回 0 = 不限制）。
+func parseHours(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	var h int
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		h = h*10 + int(c-'0')
+		if h > 24*30 {
+			return 0
+		}
+	}
+	return h
 }
 
 // registerIPGuardRoutes 挂防护端点（仅公开上报口；管理端操作端点在 admin.go 的守卫组内）。

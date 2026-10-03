@@ -84,6 +84,7 @@ func scanIPEvents(rows *sql.Rows) ([]IPEventRow, error) {
 type FingerprintRow struct {
 	Fingerprint string
 	IPs         []string
+	Webrtc      []string // WebRTC 探测到的真实 IP（host/srflx 候选）
 	UA          string
 	FirstSeen   time.Time
 	LastSeen    time.Time
@@ -91,20 +92,35 @@ type FingerprintRow struct {
 }
 
 // UpsertFingerprint 登记一次指纹上报；返回该指纹历史上出现过的所有 IP。
-func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string) ([]string, error) {
+func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string) ([]string, error) {
 	row := db.QueryRowContext(ctx,
-		"SELECT ips, ua, hits FROM ip_fingerprints WHERE fp = ?", fp)
-	var ipsJSON, oldUA string
+		"SELECT ips, ua, hits, webrtc FROM ip_fingerprints WHERE fp = ?", fp)
+	var ipsJSON, oldUA, rtcJSON string
 	var hits int
-	err := row.Scan(&ipsJSON, &oldUA, &hits)
+	err := row.Scan(&ipsJSON, &oldUA, &hits, &rtcJSON)
 	now := time.Now().UTC().Format(time.RFC3339)
 	ips := []string{}
+	rtc := []string{}
+	_ = json.Unmarshal([]byte(rtcJSON), &rtc)
+	for _, w := range webrtc {
+		known := false
+		for _, x := range rtc {
+			if x == w {
+				known = true
+				break
+			}
+		}
+		if !known {
+			rtc = append(rtc, w)
+		}
+	}
+	rb, _ := json.Marshal(rtc)
 	if err == sql.ErrNoRows {
 		ips = []string{ip}
 		b, _ := json.Marshal(ips)
 		_, err = db.ExecContext(ctx,
-			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits) VALUES (?, ?, ?, ?, ?, 1)",
-			fp, string(b), ua, now, now)
+			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits, webrtc) VALUES (?, ?, ?, ?, ?, 1, ?)",
+			fp, string(b), ua, now, now, string(rb))
 		if err != nil {
 			return nil, fmt.Errorf("写入指纹: %w", err)
 		}
@@ -129,12 +145,30 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string) ([]strin
 		ua = oldUA
 	}
 	_, err = db.ExecContext(ctx,
-		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1 WHERE fp = ?",
-		string(b), ua, now, fp)
+		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1, webrtc = ? WHERE fp = ?",
+		string(b), ua, now, string(rb), fp)
 	if err != nil {
 		return nil, fmt.Errorf("更新指纹: %w", err)
 	}
 	return ips, nil
+}
+
+// scanFingerprintRows 统一扫描指纹查询结果（含 webrtc 列）。
+func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
+	out := []FingerprintRow{}
+	for rows.Next() {
+		var f FingerprintRow
+		var ipsJSON, rtcJSON, first, last string
+		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &rtcJSON, &f.UA, &first, &last, &f.Hits); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(ipsJSON), &f.IPs)
+		_ = json.Unmarshal([]byte(rtcJSON), &f.Webrtc)
+		f.FirstSeen, _ = time.Parse(time.RFC3339, first)
+		f.LastSeen, _ = time.Parse(time.RFC3339, last)
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 // ListFingerprints 最近 limit 个活跃指纹。
@@ -143,48 +177,24 @@ func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow
 		limit = 20
 	}
 	rows, err := db.QueryContext(ctx,
-		"SELECT fp, ips, ua, first_seen, last_seen, hits FROM ip_fingerprints ORDER BY last_seen DESC LIMIT ?", limit)
+		"SELECT fp, ips, webrtc, ua, first_seen, last_seen, hits FROM ip_fingerprints ORDER BY last_seen DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, fmt.Errorf("查询指纹: %w", err)
 	}
 	defer rows.Close()
-	out := []FingerprintRow{}
-	for rows.Next() {
-		var f FingerprintRow
-		var ipsJSON, first, last string
-		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &f.UA, &first, &last, &f.Hits); err != nil {
-			return nil, err
-		}
-		_ = json.Unmarshal([]byte(ipsJSON), &f.IPs)
-		f.FirstSeen, _ = time.Parse(time.RFC3339, first)
-		f.LastSeen, _ = time.Parse(time.RFC3339, last)
-		out = append(out, f)
-	}
-	return out, rows.Err()
+	return scanFingerprintRows(rows)
 }
 
 // ListFingerprintsByIP 反查：IPS JSON 中包含该 IP 的指纹（IP 下钻用）。
 func (db *DB) ListFingerprintsByIP(ctx context.Context, ip string) ([]FingerprintRow, error) {
 	rows, err := db.QueryContext(ctx,
-		"SELECT fp, ips, ua, first_seen, last_seen, hits FROM ip_fingerprints WHERE ips LIKE ? ORDER BY last_seen DESC LIMIT 50",
+		"SELECT fp, ips, webrtc, ua, first_seen, last_seen, hits FROM ip_fingerprints WHERE ips LIKE ? ORDER BY last_seen DESC LIMIT 50",
 		"%\""+ip+"\"%")
 	if err != nil {
 		return nil, fmt.Errorf("反查指纹: %w", err)
 	}
 	defer rows.Close()
-	out := []FingerprintRow{}
-	for rows.Next() {
-		var f FingerprintRow
-		var ipsJSON, first, last string
-		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &f.UA, &first, &last, &f.Hits); err != nil {
-			return nil, err
-		}
-		_ = json.Unmarshal([]byte(ipsJSON), &f.IPs)
-		f.FirstSeen, _ = time.Parse(time.RFC3339, first)
-		f.LastSeen, _ = time.Parse(time.RFC3339, last)
-		out = append(out, f)
-	}
-	return out, rows.Err()
+	return scanFingerprintRows(rows)
 }
 
 // ListIPEventsByIP 该 IP 的最近违规事件（IP 下钻用）。
@@ -196,6 +206,28 @@ func (db *DB) ListIPEventsByIP(ctx context.Context, ip string, limit int) ([]IPE
 		"SELECT id, ip, kind, detail, score, created_at FROM ip_events WHERE ip = ? ORDER BY id DESC LIMIT ?", ip, limit)
 	if err != nil {
 		return nil, fmt.Errorf("查询 IP 事件: %w", err)
+	}
+	defer rows.Close()
+	return scanIPEvents(rows)
+}
+
+// ListIPEventsSince 最近 since 以来的违规事件（时间筛选用；since 为零值则不限制）。
+func (db *DB) ListIPEventsSince(ctx context.Context, limit int, since time.Time) ([]IPEventRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows *sql.Rows
+	var err error
+	if since.IsZero() {
+		rows, err = db.QueryContext(ctx,
+			"SELECT id, ip, kind, detail, score, created_at FROM ip_events ORDER BY id DESC LIMIT ?", limit)
+	} else {
+		rows, err = db.QueryContext(ctx,
+			"SELECT id, ip, kind, detail, score, created_at FROM ip_events WHERE created_at >= ? ORDER BY id DESC LIMIT ?",
+			since.UTC().Format(time.RFC3339), limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("查询违规事件: %w", err)
 	}
 	defer rows.Close()
 	return scanIPEvents(rows)

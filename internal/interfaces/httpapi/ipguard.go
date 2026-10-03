@@ -58,7 +58,8 @@ type GuardStore interface {
 	AddIPEvent(ctx context.Context, ip, kind, detail string, score int) error
 	RecentIPEventsScore(ctx context.Context, ip string, seconds int) (int, error)
 	ListIPEvents(ctx context.Context, limit int) ([]IPEventDTO, error)
-	UpsertFingerprint(ctx context.Context, fp, ip, ua string) ([]string, error)
+	ListIPEventsSince(ctx context.Context, limit int, since time.Time) ([]IPEventDTO, error)
+	UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string) ([]string, error)
 	ListFingerprints(ctx context.Context, limit int) ([]FingerprintDTO, error)
 	FindBan(ctx context.Context, ip string) (*BanDTO, error)
 	BannedAmong(ctx context.Context, ips []string) ([]string, error)
@@ -83,6 +84,7 @@ type IPEventDTO struct {
 type FingerprintDTO struct {
 	Fingerprint string
 	IPs         []string
+	Webrtc      []string
 	UA          string
 	FirstSeen   time.Time
 	LastSeen    time.Time
@@ -531,7 +533,7 @@ func (g *IPGuard) issue(w http.ResponseWriter, ip, fp string) {
 
 // ReportFingerprint 第二层上报入口：登记 fp↔IP，做连坐与漂移判定。
 // 返回 (响应字段, 该 IP 是否刚被封)。
-func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string) (map[string]any, bool) {
+func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, webrtc []string) (map[string]any, bool) {
 	out := map[string]any{"ok": true, "banned": false}
 	if !g.enabled || g.store == nil || fp == "" {
 		return out, false
@@ -557,7 +559,7 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string) (map
 	g.fpReport[ip] = append(keep, now)
 	g.mu.Unlock()
 
-	knownIPs, err := g.store.UpsertFingerprint(ctx, fp, ip, ua)
+	knownIPs, err := g.store.UpsertFingerprint(ctx, fp, ip, ua, webrtc)
 	if err != nil {
 		log.Printf("[ipguard] 指纹登记失败: %v", err)
 		return out, false

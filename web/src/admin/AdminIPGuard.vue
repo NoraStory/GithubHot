@@ -8,6 +8,9 @@ const banIp = ref('')
 const banHours = ref(24)
 const banReason = ref('')
 const ipFilter = ref('')
+// 时间筛选：违规事件只看近 N 小时（0 = 全部）
+const eventsHours = ref(0)
+const RANGES = [[0, '全部时间'], [1, '近 1 小时'], [24, '近 24 小时'], [168, '近 7 天']]
 
 // IP 下钻详情
 const detail = ref(null)
@@ -24,10 +27,16 @@ const fpsFiltered = computed(() => (data.value?.fingerprints || []).filter(f => 
 async function load() {
   error.value = ''
   try {
-    data.value = await api.get('/api/v1/admin/ipguard/summary')
+    const q = eventsHours.value > 0 ? '?hours=' + eventsHours.value : ''
+    data.value = await api.get('/api/v1/admin/ipguard/summary' + q)
   } catch (e) {
     error.value = e.message
   }
+}
+
+function onHoursChange() {
+  load()
+  if (detail.value) showIP(detail.value.ip)
 }
 
 async function showIP(ip) {
@@ -36,7 +45,8 @@ async function showIP(ip) {
   detailLoading.value = true
   detail.value = null
   try {
-    const d = await api.get('/api/v1/admin/ipguard/ip?ip=' + encodeURIComponent(ip))
+    const q = eventsHours.value > 0 ? '&hours=' + eventsHours.value : ''
+    const d = await api.get('/api/v1/admin/ipguard/ip?ip=' + encodeURIComponent(ip) + q)
     if (d && d.enabled === false) {
       detailError.value = 'IP 防护未启用'
     } else {
@@ -100,8 +110,12 @@ onMounted(load)
       <div class="card filter-bar">
         <label>🔍 IP 筛选</label>
         <input v-model="ipFilter" placeholder="输入 IP 片段，同时过滤下方所有列表">
+        <label>⏱ 时间</label>
+        <select v-model.number="eventsHours" class="range-select" @change="onHoursChange">
+          <option v-for="[h, label] in RANGES" :key="h" :value="h">{{ label }}</option>
+        </select>
         <button v-if="ipFilter" class="btn small" @click="ipFilter = ''">清除</button>
-        <span class="hint">点击任意 IP 可下钻查看完整档案与指纹</span>
+        <span class="hint">点击任意 IP 可下钻查看完整档案与指纹；时间筛选作用于违规事件</span>
       </div>
 
       <!-- IP 下钻详情 -->
@@ -139,11 +153,12 @@ onMounted(load)
           <!-- 关联指纹 -->
           <h4>关联设备指纹（{{ detail.fingerprints.length }}）</h4>
           <table v-if="detail.fingerprints.length">
-            <thead><tr><th>指纹</th><th>关联 IP 数</th><th>最近使用</th><th>上报次数</th></tr></thead>
+            <thead><tr><th>指纹</th><th>关联 IP 数</th><th>WebRTC 真实 IP</th><th>最近使用</th><th>上报次数</th></tr></thead>
             <tbody>
               <tr v-for="f in detail.fingerprints" :key="f.Fingerprint">
                 <td class="mono" :title="f.Fingerprint + '\n' + f.UA">{{ short(f.Fingerprint) }}</td>
                 <td class="num" :class="{ hot: f.IPs.length > 8 }">{{ f.IPs.length }}</td>
+                <td class="mono rtc" :title="(f.Webrtc || []).join('\n')">{{ (f.Webrtc || []).join(', ') || '-' }}</td>
                 <td>{{ fmt(f.LastSeen) }}</td>
                 <td class="num">{{ f.Hits }}</td>
               </tr>
@@ -204,7 +219,7 @@ onMounted(load)
       </div>
 
       <!-- 违规事件 -->
-      <h3>违规事件（近 50 条{{ ipFilter ? '，已筛选' : '' }}）</h3>
+      <h3>违规事件（{{ eventsHours ? RANGES.find(r => r[0] === eventsHours)?.[1] : '近 50 条' }}{{ ipFilter ? '，已筛选' : '' }}）</h3>
       <div class="card">
         <div v-if="!eventsFiltered.length" class="empty">暂无违规事件</div>
         <table v-else>
@@ -226,13 +241,14 @@ onMounted(load)
       <div class="card">
         <div v-if="!fpsFiltered.length" class="empty">暂无指纹记录（访客上报后出现）</div>
         <table v-else>
-          <thead><tr><th>指纹</th><th>关联 IP 数</th><th>最近使用</th><th>上报次数</th></tr></thead>
+          <thead><tr><th>指纹</th><th>关联 IP 数</th><th>WebRTC 真实 IP</th><th>最近使用</th><th>上报次数</th></tr></thead>
           <tbody>
             <tr v-for="f in fpsFiltered" :key="f.Fingerprint">
               <td class="mono" :title="f.Fingerprint + '\n' + f.UA">{{ short(f.Fingerprint) }}</td>
               <td class="num" :class="{ hot: f.IPs.length > 8 }">
                 <a class="ip-link" @click="ipFilter = f.IPs[0] || ''">{{ f.IPs.length }}</a>
               </td>
+              <td class="mono rtc" :title="(f.Webrtc || []).join('\n')">{{ (f.Webrtc || []).join(', ') || '-' }}</td>
               <td>{{ fmt(f.LastSeen) }}</td>
               <td class="num">{{ f.Hits }}</td>
             </tr>
@@ -271,6 +287,9 @@ th { color: var(--anzhiyu-gray); font-weight: 500; }
 .filter-bar input { background: var(--anzhiyu-background); border: 1px solid var(--anzhiyu-card-border); border-radius: var(--anzhiyu-radius); padding: 8px 12px; font: inherit; outline: none; flex: 1; min-width: 200px; }
 .filter-bar input:focus { border-color: var(--anzhiyu-theme); }
 .filter-bar .hint { color: var(--anzhiyu-gray); font-size: .78rem; }
+.range-select { background: var(--anzhiyu-background); border: 1px solid var(--anzhiyu-card-border); border-radius: var(--anzhiyu-radius); padding: 8px 10px; font: inherit; outline: none; color: inherit; cursor: pointer; }
+.range-select:focus { border-color: var(--anzhiyu-theme); }
+.rtc { font-size: .76rem; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .ip-link { color: var(--anzhiyu-theme); cursor: pointer; text-decoration: none; }
 .ip-link:hover { text-decoration: underline; }
 .detail-panel { border: 1px solid var(--anzhiyu-theme); }
