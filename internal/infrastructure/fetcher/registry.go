@@ -29,6 +29,7 @@ func NewRegistry() *Registry {
 		source.KindHackerNews: HackerNews{},
 		source.KindWebList:    WebList{},
 		source.KindJSONAPI:    JSONAPI{},
+		source.KindHotBoard:   HotBoard{},
 	}}
 }
 

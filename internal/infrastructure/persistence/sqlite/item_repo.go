@@ -20,13 +20,17 @@ func NewItemRepo(db *DB) *ItemRepo { return &ItemRepo{db: db} }
 // Upsert 按 ID 判重插入；已存在返回 inserted=false（不覆盖首见内容）。
 func (r *ItemRepo) Upsert(ctx context.Context, it item.Item) (bool, error) {
 	tags, _ := json.Marshal(it.Selection.Tags)
+	meta, _ := json.Marshal(it.Meta)
+	if string(meta) == "null" {
+		meta = []byte("{}")
+	}
 	res, err := r.db.ExecContext(ctx,
-		"INSERT INTO items (id, source_id, source_tier, url, title, summary, content, author, published_at, fetched_at, state, accepted, reason, score_a, score_b, title_zh, summary_zh, reason_zh, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+		"INSERT INTO items (id, source_id, source_tier, url, title, summary, content, author, published_at, fetched_at, state, accepted, reason, score_a, score_b, title_zh, summary_zh, reason_zh, tags, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
 		it.ID, it.SourceID, it.SourceTier, it.URL, it.Title, it.Summary, it.Content, it.Author,
 		rfc(it.PublishedAt), rfc(it.FetchedAt),
 		string(it.Selection.Stage), boolInt(it.Selection.Pass), it.Selection.Reason,
 		it.Selection.ScoreA, it.Selection.ScoreB,
-		it.Selection.TitleZh, it.Selection.SummaryZh, it.Selection.ReasonZh, string(tags),
+		it.Selection.TitleZh, it.Selection.SummaryZh, it.Selection.ReasonZh, string(tags), string(meta),
 	)
 	if err != nil {
 		return false, fmt.Errorf("写入条目 %s: %w", it.ID, err)
@@ -143,24 +147,26 @@ func (r *ItemRepo) SaveContentZh(ctx context.Context, id string, zh string) erro
 	return err
 }
 
-const itemCols = "id, source_id, source_tier, url, title, summary, content, content_zh, author, published_at, fetched_at, state, accepted, reason, score_a, score_b, title_zh, summary_zh, reason_zh, tags"
+const itemCols = "id, source_id, source_tier, url, title, summary, content, content_zh, author, published_at, fetched_at, state, accepted, reason, score_a, score_b, title_zh, summary_zh, reason_zh, tags, meta"
 
 func scanItems(rows *sql.Rows) ([]item.Item, error) {
 	var out []item.Item
 	for rows.Next() {
 		var it item.Item
-		var kindred struct{ stage, tags string }
+		var kindred struct{ stage, tags, meta string }
 		var published, fetched string
 		var accepted int
 		if err := rows.Scan(&it.ID, &it.SourceID, &it.SourceTier, &it.URL, &it.Title, &it.Summary, &it.Content, &it.ContentZh, &it.Author,
 			&published, &fetched, &kindred.stage, &accepted, &it.Selection.Reason,
 			&it.Selection.ScoreA, &it.Selection.ScoreB,
-			&it.Selection.TitleZh, &it.Selection.SummaryZh, &it.Selection.ReasonZh, &kindred.tags); err != nil {
+			&it.Selection.TitleZh, &it.Selection.SummaryZh, &it.Selection.ReasonZh, &kindred.tags, &kindred.meta); err != nil {
 			return nil, err
 		}
 		it.Selection.Stage = item.Stage(kindred.stage)
 		it.Selection.Pass = accepted == 1
 		_ = json.Unmarshal([]byte(kindred.tags), &it.Selection.Tags)
+		it.Meta = map[string]string{}
+		_ = json.Unmarshal([]byte(kindred.meta), &it.Meta)
 		it.PublishedAt = parseTime(published)
 		it.FetchedAt = parseTime(fetched)
 		out = append(out, it)

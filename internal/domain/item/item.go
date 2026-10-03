@@ -22,6 +22,9 @@ const (
 	StageRejected  Stage = "rejected"    // 双评分未过门槛
 	StageWritten   Stage = "written"     // 已完成中文写作
 	StageClustered Stage = "clustered"   // 已聚入事件（聚簇只处理一次，防重复合并/重复消耗 LLM）
+	// StageHotBoard 国内热榜条目：带 rank 元数据，走轻管道（多源共振热度算法），
+	// 不进入 LLM 双评分管道（SelectAndWrite 只捞 StageNew，天然分流）。
+	StageHotBoard Stage = "hotboard"
 )
 
 // Selection 精选结果值对象。不可变，只能整体替换。
@@ -50,6 +53,7 @@ type Item struct {
 	Author      string
 	PublishedAt time.Time
 	FetchedAt   time.Time
+	Meta        map[string]string // 榜单元数据（rank/heat 等），nil = 普通信源
 	Selection   Selection
 }
 

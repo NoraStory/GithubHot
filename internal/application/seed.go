@@ -106,7 +106,31 @@ func DefaultSources(now time.Time) []source.Source {
 		CreatedAt:       now,
 	}
 
-	return append(rss, hn, ghSearch, ghTrend, scriptPush)
+	// 国内热榜（hot_board 抓取器，国内直连无需代理）：百度/微博/B站三源冗余，
+	// rank/heat 元数据随条目入库，供多源共振热度算法使用。
+	mkHot := func(id, name, board string, minutes int) source.Source {
+		return source.Source{
+			ID:   id,
+			Name: name,
+			Kind: source.KindHotBoard,
+			Config: map[string]string{
+				"board":      board,
+				"max_items":  "30",
+			},
+			Tier:            source.TierMedia,
+			Tags:            []string{"国内", "热榜", "轻管道"},
+			IntervalMinutes: minutes,
+			Enabled:         true,
+			CreatedAt:       now,
+		}
+	}
+	domestic := []source.Source{
+		mkHot("hot-baidu-realtime", "百度热搜", "baidu", 15),
+		mkHot("hot-weibo-search", "微博热搜", "weibo", 15),
+		mkHot("hot-bilibili-ranking", "B站热门", "bilibili", 30),
+	}
+
+	return append(append(rss, hn, ghSearch, ghTrend, scriptPush), domestic...)
 }
 
 // SeedSources 首次运行时把默认信源导入仓储；已存在的 ID 不覆盖（用户改过就尊重用户）。

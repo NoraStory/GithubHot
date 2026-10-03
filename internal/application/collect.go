@@ -96,6 +96,11 @@ func collectOne(ctx context.Context, d Deps, s source.Source, now time.Time) (in
 	}
 	raws, ferr := fetcher.Fetch(ctx, s, now)
 	if ferr != nil {
+		// 抓取失败同样视为"空手一轮"：触发自适应退避（间隔翻倍），
+		// 否则接口宕机时信源会按原间隔空转撞墙。
+		if merr := d.Sources.MarkFetched(ctx, s.ID, now); merr != nil {
+			log.Printf("[collect] 记录抓取时间失败 %s: %v", s.ID, merr)
+		}
 		return 0, 0, ferr
 	}
 	for _, r := range raws {
@@ -110,6 +115,11 @@ func collectOne(ctx context.Context, d Deps, s source.Source, now time.Time) (in
 		it.Summary = r.Summary
 		it.Content = r.Content
 		it.Author = r.Author
+		it.Meta = r.Meta
+		// 热榜条目（带 rank 元数据）走轻管道：标 hotboard 阶段，不进入 LLM 双评分。
+		if r.Meta != nil && r.Meta["rank"] != "" {
+			it.Selection.Stage = item.StageHotBoard
+		}
 		ok, uerr := d.Items.Upsert(ctx, *it)
 		if uerr != nil {
 			continue

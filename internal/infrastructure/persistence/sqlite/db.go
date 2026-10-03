@@ -125,6 +125,7 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE sources ADD COLUMN empty_streak INTEGER NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE stories ADD COLUMN manual INTEGER NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE items ADD COLUMN content_zh TEXT NOT NULL DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE items ADD COLUMN meta TEXT NOT NULL DEFAULT '{}'")
 	return nil
 }
 

@@ -16,6 +16,8 @@ import (
 )
 
 // FetchedItem 信源适配器产出的一条原始资料。
+// Meta 携带排序/热度等榜单元数据（JSON 落库 items.meta，供热度算法用），
+// 现有抓取器不填即为 nil，行为与以前完全一致。
 type FetchedItem struct {
 	URL         string
 	Title       string
@@ -23,6 +25,7 @@ type FetchedItem struct {
 	Content     string
 	Author      string
 	PublishedAt time.Time
+	Meta        map[string]string
 }
 
 // SourceFetcher 信源抓取端口。一种 Kind 对应一个实现。
