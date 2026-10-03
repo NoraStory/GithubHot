@@ -13,6 +13,8 @@ type Repository interface {
 	CountSince(ctx context.Context, since time.Time) (int, error)
 	// ByStage 按阶段取一批条目（按发布时间倒序）。
 	ByStage(ctx context.Context, stages []Stage, limit int) ([]Item, error)
+	// HotBoardSince 时间窗内的热榜条目（轻管道原料，按抓取时间倒序）。
+	HotBoardSince(ctx context.Context, since time.Time, limit int) ([]Item, error)
 	// Recent 最近采集的条目，用于预筛批次与调试。
 	Recent(ctx context.Context, limit int) ([]Item, error)
 	// UpdateSelection 写回精选结果。

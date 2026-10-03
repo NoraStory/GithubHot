@@ -14,8 +14,9 @@ import (
 type Kind string
 
 const (
-	KindNews    Kind = "news"
-	KindProject Kind = "project"
+	KindNews     Kind = "news"
+	KindProject  Kind = "project"
+	KindDomestic Kind = "domestic" // 国内热榜事件：多源共振轻管道产出，不走 LLM 聚簇
 )
 
 // Member 事件的成员：一条精选资料或一个 GitHub 项目。

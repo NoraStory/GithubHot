@@ -126,6 +126,21 @@ func (m *memItems) Recent(_ context.Context, limit int) ([]item.Item, error) {
 	return out, nil
 }
 
+func (m *memItems) HotBoardSince(_ context.Context, since time.Time, limit int) ([]item.Item, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []item.Item
+	for _, it := range m.m {
+		if it.Selection.Stage == item.StageHotBoard && !it.FetchedAt.Before(since) {
+			out = append(out, it)
+		}
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (m *memItems) UpdateSelection(_ context.Context, id string, sel item.Selection) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

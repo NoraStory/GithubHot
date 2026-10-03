@@ -59,6 +59,7 @@ func (s *Server) Router() http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/hot/github", s.hotGitHub)
 		r.Get("/hot/news", s.hotNews)
+		r.Get("/hot/domestic", s.hotDomestic)
 		r.Get("/hot/fusion", s.hotFusion)
 		r.Get("/hot", s.hotAll)
 		r.Get("/digest/latest", s.digestLatest)
@@ -95,6 +96,16 @@ func (s *Server) hotNews(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"generatedAt": v.Generated, "items": v.News})
+}
+
+// hotDomestic 国内热榜：实时计算的轻管道视图（多源共振，无 LLM）。
+func (s *Server) hotDomestic(w http.ResponseWriter, _ *http.Request) {
+	v, err := application.BuildDomesticView(s.ctx(), s.Deps, 0)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, v)
 }
 
 func (s *Server) hotFusion(w http.ResponseWriter, _ *http.Request) {

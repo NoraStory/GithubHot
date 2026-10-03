@@ -77,6 +77,18 @@ func (r *ItemRepo) Recent(ctx context.Context, limit int) ([]item.Item, error) {
 	return scanItems(rows)
 }
 
+// HotBoardSince 时间窗内的热榜条目（按抓取时间倒序）。
+func (r *ItemRepo) HotBoardSince(ctx context.Context, since time.Time, limit int) ([]item.Item, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT "+itemCols+" FROM items WHERE state = ? AND fetched_at >= ? ORDER BY fetched_at DESC LIMIT ?",
+		string(item.StageHotBoard), rfc(since), limit)
+	if err != nil {
+		return nil, fmt.Errorf("热榜窗口查询: %w", err)
+	}
+	defer rows.Close()
+	return scanItems(rows)
+}
+
 // UpdateSelection 写回精选结果（覆盖阶段与写作产物）。
 func (r *ItemRepo) UpdateSelection(ctx context.Context, id string, sel item.Selection) error {
 	tags, _ := json.Marshal(sel.Tags)
