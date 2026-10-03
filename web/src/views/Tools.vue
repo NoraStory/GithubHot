@@ -1,6 +1,9 @@
 <script setup>
 // 工具箱（参考站 /tools 分组下载卡结构）：API 组 + Agent 组 + 资源组
+import { ref } from 'vue'
 import BannerMini from '../components/BannerMini.vue'
+
+const mcpOpen = ref(false)
 
 const groups = [
   {
@@ -22,8 +25,7 @@ const groups = [
     desc: '给 Claude / ChatGPT / 自定义 Agent 的入口',
     tools: [
       { name: 'llms.txt', desc: '站点说明与端点索引', url: '/llms.txt' },
-      { name: 'Agent Markdown', desc: '双榜完整 Markdown 报告', url: '/api/v1/agent/hot.md' },
-      { name: 'MCP 服务器', desc: 'githubhot mcp（stdio JSON-RPC，5 个工具）', url: 'https://github.com/NoraStory/GithubHot#mcp--脚本推送--精选校准' }
+      { name: 'Agent Markdown', desc: '双榜完整 Markdown 报告', url: '/api/v1/agent/hot.md' }
     ]
   },
   {
@@ -51,6 +53,24 @@ const groups = [
               <div class="tool-name">{{ t.name }}</div>
               <div class="tool-desc">{{ t.desc }}</div>
             </a>
+            <!-- MCP 是 stdio 本地进程，没有网页可进：卡片就地展开接入说明 -->
+            <div v-if="g.title === 'Agent 接入'" class="tool-card fade-up mcp-card" :class="{ open: mcpOpen }" @click="mcpOpen = !mcpOpen">
+              <div class="tool-name">MCP 服务器</div>
+              <div class="tool-desc">githubhot mcp（stdio JSON-RPC，5 个工具）· 点击展开接入说明</div>
+            </div>
+          </div>
+          <div v-if="g.title === 'Agent 接入' && mcpOpen" class="mcp-detail">
+            <p>本服务的 MCP 服务器在<strong>本地以 stdio 进程</strong>运行（不是网页端点），供 Claude Code / Cursor 等 Agent 客户端调用。需要可写数据目录与 LLM 环境变量（复用本服务的 <code>.env</code>）。</p>
+            <pre class="mcp-pre"># 终端直接测试（5 个工具：hot_github / hot_news / hot_fusion / search / latest_digest）
+githubhot mcp
+
+# Claude Code 配置（~/.claude.json 的 mcpServers 段）
+"githubhot": {
+  "command": "githubhot",
+  "args": ["mcp"],
+  "env": { "GITHUBHOT_DB": "E:\\桌面管理\\GithubHot\\data\\githubhot.db" }
+}</pre>
+            <p class="mcp-more">工具清单与排障详见 <a href="https://github.com/NoraStory/GithubHot#mcp--脚本推送--精选校准" target="_blank" rel="noopener">README · MCP 章节</a>。</p>
           </div>
         </section>
       </div>
@@ -68,4 +88,11 @@ section h2::before { content: '✽'; position: absolute; left: 0; color: #fb7061
 .tool-card:hover { border-color: var(--anzhiyu-theme); transform: translateY(-2px); box-shadow: var(--card-box-shadow); }
 .tool-name { font-weight: 700; font-size: .95rem; color: var(--anzhiyu-fontcolor); }
 .tool-desc { color: var(--anzhiyu-gray); font-size: .8rem; margin-top: 2px; }
+/* MCP 卡：不是链接，就地展开接入说明 */
+.mcp-card { cursor: pointer; }
+.mcp-card.open { border-color: var(--anzhiyu-theme); }
+.mcp-detail { margin-top: 10px; border: 1px dashed var(--anzhiyu-card-border); border-radius: var(--anzhiyu-radius); padding: 12px 16px; font-size: .84rem; color: var(--anzhiyu-fontcolor); background: var(--anzhiyu-theme-op); }
+.mcp-detail p { margin: 4px 0; line-height: 1.7; }
+.mcp-pre { background: var(--anzhiyu-code-bg, #f6f8fa); border-radius: 8px; padding: 10px 12px; overflow-x: auto; font-size: .78rem; line-height: 1.6; margin: 8px 0; }
+.mcp-more a { color: var(--anzhiyu-theme); }
 </style>
