@@ -65,6 +65,7 @@ onMounted(() => {
           <div class="footer-links">
             <a class="footer-item" href="/github">GitHub 项目榜</a>
             <a class="footer-item" href="/news">AI 资讯榜</a>
+            <a class="footer-item" href="/domestic">国内热榜</a>
             <a class="footer-item" href="/fusion">融合观察</a>
           </div>
         </div>

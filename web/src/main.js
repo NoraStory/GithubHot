@@ -4,6 +4,7 @@ import App from './App.vue'
 import { checkAdminSession } from './lib/api'
 import Home from './views/Home.vue'
 import Board from './views/Board.vue'
+import Domestic from './views/Domestic.vue'
 import Fusion from './views/Fusion.vue'
 import StoryDetail from './views/StoryDetail.vue'
 import SearchPage from './views/SearchPage.vue'
@@ -36,6 +37,7 @@ const router = createRouter({
     { path: '/', component: Home },
     { path: '/github', component: Board, props: { board: 'github' } },
     { path: '/news', component: Board, props: { board: 'news' } },
+    { path: '/domestic', component: Domestic },
     { path: '/fusion', component: Fusion },
     { path: '/story/:id', component: StoryDetail },
     { path: '/search', component: SearchPage },

@@ -366,6 +366,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
               <div class="back-menu-list">
                 <a class="back-menu-item" href="/github"><span class="back-menu-item-text">GitHub 项目榜</span></a>
                 <a class="back-menu-item" href="/news"><span class="back-menu-item-text">AI 资讯榜</span></a>
+                <a class="back-menu-item" href="/domestic"><span class="back-menu-item-text">国内热榜</span></a>
                 <a class="back-menu-item" href="/fusion"><span class="back-menu-item-text">融合观察</span></a>
                 <a class="back-menu-item" href="javascript:void(0)" @click="toRandom"><span class="back-menu-item-text">随便逛逛</span></a>
               </div>
@@ -406,6 +407,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
           <ul class="menus_item_child">
             <li><router-link class="site-page child faa-parent animated-hover" to="/github"><i class="anzhiyufont anzhiyu-icon-fire faa-tada" style="font-size: 0.9em;"></i><span> GitHub 项目榜</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/news"><i class="anzhiyufont anzhiyu-icon-shapes faa-tada" style="font-size: 0.9em;"></i><span> AI 资讯榜</span></router-link></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/domestic"><i class="anzhiyufont anzhiyu-icon-map-marker faa-tada" style="font-size: 0.9em;"></i><span> 国内热榜</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/fusion"><i class="anzhiyufont anzhiyu-icon-dove faa-tada" style="font-size: 0.9em;"></i><span> 融合观察</span></router-link></li>
             <li><a class="site-page child faa-parent animated-hover" href="javascript:void(0)" @click="toRandom"><i class="anzhiyufont anzhiyu-icon-dice faa-tada" style="font-size: 0.9em;"></i><span> 随便逛逛</span></a></li>
           </ul>
@@ -705,6 +707,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
         <div class="group-title">热点</div>
         <router-link class="site-page child" to="/github"><span> GitHub 项目榜</span></router-link>
         <router-link class="site-page child" to="/news"><span> AI 资讯榜</span></router-link>
+        <router-link class="site-page child" to="/domestic"><span> 国内热榜</span></router-link>
         <router-link class="site-page child" to="/fusion"><span> 融合观察</span></router-link>
         <div class="group-title">期刊</div>
         <router-link class="site-page child" to="/digest/latest"><span> 最新日报</span></router-link>
