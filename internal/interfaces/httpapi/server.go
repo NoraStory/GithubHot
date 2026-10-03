@@ -25,6 +25,7 @@ type Server struct {
 	Runs    application.RunRepo
 	Admin   AdminSessions // 管理端会话存储（nil 时管理端仅支持旧令牌/开放模式）
 	Guard   *IPGuard      // 三层 IP 身份防护（nil = 不启用）
+	Probes  ProbeReader   // 健康探针（nil = 未启用，管理端探针页不可用）
 	Version string
 }
 

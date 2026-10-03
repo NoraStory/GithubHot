@@ -22,6 +22,7 @@ import (
 	"github.com/NoraStory/GithubHot/internal/infrastructure/llm"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/notify"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/persistence/sqlite"
+	"github.com/NoraStory/GithubHot/internal/infrastructure/prober"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/render"
 	"github.com/NoraStory/GithubHot/internal/interfaces/httpapi"
 	"github.com/NoraStory/GithubHot/internal/interfaces/mcp"
@@ -131,6 +132,28 @@ func Serve(cfg *config.Config) error {
 
 	srv := &httpapi.Server{Deps: deps, Runs: runsRepo{db}, Admin: adminSessions{db}, Version: Version}
 	srv.Guard = httpapi.NewIPGuard(guardStore{db}) // 三层 IP 身份防护
+
+	// 健康探针：启动后首轮探测，之后每 ProbeIntervalHours（默认 6h）一轮。
+	// 覆盖全部启用信源 + 关键端点（LLM 网关 / GitHub API / 音乐上游 / 背景对象存储 / 本地库）。
+	storageBase := os.Getenv("R2_PUBLIC_BASE")
+	if storageBase == "" {
+		storageBase = "https://wanghaodatastorage.dpdns.org/githubhot"
+	}
+	probeSvc := &prober.Service{
+		Deps:  deps,
+		Store: db,
+		Targets: prober.EndpointTargets{
+			LLMBaseURL:  cfg.LLMBaseURL,
+			LLMAPIKey:   cfg.LLMAPIKey,
+			GitHubToken: cfg.GitHubToken,
+			StorageBase: storageBase,
+			MusicID:     cfg.MusicPlaylist,
+		},
+		PingDB: func(ctx context.Context) error {
+			var one int
+			return db.QueryRowContext(ctx, "SELECT 1").Scan(&one)
+		},
+	}
 	addr := "0.0.0.0:" + cfg.Port
 	fmt.Printf("GithubHot %s · API+双榜页监听 http://localhost:%s\n", Version, cfg.Port)
 	fmt.Printf("APP/前端契约：/api/v1/hot/github · /api/v1/hot/news · /api/v1/hot/fusion · /api/v1/digest/latest\n")
@@ -151,6 +174,9 @@ func Serve(cfg *config.Config) error {
 
 	ctx, stop := signalCtx()
 	defer stop()
+
+	srv.Probes = probeBridge{probeSvc}
+	probeSvc.Start(ctx, time.Duration(cfg.ProbeIntervalHours)*time.Hour)
 	return httpListen(ctx, addr, srv.Router())
 }
 
@@ -252,9 +278,42 @@ func (r runsRepo) List(ctx context.Context, limit int) ([]application.RunRow, er
 	return out, nil
 }
 
+// probeBridge 适配探针服务到 httpapi.ProbeReader 端口。
+type probeBridge struct{ svc *prober.Service }
+
+func (b probeBridge) LatestProbes(ctx context.Context) ([]httpapi.ProbeRow, error) {
+	rows, err := b.svc.Store.LatestProbes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return toProbeRows(rows), nil
+}
+
+func (b probeBridge) ProbeHistory(ctx context.Context, target string, limit int) ([]httpapi.ProbeRow, error) {
+	rows, err := b.svc.Store.ProbeHistory(ctx, target, limit)
+	if err != nil {
+		return nil, err
+	}
+	return toProbeRows(rows), nil
+}
+
+func (b probeBridge) RunProbes(ctx context.Context) {
+	b.svc.Run(ctx)
+}
+
+func toProbeRows(rows []sqlite.ProbeRecord) []httpapi.ProbeRow {
+	out := make([]httpapi.ProbeRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, httpapi.ProbeRow{
+			Target: r.Target, Kind: r.Kind, OK: r.OK,
+			LatencyMS: r.LatencyMS, Detail: r.Detail, CheckedAt: r.CheckedAt,
+		})
+	}
+	return out
+}
+
 // adminSessions 适配 sqlite 会话存储到 httpapi.AdminSessions 端口。
 type adminSessions struct{ db *sqlite.DB }
-
 func (a adminSessions) CreateAdminSession(ctx context.Context, id, ip string, ttl time.Duration) error {
 	return a.db.CreateAdminSession(ctx, id, ip, ttl)
 }

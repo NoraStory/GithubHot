@@ -32,6 +32,7 @@ type Config struct {
 	GitHubToken         string
 	GitHubProxy         string // GitHub 镜像前缀（国内服务器直连失败时用，如 https://gh-proxy.com）
 	CronSpec            string // serve 模式内置调度（cron 表达式，本地时区）
+	ProbeIntervalHours  int    // 探针轮询间隔小时数（信源与端点健康探测，默认 6）
 }
 
 // Load 读取配置。工作目录存在 .env 时先加载（环境变量优先于 .env）。
@@ -67,6 +68,7 @@ func Load() (*Config, error) {
 		GitHubToken:         getEnv("GITHUB_TOKEN", ""),
 		GitHubProxy:         getEnv("GITHUB_PROXY", ""),
 		CronSpec:            getEnv("HOT_CRON", "30 7 * * *"),
+		ProbeIntervalHours:  getEnvInt("PROBE_INTERVAL_HOURS", 6),
 	}
 	if cfg.LLMBaseURL != "" || cfg.LLMAPIKey != "" || cfg.LLMModelA != "" {
 		if cfg.LLMBaseURL == "" || cfg.LLMAPIKey == "" || cfg.LLMModelA == "" {

@@ -14,7 +14,8 @@ const menus = [
   { path: '/admin/runs', label: '🖥 运行历史' },
   { path: '/admin/sources', label: '🛠 信源管理' },
   { path: '/admin/digests', label: '📰 期刊' },
-  { path: '/admin/ipguard', label: '🛡 IP 防护' }
+  { path: '/admin/ipguard', label: '🛡 IP 防护' },
+  { path: '/admin/probes', label: '🩺 健康探针' }
 ]
 const health = ref(null)
 onMounted(async () => {

@@ -50,6 +50,9 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 			// 国内热榜 Top10 综述开关
 			r.Get("/domestic-summary", s.domesticSummaryStatus)
 			r.Post("/domestic-summary", s.domesticSummaryToggle)
+			// 健康探针（最新结果 / 历史 / 立即探测）
+			r.Get("/probes", s.probesAPI)
+			r.Post("/probes/run", s.probesRunAPI)
 		})
 	})
 }

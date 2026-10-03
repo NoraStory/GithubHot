@@ -30,6 +30,7 @@ import AdminSources from './admin/AdminSources.vue'
 import AdminStories from './admin/AdminStories.vue'
 import AdminDigests from './admin/AdminDigests.vue'
 import AdminIPGuard from './admin/AdminIPGuard.vue'
+import AdminProbes from './admin/AdminProbes.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -70,7 +71,8 @@ const router = createRouter({
         { path: 'sources', component: AdminSources },
         { path: 'stories', component: AdminStories },
         { path: 'digests', component: AdminDigests },
-        { path: 'ipguard', component: AdminIPGuard }
+        { path: 'ipguard', component: AdminIPGuard },
+        { path: 'probes', component: AdminProbes }
       ]
     },
     { path: '/:pathMatch(.*)*', redirect: '/' }

@@ -397,7 +397,8 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 		// 后面的 adminAuth，保证被封管理员有自救解封通道，又不给攻击者任何
 		// 未授权入口）。
 		if g.isBanned(ctx, ip) {
-			if local || g.isWhitelisted(ip) || strings.HasPrefix(r.URL.Path, "/api/v1/admin/ipguard/") {
+			if local || g.isWhitelisted(ip) || strings.HasPrefix(r.URL.Path, "/api/v1/admin/ipguard/") ||
+				strings.HasPrefix(r.URL.Path, "/api/v1/admin/probes") {
 				next.ServeHTTP(w, r)
 				return
 			}

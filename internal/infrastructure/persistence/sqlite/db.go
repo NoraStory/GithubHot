@@ -117,6 +117,9 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS domestic_summaries (date TEXT PRIMARY KEY, summary TEXT NOT NULL, created_at TEXT NOT NULL)"); err != nil {
 		return fmt.Errorf("建表 domestic_summaries: %w", err)
 	}
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS probe_results (id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, kind TEXT NOT NULL, ok INTEGER NOT NULL, latency_ms INTEGER NOT NULL, detail TEXT NOT NULL, checked_at TEXT NOT NULL)"); err != nil {
+		return fmt.Errorf("建表 probe_results: %w", err)
+	}
 	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_usage_created ON llm_usage(created_at)"); err != nil {
 		return fmt.Errorf("建索引 usage: %w", err)
 	}
