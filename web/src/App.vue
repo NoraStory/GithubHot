@@ -351,7 +351,8 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
   <div id="an_music_bg"></div>
 
   <!-- AnZhiYu #nav：桌面端 悬停下拉；窄屏 #toggle-menu 汉堡 → #sidebar-menus 抽屉 -->
-  <nav id="nav" :class="{ 'nav-fixed': scrolled }">
+  <!-- 管理端路由下隐藏（v-show 保持 DOM，既有查询绑定不受影响），避免固定导航遮挡管理端标题 -->
+  <nav id="nav" v-show="!isAdminRoute" :class="{ 'nav-fixed': scrolled }">
     <div id="nav-group">
       <span id="blog_name">
         <a id="site-name" href="/" @click.prevent="router.push('/')">
