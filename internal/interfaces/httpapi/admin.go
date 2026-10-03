@@ -268,6 +268,7 @@ func (s *Server) llmsTxt(w http.ResponseWriter, _ *http.Request) {
 	b.WriteString("- GET /api/v1/hot/fusion — 资讯×项目融合配对\n")
 	b.WriteString("- GET /api/v1/hot — 三榜合一\n")
 	b.WriteString("- GET /api/v1/search?q= — 站内搜索\n")
+	b.WriteString("- GET /api/v1/stories?page=&pageSize= — 全量事件分页（归档）\n")
 	b.WriteString("- GET /api/v1/digest/latest?format=raw — 最新日报 Markdown\n")
 	b.WriteString("- GET /feed/news.xml / /feed/github.xml / /feed/digest.xml — RSS\n\n")
 	b.WriteString("## 当前热点速览\n\n")

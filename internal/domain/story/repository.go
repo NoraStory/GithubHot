@@ -24,6 +24,9 @@ type Repository interface {
 	SetManual(ctx context.Context, storyID string, manual bool) error
 	// HotnessHistory 事件热度历史（升序，用于详情页）。
 	HotnessHistory(ctx context.Context, storyID string, limit int) ([]HotnessPoint, error)
+	// ListPage 全量事件分页（归档页用）：按首次收录时间降序，
+	// 返回当页事件与总条数。kind 为空表示全部种类。
+	ListPage(ctx context.Context, kind Kind, offset, limit int) ([]*Story, int, error)
 }
 
 // HotnessPoint 热度历史点。

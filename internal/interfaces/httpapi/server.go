@@ -68,6 +68,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/search", s.searchAPI)
 		r.Get("/agent/hot.md", s.agentMD)
 		r.Get("/story/{id}", s.storyAPI)
+		r.Get("/stories", s.storiesArchiveAPI)
 		s.registerAdminRoutes(r)
 		s.registerIPGuardRoutes(r)
 	})

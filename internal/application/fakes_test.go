@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -341,6 +342,35 @@ func (m *memStories) Active(_ context.Context, since time.Time) ([]*story.Story,
 		}
 	}
 	return out, nil
+}
+
+// ListPage 内存版：按首次收录时间降序分页。
+func (m *memStories) ListPage(_ context.Context, kind story.Kind, offset, limit int) ([]*story.Story, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var all []*story.Story
+	for _, s := range m.m {
+		if kind != "" && s.Kind != kind {
+			continue
+		}
+		cp := *s
+		all = append(all, &cp)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].FirstSeenAt.Equal(all[j].FirstSeenAt) {
+			return all[i].FirstSeenAt.After(all[j].FirstSeenAt)
+		}
+		return all[i].ID < all[j].ID
+	})
+	total := len(all)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
 }
 
 func (m *memStories) Delete(_ context.Context, id string) error {

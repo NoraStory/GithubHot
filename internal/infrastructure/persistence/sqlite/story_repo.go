@@ -145,6 +145,35 @@ func (r *StoryRepo) LinkProjects(ctx context.Context, storyID string, fullNames 
 	return r.Save(ctx, s)
 }
 
+// ListPage 全量事件分页（归档页用）：按首次收录时间降序，返回当页与总条数。
+func (r *StoryRepo) ListPage(_ context.Context, kind story.Kind, offset, limit int) ([]*story.Story, int, error) {
+	where, args := "", []any{}
+	if kind != "" {
+		where = " WHERE kind = ?"
+		args = append(args, string(kind))
+	}
+	var total int
+	if err := r.db.QueryRow("SELECT COUNT(*) FROM stories"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	q := "SELECT id, kind, title_zh, summary_zh, url, COALESCE(overview, ''), COALESCE(manual, 0), members, projects, hotness, first_seen_at, updated_at FROM stories" +
+		where + " ORDER BY first_seen_at DESC, id LIMIT ? OFFSET ?"
+	rows, err := r.db.Query(q, append(args, limit, offset)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := []*story.Story{}
+	for rows.Next() {
+		s, err := scanStory(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, s)
+	}
+	return out, total, rows.Err()
+}
+
 func scanStory(rs rowScanner) (*story.Story, error) {
 	var s story.Story
 	var kind, members, projects string

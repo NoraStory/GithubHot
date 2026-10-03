@@ -8,9 +8,11 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/NoraStory/GithubHot/internal/application"
 	"github.com/NoraStory/GithubHot/internal/domain/digest"
+	"github.com/NoraStory/GithubHot/internal/domain/story"
 	"github.com/NoraStory/GithubHot/internal/interfaces/webui"
 )
 
@@ -270,6 +272,39 @@ func (s *Server) digestsAPI(w http.ResponseWriter, r *http.Request) {
 		"page":  page,
 		"items": items,
 	})
+}
+
+// storiesArchiveAPI 全量事件分页（归档页用）：GET /api/v1/stories?page=&pageSize=
+// 只返回归档需要的轻量字段，默认仅资讯事件（kind=news）。
+func (s *Server) storiesArchiveAPI(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page := atoiDefault(q.Get("page"), 1)
+	size := atoiDefault(q.Get("pageSize"), 100)
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 || size > 200 {
+		size = 100
+	}
+	kind := story.KindNews
+	if k := q.Get("kind"); k == "all" || k == string(story.KindProject) || k == string(story.KindDomestic) {
+		kind = story.Kind(k)
+	}
+	items, total, err := s.Deps.Stories.ListPage(s.ctx(), kind, (page-1)*size, size)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	type row struct {
+		StoryID     string    `json:"storyId"`
+		TitleZh     string    `json:"titleZh"`
+		FirstSeenAt time.Time `json:"firstSeenAt"`
+	}
+	rows := []row{}
+	for _, it := range items {
+		rows = append(rows, row{StoryID: it.ID, TitleZh: it.TitleZh, FirstSeenAt: it.FirstSeenAt})
+	}
+	writeJSON(w, 200, map[string]any{"total": total, "page": page, "items": rows})
 }
 
 func atoiDefault(s string, def int) int {

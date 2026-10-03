@@ -1,11 +1,42 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '../lib/api'
 
 // 归档页（AnZhiYu article-sort 时间线同构）：期刊 + 事件按时间归档
+// 期刊：循环分页拉全量（每天最多 1 期，总量小）；事件：分页加载 + 手动加载更多
 const view = ref({ digests: [], stories: [] })
 const loading = ref(true)
+const loadingMore = ref(false)
 const year = ref('all')
+const PAGE_SIZE = 100
+const storyTotal = ref(0)
+const storyPage = ref(0)
+
+// 循环分页拉完全部期刊（接口单页上限 50，返回 total）
+async function loadAllDigests() {
+  const all = []
+  let page = 1
+  for (;;) {
+    const d = await api.get(`/api/v1/digests?page=${page}&pageSize=50`)
+    const items = d.items || []
+    all.push(...items)
+    if (all.length >= (d.total || 0) || !items.length) break
+    page++
+    if (page > 40) break // 保险丝：最多 2000 期
+  }
+  return all
+}
+
+// 事件下一页；返回是否还有更多
+async function loadStoriesNext() {
+  const next = storyPage.value + 1
+  const d = await api.get(`/api/v1/stories?page=${next}&pageSize=${PAGE_SIZE}`)
+  storyTotal.value = d.total || 0
+  storyPage.value = next
+  view.value.stories = view.value.stories.concat(d.items || [])
+  return view.value.stories.length < storyTotal.value
+}
+const hasMore = computed(() => view.value.stories.length < storyTotal.value)
 
 const years = computed(() => {
   const ys = new Set()
@@ -27,13 +58,21 @@ const sorted = computed(() => {
   return year.value === 'all' ? all : all.filter((x) => x.y === year.value)
 })
 
-import { computed } from 'vue'
 onMounted(async () => {
-  const [dg, sn] = await Promise.all([api.get('/api/v1/digests?pageSize=50'), api.get('/api/v1/hot/news')])
-  view.value.digests = dg.items || []
-  view.value.stories = sn.items || []
+  await loadAllDigests().then((all) => { view.value.digests = all })
+  await loadStoriesNext()
   loading.value = false
 })
+
+async function loadMore() {
+  if (loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+  try {
+    await loadStoriesNext()
+  } finally {
+    loadingMore.value = false
+  }
+}
 </script>
 
 <template>
@@ -83,6 +122,11 @@ onMounted(async () => {
             </div>
           </template>
         </div>
+        <div v-if="!loading && hasMore" class="load-more-wrap">
+          <button class="load-more" :disabled="loadingMore" @click="loadMore">
+            {{ loadingMore ? '加载中…' : `加载更多事件（已显示 ${view.stories.length} / 共 ${storyTotal} 条）` }}
+          </button>
+        </div>
         <div v-if="!loading && !sorted.length" class="empty">暂无归档</div>
       </div>
     </div>
@@ -97,5 +141,9 @@ onMounted(async () => {
 #post-meta .meta-firstline { opacity: .9; font-size: .85rem; }
 .article-sort-item.month { display: block; margin: 10px 0 4px; padding: 6px 12px; font-weight: 700; font-size: .95rem; color: var(--anzhiyu-hover); background: var(--anzhiyu-theme-op); border-radius: 8px; }
 .article-sort-item.month:hover { color: var(--anzhiyu-main); }
+.load-more-wrap { text-align: center; margin: 18px 0 6px; }
+.load-more { background: var(--anzhiyu-theme); color: #fff; border: none; border-radius: 20px; padding: 8px 22px; font-size: .84rem; cursor: pointer; transition: opacity .2s; }
+.load-more:hover { opacity: .85; }
+.load-more:disabled { opacity: .5; cursor: default; }
 @media (max-width: 768px) { .post-bg { height: 15rem; } }
 </style>
