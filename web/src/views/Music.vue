@@ -138,7 +138,27 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.body.dataset.type = ''
   timers.forEach((t) => clearInterval(t))
-  handlers.forEach(([el, h]) => el.removeEventListener('click', h))
+  // handlers 每项是 [元素, 事件类型, 回调] 三元组；解构错会把字符串当回调传入
+  // removeEventListener 抛 TypeError，导致路由卸载中断——导航永远完不成（页面卡死）。
+  handlers.forEach(([el, type, h]) => el.removeEventListener(type, h))
+  // 停掉 APlayer：不处理的话音频元素随 DOM 摘除进入游离状态仍继续下载播放，
+  // 既白费流量又和首页播放器叠音。注意三个坑（实测踩过）：
+  //  1) APlayer 1.10.1 没有 destroy() 方法；
+  //  2) 摘掉 src 会触发 audio error 事件，其内置处理器 2 秒后 skipForward() 回切
+  //     列表——此时播放器 DOM 已卸载，list.switch 读不到列表节点抛 TypeError；
+  //  3) 所以要先清空 list.audios 再摘 src，让 error 处理器走空分支。
+  const meting = document.querySelector('#anMusic-page-meting meting-js')
+  if (meting && meting.aplayer) {
+    const ap = meting.aplayer
+    try { ap.pause() } catch (e) { /* 忽略 */ }
+    try { ap.list.audios.length = 0 } catch (e) { /* 忽略 */ }
+    try {
+      ap.audio.removeAttribute('src')
+      ap.audio.load()
+    } catch (e) { /* 忽略 */ }
+  }
+  const holder = document.getElementById('anMusic-page-meting')
+  if (holder) holder.innerHTML = ''
   const bg = document.getElementById('an_music_bg')
   if (bg) bg.style.backgroundImage = ''
 })
