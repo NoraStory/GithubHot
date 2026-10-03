@@ -101,8 +101,8 @@ jobs:
 
       - name: 配置 SSH
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
           chmod 600 ~/.ssh/deploy
           ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
 
@@ -111,9 +111,9 @@ jobs:
           PORT: ${{ secrets.DEPLOY_PORT || 22 }}
           DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
         run: |
-          scp -P $PORT githubhot webdist.tar.gz \
+          scp -i ~/.ssh/deploy -P $PORT githubhot webdist.tar.gz \
             ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$DIR/
-          ssh -p $PORT ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
+          ssh -i ~/.ssh/deploy -p $PORT ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
             set -e
             cd $DIR
             tar xzf webdist.tar.gz
