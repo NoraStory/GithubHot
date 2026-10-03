@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/NoraStory/GithubHot/internal/application"
@@ -35,9 +36,21 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 		}
 		// 磁盘没有该文件 → 继续走 embed（兼容旧部署）
 	}
-	// APP 安装包直出：/app/xxx.apk 走磁盘目录（APK_DIR，默认 ./apks），
-	// 供 force_upgrade_url 指向本机（如 /app/githubhot-latest.apk）做 APP 内自动更新。
+	// APP 安装包直出 + IP 防护：已封禁 IP 一律 403；每 IP 限频（10 分钟 5 次），
+	// 超限 429 并按违规事件计入 IP 守护积分体系（累计到线自动封禁）。
 	if strings.HasPrefix(p, "app/") {
+		if s.Guard != nil {
+			ip := clientIPFromRequest(r)
+			if s.Guard.isBanned(r.Context(), ip) {
+				writeJSON(w, 403, map[string]any{"error": "banned"})
+				return
+			}
+			if r.Method != http.MethodHead && !appDlAllow(ip, time.Now()) {
+				s.Guard.event(r.Context(), ip, "app-download-flood", "APP 安装包下载过于频繁", 2, false)
+				writeJSON(w, 429, map[string]any{"error": "rate limited"})
+				return
+			}
+		}
 		serveDiskApk(w, r, strings.TrimPrefix(p, "app/"))
 		return
 	}
@@ -127,6 +140,37 @@ func serveDiskVideo(w http.ResponseWriter, r *http.Request, name string) bool {
 	}
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeFile(w, r, full)
+	return true
+}
+
+// appDlLimiter APP 安装包下载限流：每 IP 滑动窗口（10 分钟 5 次）。
+// 与 IP 守护联动：超限方除 429 外按违规事件计分，累计到线自动封禁。
+var appDlLimiter = struct {
+	sync.Mutex
+	m map[string][]time.Time
+}{m: map[string][]time.Time{}}
+
+func appDlAllow(ip string, now time.Time) bool {
+	const window = 10 * time.Minute
+	const max = 5
+	appDlLimiter.Lock()
+	defer appDlLimiter.Unlock()
+	ts := appDlLimiter.m[ip]
+	cut := now.Add(-window)
+	keep := ts[:0]
+	for _, t := range ts {
+		if t.After(cut) {
+			keep = append(keep, t)
+		}
+	}
+	if len(keep) == 0 {
+		delete(appDlLimiter.m, ip)
+	}
+	if len(keep) >= max {
+		appDlLimiter.m[ip] = keep
+		return false
+	}
+	appDlLimiter.m[ip] = append(keep, now)
 	return true
 }
 

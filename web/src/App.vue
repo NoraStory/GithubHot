@@ -395,6 +395,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
                 <a class="back-menu-item" href="/music"><span class="back-menu-item-text">音乐馆</span></a>
                 <a class="back-menu-item" href="/about"><span class="back-menu-item-text">关于本站</span></a>
                 <a class="back-menu-item" href="https://github.com/NoraStory/GithubHot" target="_blank"><span class="back-menu-item-text">源码仓库</span></a>
+                <a class="back-menu-item" href="/app/githubhot-latest.apk" download title="Android APP 安装包"><span class="back-menu-item-text">📱 APP 下载</span></a>
                 <a class="back-menu-item" v-if="adminAuthed" href="/admin/usage"><span class="back-menu-item-text">管理端</span></a>
               </div>
             </div>
@@ -445,6 +446,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
             <li><a class="site-page child faa-parent animated-hover" href="javascript:void(0)" @click="toRandom"><i class="anzhiyufont anzhiyu-icon-dice faa-tada" style="font-size: 0.9em;"></i><span> 随便逛逛</span></a></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/privacy"><i class="anzhiyufont anzhiyu-icon-file-contract faa-tada" style="font-size: 0.9em;"></i><span> 隐私协议</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/about"><i class="anzhiyufont anzhiyu-icon-github faa-tada" style="font-size: 0.9em;"></i><span> 关于本站</span></router-link></li>
+            <li><a class="site-page child faa-parent animated-hover" href="/app/githubhot-latest.apk" download title="Android APP 安装包"><i class="fa-solid fa-mobile-screen-button faa-tada" style="font-size: 0.9em;"></i><span> APP 下载</span></a></li>
             <li v-if="adminAuthed"><router-link class="site-page child faa-parent animated-hover" to="/admin/usage"><i class="anzhiyufont anzhiyu-icon-gear faa-tada" style="font-size: 0.9em;"></i><span> 管理端</span></router-link></li>
           </ul>
         </div>
