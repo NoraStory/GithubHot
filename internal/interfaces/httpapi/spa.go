@@ -58,29 +58,63 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(index)
 }
 
-// serveDiskVideo 从 VIDEOS_DIR 提供 /video/ 下的媒体文件；未配置时默认
-// 取可执行文件旁的 videos/ 目录（不依赖进程工作目录，Windows 服务化也稳）。
-// 命中返回 true；目录不可用或文件不存在返回 false，由调用方回退 embed。
-func serveDiskVideo(w http.ResponseWriter, r *http.Request, name string) bool {
+// videosDir 本地视频目录：VIDEOS_DIR 环境变量优先（相对路径锚定可执行文件目录），
+// 默认取可执行文件旁的 videos/。取不到可执行文件路径时返回空串。
+func videosDir() string {
 	dir := strings.TrimSpace(os.Getenv("VIDEOS_DIR"))
+	if dir != "" && filepath.IsAbs(dir) {
+		return dir
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
 	if dir == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			return false
-		}
-		dir = filepath.Join(filepath.Dir(exe), "videos")
-	} else if !filepath.IsAbs(dir) {
-		if exe, err := os.Executable(); err == nil {
-			dir = filepath.Join(filepath.Dir(exe), dir)
+		dir = "videos"
+	}
+	return filepath.Join(filepath.Dir(exe), dir)
+}
+
+// r2Base R2 后备方案的公开地址前缀（对象键为 x/x7.mp4、y/y4.mp4 风格）。
+// R2_PUBLIC_BASE 环境变量可整体切换；留空则禁用后备。
+func r2Base() string {
+	if b := strings.TrimSpace(os.Getenv("R2_PUBLIC_BASE")); b != "" {
+		return strings.TrimSuffix(b, "/")
+	}
+	return "https://wanghaodatastorage.dpdns.org/githubhot"
+}
+
+// videoURL 生成片单/兜底用的视频地址：本地磁盘有文件用 /video/ 本地直出，
+// 缺失时自动落到 R2 后备域名，保证换机器没拷 videos/ 也能放。
+func videoURL(dir, localPath, r2Key string) string {
+	if dir != "" {
+		full := filepath.Join(dir, filepath.FromSlash(r2Key))
+		if info, err := os.Stat(full); err == nil && !info.IsDir() {
+			return localPath
 		}
 	}
+	return r2Base() + "/" + r2Key
+}
+
+// serveDiskVideo 从 videosDir() 提供 /video/ 下的媒体文件。
+// 命中返回 true；文件不存在且配置了 R2 后备时 302 跳 R2；否则返回 false 由调用方回退 embed。
+func serveDiskVideo(w http.ResponseWriter, r *http.Request, name string) bool {
 	// path.Clean 已处理 ..，这里再拒绝绝对路径与越界分隔符，双保险
 	if filepath.IsAbs(name) || strings.Contains(name, "..") {
+		return false
+	}
+	dir := videosDir()
+	if dir == "" {
 		return false
 	}
 	full := filepath.Join(dir, filepath.FromSlash(name))
 	info, err := os.Stat(full)
 	if err != nil || info.IsDir() {
+		// R2 后备：/video/x/x7.mp4 → {r2Base}/x/x7.mp4
+		if base := r2Base(); base != "" && (strings.HasPrefix(name, "x/") || strings.HasPrefix(name, "y/")) {
+			http.Redirect(w, r, base+"/"+strings.TrimPrefix(path.Clean("/"+name), "/"), http.StatusFound)
+			return true
+		}
 		return false
 	}
 	w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -136,33 +170,35 @@ func (s *Server) siteConfig(w http.ResponseWriter, _ *http.Request) {
 	}
 	homeVideos := strings.TrimSpace(os.Getenv("HOME_VIDEOS"))
 	if homeVideos == "" {
-		// 默认片单：前 6 个远程黑白老电影 + R2 托管域名上的本地新增横屏（x1~x6 与远程重复已剔除）
+		// 默认片单：前 6 个远程黑白老电影 + 本地/R2 横屏（磁盘有文件走本地直出，缺文件自动落 R2 后备）
+		dir := videosDir()
 		homeVideos = strings.Join([]string{
 			"https://pic.lololowe.com/video/x/1.mp4", "https://pic.lololowe.com/video/x/2.mp4",
 			"https://pic.lololowe.com/video/x/3.mp4", "https://pic.lololowe.com/video/x/4.mp4",
 			"https://pic.lololowe.com/video/x/5.mp4", "https://pic.lololowe.com/video/x/6.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/x/x7.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/x/x8.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/x/x10.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/x/x11.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/x/x12.mp4",
+			videoURL(dir, "/video/x/x7.mp4", "x/x7.mp4"),
+			videoURL(dir, "/video/x/x8.mp4", "x/x8.mp4"),
+			videoURL(dir, "/video/x/x10.mp4", "x/x10.mp4"),
+			videoURL(dir, "/video/x/x11.mp4", "x/x11.mp4"),
+			videoURL(dir, "/video/x/x12.mp4", "x/x12.mp4"),
 		}, "|")
 	}
-	// 竖屏片单：R2 上的本地 y 系列（y1~y12，无 y9）
+	// 竖屏片单：本地/R2 的 y 系列（y1~y12，无 y9）
 	homePortraitVideos := strings.TrimSpace(os.Getenv("HOME_PORTRAIT_VIDEOS"))
 	if homePortraitVideos == "" {
+		dir := videosDir()
 		homePortraitVideos = strings.Join([]string{
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y1.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y2.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y3.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y4.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y5.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y6.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y7.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y8.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y10.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y11.mp4",
-			"https://wanghaodatastorage.dpdns.org/githubhot/y/y12.mp4",
+			videoURL(dir, "/video/y/y1.mp4", "y/y1.mp4"),
+			videoURL(dir, "/video/y/y2.mp4", "y/y2.mp4"),
+			videoURL(dir, "/video/y/y3.mp4", "y/y3.mp4"),
+			videoURL(dir, "/video/y/y4.mp4", "y/y4.mp4"),
+			videoURL(dir, "/video/y/y5.mp4", "y/y5.mp4"),
+			videoURL(dir, "/video/y/y6.mp4", "y/y6.mp4"),
+			videoURL(dir, "/video/y/y7.mp4", "y/y7.mp4"),
+			videoURL(dir, "/video/y/y8.mp4", "y/y8.mp4"),
+			videoURL(dir, "/video/y/y10.mp4", "y/y10.mp4"),
+			videoURL(dir, "/video/y/y11.mp4", "y/y11.mp4"),
+			videoURL(dir, "/video/y/y12.mp4", "y/y12.mp4"),
 		}, "|")
 	}
 	writeJSON(w, 200, map[string]any{

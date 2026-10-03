@@ -92,13 +92,13 @@ function maxHot(history) {
 
         <h2>同事件报道（{{ detail.members.length }}）</h2>
         <div v-if="!detail.members.length" class="empty">无成员条目</div>
-        <div v-for="m in detail.members" :key="m.id" class="story-line fade-up">
+        <div v-for="(m, i) in detail.members" :key="m.id" class="story-line fade-up">
           <a class="member-link" :href="m.url" target="_blank" rel="noopener">{{ m.titleZh || m.title }}</a>
           <span class="desc">{{ m.sourceName }} · {{ m.published }} · 评分 {{ m.scoreA.toFixed(1) }}/{{ m.scoreB.toFixed(1) }}
             <a v-if="m.url" class="read-origin-mini" :href="m.url" target="_blank" rel="noopener">原文 ↗</a>
           </span>
-          <details v-if="m.contentZh" class="member-zh">
-            <summary>📄 本地 AI 译文（原站打不开时读这份）</summary>
+          <details v-if="m.contentZh" class="member-zh" :open="i === 0">
+            <summary><span class="zh-badge">AI 译文</span><span class="zh-title">📄 本地中文翻译<em>原站打不开时读这份</em></span><span class="zh-arrow anzhiyufont anzhiyu-icon-arrow-right"></span></summary>
             <p>{{ m.contentZh }}</p>
           </details>
         </div>
@@ -127,10 +127,48 @@ function maxHot(history) {
 .read-origin { background: var(--anzhiyu-main) !important; }
 .read-origin-mini { margin-left: 8px; color: var(--anzhiyu-main); }
 .read-origin-mini:hover { color: var(--anzhiyu-hover); }
-.member-zh { margin-top: 6px; border: 1px dashed var(--anzhiyu-card-border); border-radius: 8px; padding: 8px 12px; background: var(--anzhiyu-background); }
-.member-zh summary { cursor: pointer; font-size: .82rem; color: var(--anzhiyu-main); user-select: none; }
-.member-zh summary:hover { color: var(--anzhiyu-hover); }
-.member-zh p { margin: 8px 0 2px; font-size: .9rem; line-height: 1.9; color: var(--anzhiyu-secondary); white-space: pre-line; }
+.member-zh {
+  margin-top: 10px;
+  border: 1px solid var(--anzhiyu-theme-op);
+  border-left: 4px solid var(--anzhiyu-theme);
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, var(--anzhiyu-theme-op) 0%, transparent 60%);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .04);
+}
+.member-zh summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.member-zh summary::-webkit-details-marker { display: none; }
+.zh-badge {
+  flex: none;
+  background: var(--anzhiyu-theme);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  padding: 3px 10px;
+  border-radius: 50px;
+  box-shadow: 0 2px 8px var(--anzhiyu-theme-op);
+}
+.zh-title { font-size: .9rem; font-weight: 600; color: var(--anzhiyu-fontcolor); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.zh-title em { font-style: normal; font-size: .74rem; font-weight: 400; color: var(--anzhiyu-gray); }
+.zh-arrow { margin-left: auto; flex: none; font-size: .8rem; color: var(--anzhiyu-theme); transition: transform .25s; }
+.member-zh[open] .zh-arrow { transform: rotate(90deg); }
+.member-zh p {
+  margin: 10px 2px 2px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--anzhiyu-theme-op);
+  font-size: .92rem;
+  line-height: 1.95;
+  color: var(--anzhiyu-secondary);
+  white-space: pre-line;
+}
 @media (max-width: 768px) { .post-bg { height: 18rem; } .post-title { font-size: 1.4rem; } }
 </style>
 
