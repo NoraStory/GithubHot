@@ -13,16 +13,36 @@ import (
 // ---------- 指纹上报（公开端点，第二层入口） ----------
 
 type fpPayload struct {
-	Fingerprint string   `json:"fp"`
-	WebRTC      []string `json:"webrtc"`
-	Canvas      string   `json:"canvas"`
-	WebGL       string   `json:"webgl"`
-	Renderer    string   `json:"renderer"`
-	Screen      string   `json:"screen"`
-	Coherent    bool     `json:"coherent"` // 客户端自算的 UA/platform 一致性
+	Fingerprint string            `json:"fp"`
+	WebRTC      []string          `json:"webrtc"`
+	Canvas      string            `json:"canvas"`
+	WebGL       string            `json:"webgl"`
+	Audio       string            `json:"audio"`
+	Fonts       string            `json:"fonts"`
+	Components  map[string]string `json:"components"` // 各技术分量指纹明细（canvas/webgl/audio/fonts/screen/renderer）
+	Flags       []string          `json:"flags"`      // 第三层环境核验命中项
+	Renderer    string            `json:"renderer"`
+	Screen      string            `json:"screen"`
+	Coherent    bool              `json:"coherent"` // 旧客户端兼容：UA 与 platform 一致性
+}
+
+// flagScore 第三层各命中项的违规积分与严重级别。
+var flagScore = map[string]struct {
+	score  int
+	severe bool
+}{
+	"navigator-webdriver":   {60, true},
+	"automation-global":     {60, true},
+	"headless-ua":           {50, true},
+	"ua-platform-mismatch":  {30, false},
+	"ua-ch-mismatch":        {35, false},
+	"lang-tz-mismatch":      {15, false},
+	"no-plugins":            {10, false},
+	"env-incoherent":        {30, false},
 }
 
 // fpReportAPI POST /api/v1/fp/report：浏览器上报设备指纹，服务端登记并做连坐判定。
+// 第三层环境核验：客户端 flags + 服务端 Client Hints 比对，命中即计违规分。
 func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 	if s.Guard == nil {
 		writeJSON(w, 200, map[string]any{"ok": true, "banned": false})
@@ -36,10 +56,53 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r.Context())
 	defer cancel()
 	ip := clientIPFromRequest(r)
-	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, p.WebRTC)
-	// 环境自洽性差的指纹：作弊/改机工具常留此类矛盾（第三层·环境核验）
-	if !p.Coherent {
-		s.Guard.Event(ctx, ip, "env-incoherent", "UA 与 platform 不一致", 30, false)
+
+	// ---- 第三层：服务端环境核验（不依赖客户端自觉上报）----
+	flags := p.Flags
+	hasFlag := func(k string) bool {
+		for _, f := range flags {
+			if f == k {
+				return true
+			}
+		}
+		return false
+	}
+	// 旧客户端（无 flags 字段，nil 切片）只发 coherent 布尔：不一致时补等价命中项。
+	// 注意区分：新客户端会显式发 "flags": []，反序列化为非 nil 空切片。
+	if p.Flags == nil && !p.Coherent && !hasFlag("ua-platform-mismatch") {
+		flags = append(flags, "ua-platform-mismatch")
+	}
+	// Client Hints 比对：Sec-CH-UA-Platform 与 UA 声明的系统矛盾 = 伪造 header 的爬虫
+	if ch := r.Header.Get("Sec-CH-UA-Platform"); ch != "" {
+		ua := strings.ToLower(r.UserAgent())
+		chl := strings.ToLower(strings.Trim(ch, `"`))
+		saysWin, saysMac := strings.Contains(ua, "windows"), strings.Contains(ua, "mac os")
+		saysLinux := strings.Contains(ua, "linux") && !strings.Contains(ua, "android")
+		saysAndroid := strings.Contains(ua, "android")
+		switch {
+		case strings.Contains(chl, "windows") && !saysWin,
+			strings.Contains(chl, "mac") && !saysMac,
+			strings.Contains(chl, "linux") && !saysLinux && !saysAndroid,
+			strings.Contains(chl, "android") && !saysAndroid:
+			if !hasFlag("ua-ch-mismatch") {
+				flags = append(flags, "ua-ch-mismatch")
+			}
+		}
+	}
+	// UA 直查无头标记（客户端可能跑在旧 JS 里没检出来）
+	if strings.Contains(strings.ToLower(r.UserAgent()), "headless") && !hasFlag("headless-ua") {
+		flags = append(flags, "headless-ua")
+	}
+
+	meta := FingerprintMeta{Webrtc: p.WebRTC, Components: p.Components, Flags: flags}
+	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, meta)
+	// 每个命中项记违规事件（积分见 flagScore）
+	for _, f := range flags {
+		fs, ok := flagScore[f]
+		if !ok {
+			fs = flagScore["env-incoherent"]
+		}
+		s.Guard.Event(ctx, ip, "env-flag", "环境核验命中 "+f, fs.score, fs.severe)
 	}
 	writeJSON(w, 200, out)
 }

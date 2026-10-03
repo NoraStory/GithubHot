@@ -117,6 +117,8 @@ func migrate(db *sql.DB) error {
 	// 旧库增量迁移：列已存在时报错属预期，忽略
 	_, _ = db.Exec("ALTER TABLE digests ADD COLUMN kind TEXT NOT NULL DEFAULT 'daily'")
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN webrtc TEXT NOT NULL DEFAULT '[]'")
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN components TEXT NOT NULL DEFAULT '{}'")
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN flags TEXT NOT NULL DEFAULT '[]'")
 	_, _ = db.Exec("ALTER TABLE stories ADD COLUMN overview TEXT NOT NULL DEFAULT ''")
 	_, _ = db.Exec("ALTER TABLE projects ADD COLUMN description_zh TEXT NOT NULL DEFAULT ''")
 	_, _ = db.Exec("ALTER TABLE sources ADD COLUMN current_interval_minutes INTEGER NOT NULL DEFAULT 0")

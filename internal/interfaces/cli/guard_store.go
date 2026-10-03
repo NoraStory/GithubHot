@@ -55,8 +55,8 @@ func (g guardStore) ListIPEventsSince(ctx context.Context, limit int, since time
 	return out, nil
 }
 
-func (g guardStore) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string) ([]string, error) {
-	return g.db.UpsertFingerprint(ctx, fp, ip, ua, webrtc)
+func (g guardStore) UpsertFingerprint(ctx context.Context, fp, ip, ua string, meta httpapi.FingerprintMeta) ([]string, error) {
+	return g.db.UpsertFingerprint(ctx, fp, ip, ua, meta.Webrtc, meta.Components, meta.Flags)
 }
 
 func (g guardStore) ListFingerprintsByIP(ctx context.Context, ip string, limit int) ([]httpapi.FingerprintDTO, error) {
@@ -70,7 +70,7 @@ func (g guardStore) ListFingerprintsByIP(ctx context.Context, ip string, limit i
 	out := make([]httpapi.FingerprintDTO, 0, len(rows))
 	for _, f := range rows {
 		out = append(out, httpapi.FingerprintDTO{
-			Fingerprint: f.Fingerprint, IPs: f.IPs, Webrtc: f.Webrtc, UA: f.UA,
+			Fingerprint: f.Fingerprint, IPs: f.IPs, Webrtc: f.Webrtc, Components: f.Components, Flags: f.Flags, UA: f.UA,
 			FirstSeen: f.FirstSeen, LastSeen: f.LastSeen, Hits: f.Hits,
 		})
 	}
@@ -85,7 +85,7 @@ func (g guardStore) ListFingerprints(ctx context.Context, limit int) ([]httpapi.
 	out := make([]httpapi.FingerprintDTO, 0, len(rows))
 	for _, f := range rows {
 		out = append(out, httpapi.FingerprintDTO{
-			Fingerprint: f.Fingerprint, IPs: f.IPs, Webrtc: f.Webrtc, UA: f.UA,
+			Fingerprint: f.Fingerprint, IPs: f.IPs, Webrtc: f.Webrtc, Components: f.Components, Flags: f.Flags, UA: f.UA,
 			FirstSeen: f.FirstSeen, LastSeen: f.LastSeen, Hits: f.Hits,
 		})
 	}

@@ -85,6 +85,8 @@ type FingerprintRow struct {
 	Fingerprint string
 	IPs         []string
 	Webrtc      []string // WebRTC 探测到的真实 IP（host/srflx 候选）
+	Components  map[string]string
+	Flags       []string // 第三层环境核验命中项（如 headless-ua）
 	UA          string
 	FirstSeen   time.Time
 	LastSeen    time.Time
@@ -92,16 +94,19 @@ type FingerprintRow struct {
 }
 
 // UpsertFingerprint 登记一次指纹上报；返回该指纹历史上出现过的所有 IP。
-func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string) ([]string, error) {
+// meta：WebRTC IP、分量明细（components）、环境核验命中（flags，做并集累计）。
+func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string, components map[string]string, flags []string) ([]string, error) {
 	row := db.QueryRowContext(ctx,
-		"SELECT ips, ua, hits, webrtc FROM ip_fingerprints WHERE fp = ?", fp)
-	var ipsJSON, oldUA, rtcJSON string
+		"SELECT ips, ua, hits, webrtc, flags FROM ip_fingerprints WHERE fp = ?", fp)
+	var ipsJSON, oldUA, rtcJSON, flagsJSON string
 	var hits int
-	err := row.Scan(&ipsJSON, &oldUA, &hits, &rtcJSON)
+	err := row.Scan(&ipsJSON, &oldUA, &hits, &rtcJSON, &flagsJSON)
 	now := time.Now().UTC().Format(time.RFC3339)
 	ips := []string{}
 	rtc := []string{}
+	knownFlags := []string{}
 	_ = json.Unmarshal([]byte(rtcJSON), &rtc)
+	_ = json.Unmarshal([]byte(flagsJSON), &knownFlags)
 	for _, w := range webrtc {
 		known := false
 		for _, x := range rtc {
@@ -114,13 +119,27 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 			rtc = append(rtc, w)
 		}
 	}
+	for _, f := range flags {
+		known := false
+		for _, x := range knownFlags {
+			if x == f {
+				known = true
+				break
+			}
+		}
+		if !known {
+			knownFlags = append(knownFlags, f)
+		}
+	}
 	rb, _ := json.Marshal(rtc)
+	fb, _ := json.Marshal(knownFlags)
+	cb, _ := json.Marshal(components)
 	if err == sql.ErrNoRows {
 		ips = []string{ip}
 		b, _ := json.Marshal(ips)
 		_, err = db.ExecContext(ctx,
-			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits, webrtc) VALUES (?, ?, ?, ?, ?, 1, ?)",
-			fp, string(b), ua, now, now, string(rb))
+			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits, webrtc, components, flags) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+			fp, string(b), ua, now, now, string(rb), string(cb), string(fb))
 		if err != nil {
 			return nil, fmt.Errorf("写入指纹: %w", err)
 		}
@@ -145,25 +164,28 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 		ua = oldUA
 	}
 	_, err = db.ExecContext(ctx,
-		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1, webrtc = ? WHERE fp = ?",
-		string(b), ua, now, string(rb), fp)
+		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1, webrtc = ?, components = ?, flags = ? WHERE fp = ?",
+		string(b), ua, now, string(rb), string(cb), string(fb), fp)
 	if err != nil {
 		return nil, fmt.Errorf("更新指纹: %w", err)
 	}
 	return ips, nil
 }
 
-// scanFingerprintRows 统一扫描指纹查询结果（含 webrtc 列）。
+// scanFingerprintRows 统一扫描指纹查询结果（含 webrtc/components/flags 列）。
 func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 	out := []FingerprintRow{}
 	for rows.Next() {
 		var f FingerprintRow
-		var ipsJSON, rtcJSON, first, last string
-		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &rtcJSON, &f.UA, &first, &last, &f.Hits); err != nil {
+		var ipsJSON, rtcJSON, compJSON, flagsJSON, first, last string
+		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &rtcJSON, &compJSON, &flagsJSON, &f.UA, &first, &last, &f.Hits); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(ipsJSON), &f.IPs)
 		_ = json.Unmarshal([]byte(rtcJSON), &f.Webrtc)
+		f.Components = map[string]string{}
+		_ = json.Unmarshal([]byte(compJSON), &f.Components)
+		_ = json.Unmarshal([]byte(flagsJSON), &f.Flags)
 		f.FirstSeen, _ = time.Parse(time.RFC3339, first)
 		f.LastSeen, _ = time.Parse(time.RFC3339, last)
 		out = append(out, f)
@@ -171,13 +193,16 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 	return out, rows.Err()
 }
 
+// fingerprintCols 指纹查询的统一列清单。
+const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits"
+
 // ListFingerprints 最近 limit 个活跃指纹。
 func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	rows, err := db.QueryContext(ctx,
-		"SELECT fp, ips, webrtc, ua, first_seen, last_seen, hits FROM ip_fingerprints ORDER BY last_seen DESC LIMIT ?", limit)
+		"SELECT "+fingerprintCols+" FROM ip_fingerprints ORDER BY last_seen DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, fmt.Errorf("查询指纹: %w", err)
 	}
@@ -188,7 +213,7 @@ func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow
 // ListFingerprintsByIP 反查：IPS JSON 中包含该 IP 的指纹（IP 下钻用）。
 func (db *DB) ListFingerprintsByIP(ctx context.Context, ip string) ([]FingerprintRow, error) {
 	rows, err := db.QueryContext(ctx,
-		"SELECT fp, ips, webrtc, ua, first_seen, last_seen, hits FROM ip_fingerprints WHERE ips LIKE ? ORDER BY last_seen DESC LIMIT 50",
+		"SELECT "+fingerprintCols+" FROM ip_fingerprints WHERE ips LIKE ? ORDER BY last_seen DESC LIMIT 50",
 		"%\""+ip+"\"%")
 	if err != nil {
 		return nil, fmt.Errorf("反查指纹: %w", err)
