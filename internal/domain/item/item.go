@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/NoraStory/GithubHot/internal/domain/shared"
 )
 
 // Stage 精选流程阶段。
@@ -44,6 +46,7 @@ type Item struct {
 	Title       string
 	Summary     string
 	Content     string
+	ContentZh   string // 正文/摘要的忠实中文翻译（本地存档，LLM 产出）
 	Author      string
 	PublishedAt time.Time
 	FetchedAt   time.Time
@@ -98,9 +101,9 @@ func (i *Item) TextForLLM(maxContent int) string {
 		b.WriteString("\n摘要: ")
 		b.WriteString(i.Summary)
 	}
-	if len(i.Content) > maxContent {
+	if i.Content != "" {
 		b.WriteString("\n正文: ")
-		b.WriteString(i.Content[:maxContent])
+		b.WriteString(shared.Truncate(i.Content, maxContent))
 	}
 	return b.String()
 }

@@ -31,11 +31,15 @@ func (r *DigestRepo) Save(ctx context.Context, d digest.Digest) error {
 	return err
 }
 
-// FindByDate 按期号取日报。
+// FindByDate 按期号取日报；不存在返回 (nil, nil)（与 Latest 一致，便于接口层 404）。
 func (r *DigestRepo) FindByDate(ctx context.Context, date string) (*digest.Digest, error) {
 	row := r.db.QueryRowContext(ctx,
 		"SELECT date, COALESCE(kind, 'daily'), markdown, stats, created_at FROM digests WHERE date = ?", date)
-	return scanDigest(row)
+	d, err := scanDigest(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return d, err
 }
 
 // Latest 取某类最新一期。

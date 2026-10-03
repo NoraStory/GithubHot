@@ -2,7 +2,8 @@
 // 自定义音乐播放器（参考站 #custom-music-player-placeholder 同构，改造成 Vue3 组件）
 // 原版 music-index.js 直连第三方 Meting API；这里走本服务 /api/v1/music/playlist 代理，
 // DOM 类名与原版前缀保持一致（anzhiyuCustomPlayer-*），样式块也从原版注入样式逐条移植。
-import { ref, computed, onMounted } from 'vue'
+// 唱片占位：不用纯色底，跑"随便逛逛"同款人群动画（people.webp 7×15 精灵图的迷你版）。
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 
 const playlist = ref([])
 const index = ref(0)
@@ -10,9 +11,11 @@ const rotating = ref(false)
 const status = ref('正在加载...')
 const failed = ref(false)
 const audioEl = ref(null)
+const crowdEl = ref(null)
 
 const defaultCover = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 const current = computed(() => playlist.value[index.value] || null)
+const hasCover = computed(() => !!(current.value && current.value.pic))
 const cover = computed(() => {
   const t = current.value
   if (!t || !t.pic) return defaultCover
@@ -44,6 +47,7 @@ function onPlay() { rotating.value = true }
 function onPause() { rotating.value = false }
 
 onMounted(async () => {
+  if (!hasCover.value) crowdStop = startCrowd(crowdEl.value)
   const cfg = (window.GLOBAL_CONFIG && window.GLOBAL_CONFIG.musicPlayer) || {}
   const id = /^\d+$/.test(String(cfg.playlistId)) ? String(cfg.playlistId) : '652135520'
   const server = ['netease', 'tencent', 'kugou', 'baidu'].includes(String(cfg.server)) ? String(cfg.server) : 'netease'
@@ -94,12 +98,104 @@ async function retry() {
     failed.value = true
   }
 }
+
+// ===== 唱片占位：随便逛逛同款人群动画（people_2.js 的迷你独立版）=====
+// people_2.js 只驱动全站唯一 #peoplecanvas；这里用同一张精灵图在唱片位
+// 跑一个简化版：随机小人左右穿行。有真实封面时停止并盖住画布。
+let crowdStop = null
+
+watch(hasCover, (v) => {
+  if (v) {
+    if (crowdStop) { crowdStop(); crowdStop = null }
+  } else if (!crowdStop) {
+    crowdStop = startCrowd(crowdEl.value)
+  }
+})
+
+function startCrowd(canvas) {
+  if (!canvas) return () => {}
+  const ctx = canvas.getContext('2d')
+  const COLS = 7, ROWS = 15
+  const dpr = Math.min(window.devicePixelRatio || 1, 2)
+  const img = new Image()
+  let W = 0, H = 0, fw = 0, fh = 0, raf = 0
+  let alive = true
+  const peeps = []
+
+  const resize = () => {
+    const r = canvas.parentElement.getBoundingClientRect()
+    W = r.width; H = r.height
+    canvas.width = W * dpr
+    canvas.height = H * dpr
+  }
+  const spawn = () => {
+    if (!fw) return
+    const h = H * (0.32 + Math.random() * 0.26)
+    const w = h * (fw / fh)
+    const dir = Math.random() < 0.5 ? 1 : -1
+    peeps.push({
+      sx: (Math.random() * COLS | 0) * fw,
+      sy: (Math.random() * ROWS | 0) * fh,
+      x: dir > 0 ? -w : W + w * 0.2,
+      y: H - h * (0.92 + Math.random() * 0.3) + h * 0.3,
+      w, h, dir,
+      v: 0.28 + Math.random() * 0.5,
+    })
+  }
+  const tick = () => {
+    if (!alive) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.save()
+    ctx.scale(dpr, dpr)
+    for (let i = peeps.length - 1; i >= 0; i--) {
+      const p = peeps[i]
+      p.x += p.v * p.dir
+      if ((p.dir > 0 && p.x > W + p.w) || (p.dir < 0 && p.x < -p.w)) {
+        peeps.splice(i, 1)
+        spawn()
+        continue
+      }
+      ctx.save()
+      if (p.dir < 0) {
+        ctx.translate(p.x + p.w / 2, 0)
+        ctx.scale(-1, 1)
+        ctx.translate(-(p.x + p.w / 2), 0)
+      }
+      ctx.drawImage(img, p.sx, p.sy, fw, fh, p.x, p.y, p.w, p.h)
+      ctx.restore()
+    }
+    ctx.restore()
+    raf = requestAnimationFrame(tick)
+  }
+  img.onload = () => {
+    fw = img.width / COLS
+    fh = img.height / ROWS
+    resize()
+    for (let i = 0; i < 8; i++) {
+      spawn()
+      // 初始种群直接散布在画布内，避免开场空盘等小人走进来
+      const p = peeps[peeps.length - 1]
+      if (p) p.x = Math.random() * (W + p.w) - p.w
+    }
+    tick()
+  }
+  img.src = '/anzhiyu/img/people.webp'
+  window.addEventListener('resize', resize)
+  return () => {
+    alive = false
+    cancelAnimationFrame(raf)
+    window.removeEventListener('resize', resize)
+  }
+}
+
+onBeforeUnmount(() => { if (crowdStop) crowdStop() })
 </script>
 
 <template>
   <div class="anzhiyuCustomPlayer-player-container-v3">
     <div class="anzhiyuCustomPlayer-left-column">
       <div id="anzhiyuCustomPlayer-cover-art-wrapper" class="anzhiyuCustomPlayer-cover-art-wrapper">
+        <canvas ref="crowdEl" class="disc-crowd" aria-hidden="true"></canvas>
         <img id="anzhiyuCustomPlayer-cover-art-img" :class="{ rotating }" :src="cover" alt="专辑封面">
       </div>
       <div class="anzhiyuCustomPlayer-song-info-left">
@@ -133,23 +229,24 @@ async function retry() {
 
 <style>
 /* 原版 music-index.js 运行时注入的样式块（styles-v3）逐条移植 */
-.anzhiyuCustomPlayer-player-container-v3 { display: flex; height: 100%; box-sizing: border-box; padding: 15px; background-color: var(--anzhiyu-card-bg, white); box-shadow: var(--anzhiyu-shadow-border, 0 0 10px rgba(0,0,0,0.1)); border-radius: var(--anzhiyu-border-radius, 12px); color: var(--anzhiyu-fontcolor, black); gap: 20px; }
+.anzhiyuCustomPlayer-player-container-v3 { display: flex; height: 100%; box-sizing: border-box; padding: 15px; background-color: var(--anzhiyu-card-bg, white); box-shadow: var(--anzhiyu-shadow-border, 0 0 10px rgba(0,0,0,0.1)); border-radius: var(--anzhiyu-border-radius, 12px); color: var(--anzhiyu-fontcolor, black); gap: 20px; position: relative; z-index: 1; }
 .anzhiyuCustomPlayer-left-column { flex: 0 0 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.anzhiyuCustomPlayer-cover-art-wrapper { width: 170px; height: 170px; border-radius: 50%; overflow: hidden; box-shadow: 0 5px 15px rgba(0,0,0,0.25); margin-bottom: 15px; background-color: #e0e0e0; }
-#anzhiyuCustomPlayer-cover-art-img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.3s ease-out; }
+.anzhiyuCustomPlayer-cover-art-wrapper { position: relative; width: 170px; height: 170px; border-radius: 50%; overflow: hidden; box-shadow: 0 5px 15px rgba(0,0,0,0.25); margin-bottom: 15px; background: var(--anzhiyu-card-bg, #fff); }
+.anzhiyuCustomPlayer-cover-art-wrapper .disc-crowd { position: absolute; inset: 0; width: 100%; height: 100%; }
+#anzhiyuCustomPlayer-cover-art-img { position: relative; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.3s ease-out; }
 #anzhiyuCustomPlayer-cover-art-img.rotating { animation: anzhiyuCustomPlayer-rotate 15s linear infinite; }
 @keyframes anzhiyuCustomPlayer-rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .anzhiyuCustomPlayer-song-info-left { text-align: center; width: 100%; padding: 0 5px; }
 #anzhiyuCustomPlayer-song-title { font-size: 1.1em; margin: 0 0 4px 0; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--anzhiyu-fontcolor, black); display: block; max-width: 150px; }
 #anzhiyuCustomPlayer-artist-name { font-size: 0.85em; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--anzhiyu-second-fontcolor, gray); display: block; max-width: 150px; }
 .anzhiyuCustomPlayer-right-column { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.anzhiyuCustomPlayer-playlist-container { height: 200px; overflow-y: auto; border: 1px solid var(--anzhiyu-gray-c, #ddd); padding: 5px; border-radius: var(--anzhiyu-border-radius-small, 8px); background-color: var(--anzhiyu-background, #f9f9f9); margin-bottom: 10px; }
+.anzhiyuCustomPlayer-playlist-container { height: 200px; overflow-y: auto; border: 1px solid var(--anzhiyu-card-border, #ddd); padding: 5px; border-radius: var(--anzhiyu-border-radius-small, 8px); background-color: var(--anzhiyu-card-bg, #fff); margin-bottom: 10px; }
 .anzhiyuCustomPlayer-playlist-item { display: flex; align-items: center; padding: 6px 8px; margin-bottom: 3px; cursor: pointer; border-radius: 6px; transition: background-color 0.2s ease-in-out; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .anzhiyuCustomPlayer-playlist-item:hover { background-color: var(--anzhiyu-gray-a, #eee); }
 .anzhiyuCustomPlayer-playlist-item-active { background-color: var(--anzhiyu-theme-op, rgba(255, 102, 102, 0.15)); color: var(--anzhiyu-theme, #ff6666); font-weight: bold; }
 .anzhiyuCustomPlayer-playlist-item-number { font-size: 0.8em; color: var(--anzhiyu-third-fontcolor, #999); margin-right: 8px; min-width: 20px; text-align: right; }
 .anzhiyuCustomPlayer-playlist-item-active .anzhiyuCustomPlayer-playlist-item-number { color: var(--anzhiyu-theme, #ff6666); }
-.anzhiyuCustomPlayer-playlist-item-info { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; color: var(--anzhiyu-second-fontcolor, #555); }
+.anzhiyuCustomPlayer-playlist-item-info { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; color: var(--anzhiyu-fontcolor, #333); }
 .anzhiyuCustomPlayer-playlist-item-active .anzhiyuCustomPlayer-playlist-item-info { color: var(--anzhiyu-theme, #ff6666); }
 .anzhiyuCustomPlayer-controls-area { margin-top: auto; }
 .anzhiyuCustomPlayer-retry { margin-left: auto; background: var(--anzhiyu-theme, #eabcbd); color: #fff; border: none; border-radius: 12px; padding: 2px 12px; font-size: .8rem; cursor: pointer; }

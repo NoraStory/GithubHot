@@ -238,43 +238,45 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
 
     <div class="layout" id="content-inner">
       <div class="recent-posts" id="recent-posts">
-        <div id="categoryBar">
-          <div class="category-bar" id="category-bar">
-            <div id="catalog-bar">
-              <div id="catalog-list">
-                <div v-for="k in [{ v: 'all', l: '全部' }, { v: 'daily', l: '日报' }, { v: 'weekly', l: '周报' }, { v: 'monthly', l: '月报' }]" :key="k.v" class="catalog-list-item" :id="k.v" :class="{ selected: filter === k.v }">
-                  <a href="javascript:void(0)" @click="filter = k.v">{{ k.l }}</a>
+        <!-- 统一面板：分类筛选条 + 三栏同容器，一张卡片（原来筛选条与三栏各自独立、视觉零散） -->
+        <div class="home-panel">
+          <div id="categoryBar">
+            <div class="category-bar" id="category-bar">
+              <div id="catalog-bar">
+                <div id="catalog-list">
+                  <div v-for="k in [{ v: 'all', l: '全部' }, { v: 'daily', l: '日报' }, { v: 'weekly', l: '周报' }, { v: 'monthly', l: '月报' }]" :key="k.v" class="catalog-list-item" :id="k.v" :class="{ selected: filter === k.v }">
+                    <a href="javascript:void(0)" @click="filter = k.v">{{ k.l }}</a>
+                  </div>
                 </div>
+                <a class="catalog-more" href="javascript:void(0)" @click="$router.push('/categories')">更多</a>
               </div>
-              <a class="catalog-more" href="javascript:void(0)" @click="$router.push('/categories')">更多</a>
             </div>
           </div>
-        </div>
 
-        <div v-if="loading" class="loading">加载中 </div>
+          <div v-if="loading" class="loading">加载中 </div>
 
-        <!-- 三栏：期刊 / GitHub 热点 / AI 热点 -->
-        <div class="home-columns">
-          <!-- 栏一：期刊（受分类条筛选） -->
-          <section class="home-col">
-            <div class="home-col-head">
-              <span class="home-col-title"><i class="anzhiyufont anzhiyu-icon-book"></i> 期刊报告</span>
-              <router-link class="home-col-more" to="/digests">全部期刊 ›</router-link>
-            </div>
-            <div v-if="!filteredDigests.length" class="empty">暂无期刊</div>
-            <router-link v-for="d in filteredDigests" :key="d.date" class="col-item digest-item" :to="`/digest/${d.date}`" :title="d.date">
-              <img class="col-item-cover" :src="digestCover(d.date)" alt="cover">
-              <div class="col-item-body">
-                <div class="col-item-kind">{{ d.kind === 'weekly' ? '周报' : d.kind === 'monthly' ? '月报' : '日报' }}</div>
-                <div class="col-item-title">{{ d.date }} 双热点报告</div>
-                <div class="col-item-meta">
-                  <span>🔥 {{ d.stats ? d.stats.githubItems : 0 }} 项目</span>
-                  <span>🤖 {{ d.stats ? d.stats.newsItems : 0 }} 资讯</span>
-                  <span class="col-item-date">{{ d.date }}</span>
-                </div>
+          <!-- 三栏：期刊 / GitHub 热点 / AI 热点 -->
+          <div class="home-columns">
+            <!-- 栏一：期刊（受分类条筛选） -->
+            <section class="home-col">
+              <div class="home-col-head">
+                <span class="home-col-title"><i class="anzhiyufont anzhiyu-icon-book"></i> 期刊报告</span>
+                <router-link class="home-col-more" to="/digests">全部期刊 ›</router-link>
               </div>
-            </router-link>
-          </section>
+              <div v-if="!filteredDigests.length" class="empty">暂无期刊</div>
+              <router-link v-for="d in filteredDigests" :key="d.date" class="col-item digest-item" :to="`/digest/${d.date}`" :title="d.date">
+                <img class="col-item-cover" :src="digestCover(d.date)" alt="cover">
+                <div class="col-item-body">
+                  <div class="col-item-kind">{{ d.kind === 'weekly' ? '周报' : d.kind === 'monthly' ? '月报' : '日报' }}</div>
+                  <div class="col-item-title">{{ d.date }} 双热点报告</div>
+                  <div class="col-item-meta">
+                    <span>🔥 {{ d.stats ? d.stats.githubItems : 0 }} 项目</span>
+                    <span>🤖 {{ d.stats ? d.stats.newsItems : 0 }} 资讯</span>
+                    <span class="col-item-date">{{ d.date }}</span>
+                  </div>
+                </div>
+              </router-link>
+            </section>
 
           <!-- 栏二：GitHub 热点榜 -->
           <section class="home-col">
@@ -316,6 +318,7 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
               </div>
             </router-link>
           </section>
+          </div>
         </div>
       </div>
 
@@ -385,10 +388,25 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
 </template>
 
 <style scoped>
+/* ===== 统一面板：筛选条 + 三栏同容器 ===== */
+.home-panel { background: var(--anzhiyu-maskbg); border: 1px solid var(--anzhiyu-card-border); border-radius: 14px; padding: 4px 16px 14px; box-shadow: var(--card-box-shadow); }
+/* 面板内筛选条不再单独成卡：融为面板头部 */
+.home-panel #categoryBar,
+.home-panel #category-bar { background: transparent !important; border: none !important; box-shadow: none !important; }
+.home-panel #categoryBar { padding: 6px 0; border-bottom: 1px dashed var(--anzhiyu-card-border) !important; border-radius: 0; margin-bottom: 4px; }
+
 /* ===== 首页三栏：期刊 / GitHub 热点 / AI 热点 ===== */
-.home-columns { width: 100%; display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 16px; align-items: start; }
-@media (max-width: 1200px) { .home-columns { grid-template-columns: 1fr; } }
-.home-col { background: var(--anzhiyu-maskbg); border: 1px solid var(--anzhiyu-card-border); border-radius: 14px; padding: 14px 16px 10px; }
+/* minmax(0,…)：fr 轨道默认最小宽度是 min-content，长标题会把第三栏撑出容器、
+   盖到右侧边栏下面（AI 热点栏被头像卡片遮住） */
+.home-columns { width: 100%; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0; align-items: stretch; }
+/* 榜单行的内容比卡片矮时底部留白——行弹性均分剩余空间，三栏都撑满 */
+.home-col { min-width: 0; display: flex; flex-direction: column; padding: 12px 16px 6px; }
+.home-col + .home-col { border-left: 1px dashed var(--anzhiyu-card-border); }
+.home-col .rank-item { flex: 1 0 auto; }
+@media (max-width: 1200px) {
+  .home-columns { grid-template-columns: 1fr; }
+  .home-col + .home-col { border-left: none; border-top: 1px dashed var(--anzhiyu-card-border); }
+}
 .home-col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px dashed var(--anzhiyu-card-border); }
 .home-col-title { font-weight: 700; font-size: 1rem; color: var(--anzhiyu-fontcolor); }
 .home-col-title i { color: var(--anzhiyu-hover); margin-right: 2px; }

@@ -49,7 +49,7 @@ async function test(id) {
   msg.value = `试抓 ${id} …`
   try {
     const d = await api.post('/api/v1/admin/sources/test', {
-      id, name: s.name, kind: s.kind, tier: s.tier, url: (s.config && s.config.url) || ''
+      id, name: s.name, kind: s.kind, tier: s.tier, url: (s.config && s.config.url) || '', config: s.config || {}
     })
     msg.value = d.ok
       ? `试抓成功，共 ${d.count} 条，预览: ${(d.preview || []).map((p) => p.title).join(' / ')}`

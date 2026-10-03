@@ -76,15 +76,19 @@ func BuildHotView(ctx context.Context, d Deps, kind digest.Kind) (HotView, error
 		if len(s.Projects) == 0 {
 			continue
 		}
-		newsRow := view.News[storyIndexByID(view.News, s.ID)]
+		idx, ok := storyIndexByID(view.News, s.ID)
+		if !ok {
+			continue // 事件不在榜单内（理论不发生，防御兜底）
+		}
+		newsRow := view.News[idx]
 		for _, fn := range s.Projects {
-			for _, row := range board {
+			for bi, row := range board {
 				if row.Project.FullName != fn {
 					continue
 				}
 				view.Fusion = append(view.Fusion, FusionRow{
 					News:    newsRow,
-					Project: projectRowOf(row, now, 0),
+					Project: projectRowOf(row, now, bi+1),
 				})
 			}
 		}
@@ -93,13 +97,13 @@ func BuildHotView(ctx context.Context, d Deps, kind digest.Kind) (HotView, error
 	return view, nil
 }
 
-func storyIndexByID(rows []StoryRow, id string) int {
+func storyIndexByID(rows []StoryRow, id string) (int, bool) {
 	for i, r := range rows {
 		if r.StoryID == id {
-			return i
+			return i, true
 		}
 	}
-	return 0
+	return 0, false
 }
 
 func projectRowOf(row ProjectBoardRow, now time.Time, rank int) ProjectRow {

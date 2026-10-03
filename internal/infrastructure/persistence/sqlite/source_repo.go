@@ -25,7 +25,7 @@ func (r *SourceRepo) Save(ctx context.Context, s source.Source) error {
 		lastFetched = rfc(*s.LastFetchedAt)
 	}
 	_, err := r.db.ExecContext(ctx,
-		"INSERT INTO sources (id, name, kind, config, tier, tags, interval_minutes, enabled, created_at, last_fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, kind = excluded.kind, config = excluded.config, tier = excluded.tier, tags = excluded.tags, interval_minutes = excluded.interval_minutes, enabled = excluded.enabled, last_fetched_at = excluded.last_fetched_at",
+		"INSERT INTO sources (id, name, kind, config, tier, tags, interval_minutes, enabled, created_at, last_fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, kind = excluded.kind, config = excluded.config, tier = excluded.tier, tags = excluded.tags, interval_minutes = excluded.interval_minutes, enabled = excluded.enabled, last_fetched_at = CASE WHEN excluded.last_fetched_at != '' THEN excluded.last_fetched_at ELSE sources.last_fetched_at END",
 		s.ID, s.Name, string(s.Kind), string(cfg), string(s.Tier), string(tags), s.IntervalMinutes, boolInt(s.Enabled), rfc(s.CreatedAt), lastFetched,
 	)
 	if err != nil {

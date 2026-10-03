@@ -104,10 +104,11 @@ func (r *ItemRepo) FindByIDs(ctx context.Context, ids []string) ([]item.Item, er
 }
 
 // Search 在已写作条目中按关键词检索（中文标题/摘要/原标题 LIKE 匹配）。
+// % _ 通配符转义：用户输入的 % 不应匹配一切。
 func (r *ItemRepo) Search(ctx context.Context, q string, limit int) ([]item.Item, error) {
-	pattern := "%" + q + "%"
+	pattern := "%" + escapeLike(q) + "%"
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT "+itemCols+" FROM items WHERE state = 'written' AND (title_zh LIKE ? OR summary_zh LIKE ? OR title LIKE ?) ORDER BY published_at DESC LIMIT ?",
+		"SELECT "+itemCols+" FROM items WHERE state = 'written' AND (title_zh LIKE ? ESCAPE '\\' OR summary_zh LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\') ORDER BY published_at DESC LIMIT ?",
 		pattern, pattern, pattern, limit)
 	if err != nil {
 		return nil, err
@@ -116,7 +117,33 @@ func (r *ItemRepo) Search(ctx context.Context, q string, limit int) ([]item.Item
 	return scanItems(rows)
 }
 
-const itemCols = "id, source_id, source_tier, url, title, summary, content, author, published_at, fetched_at, state, accepted, reason, score_a, score_b, title_zh, summary_zh, reason_zh, tags"
+// escapeLike 转义 LIKE 模式中的通配符与转义符本身。
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
+
+// PendingContentZh 已精选（written 或已聚簇 clustered）、有原文（正文优先，否则摘要）
+// 但还没有中文译文的条目。聚簇会把 written 推进成 clustered，两者都算已精选成品。
+func (r *ItemRepo) PendingContentZh(ctx context.Context, limit int) ([]item.Item, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT "+itemCols+" FROM items WHERE state IN ('written', 'clustered') AND content_zh = '' AND (content != '' OR summary != '') ORDER BY published_at DESC LIMIT ?", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanItems(rows)
+}
+
+// SaveContentZh 写入原文的中文译文（本地存档）。
+func (r *ItemRepo) SaveContentZh(ctx context.Context, id string, zh string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE items SET content_zh = ? WHERE id = ?", zh, id)
+	return err
+}
+
+const itemCols = "id, source_id, source_tier, url, title, summary, content, content_zh, author, published_at, fetched_at, state, accepted, reason, score_a, score_b, title_zh, summary_zh, reason_zh, tags"
 
 func scanItems(rows *sql.Rows) ([]item.Item, error) {
 	var out []item.Item
@@ -125,7 +152,7 @@ func scanItems(rows *sql.Rows) ([]item.Item, error) {
 		var kindred struct{ stage, tags string }
 		var published, fetched string
 		var accepted int
-		if err := rows.Scan(&it.ID, &it.SourceID, &it.SourceTier, &it.URL, &it.Title, &it.Summary, &it.Content, &it.Author,
+		if err := rows.Scan(&it.ID, &it.SourceID, &it.SourceTier, &it.URL, &it.Title, &it.Summary, &it.Content, &it.ContentZh, &it.Author,
 			&published, &fetched, &kindred.stage, &accepted, &it.Selection.Reason,
 			&it.Selection.ScoreA, &it.Selection.ScoreB,
 			&it.Selection.TitleZh, &it.Selection.SummaryZh, &it.Selection.ReasonZh, &kindred.tags); err != nil {

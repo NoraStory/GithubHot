@@ -129,12 +129,24 @@ func RunPipeline(ctx context.Context, d Deps) (*PipelineResult, error) {
 			fmt.Printf("[pipeline] 生成事件综述 %d 篇\n", n)
 		}
 	}
+	if !budgetHit("原文翻译") {
+		setPhase("translate-content")
+		if ts, err := TranslateItemContents(ctx, d, 0); err != nil {
+			if !errors.Is(err, ErrBudgetExceeded) {
+				fmt.Printf("[pipeline] 原文翻译失败（跳过）: %v\n", err)
+			}
+		} else if ts.Translated > 0 {
+			fmt.Printf("[pipeline] 原文本地存档（AI 译文）%d 条\n", ts.Translated)
+		}
+	}
 	return finishPipeline(ctx, d, res, started)
 }
 
 // finishPipeline 排名后的收尾：视图 → 日报 → 周报/月报 → 站点。
 func finishPipeline(ctx context.Context, d Deps, res *PipelineResult, started time.Time) (*PipelineResult, error) {
 	now := d.Clock.Now()
+	// 先结算耗时再渲染日报：stats.Duration 会写进 Markdown 头部与统计 JSON
+	res.DurationSec = now.Sub(started).Seconds()
 	view, err := BuildHotView(ctx, d, digest.KindDaily)
 	if err != nil {
 		return res, fmt.Errorf("榜单视图: %w", err)
@@ -146,6 +158,7 @@ func finishPipeline(ctx context.Context, d Deps, res *PipelineResult, started ti
 		Collected: res.Collect.Inserted,
 		ModelA:    d.LLM.ModelA(),
 		ModelB:    d.LLM.ModelB(),
+		Duration:  res.DurationSec,
 	}
 	dig, err := BuildDigest(ctx, d, digest.KindDaily, now, stats)
 	if err != nil {
@@ -172,6 +185,5 @@ func finishPipeline(ctx context.Context, d Deps, res *PipelineResult, started ti
 		}
 	}
 
-	res.DurationSec = d.Clock.Now().Sub(started).Seconds()
 	return res, nil
 }

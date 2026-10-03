@@ -74,17 +74,18 @@ func DiscoverProjects(ctx context.Context, d Deps) (DiscoverStats, error) {
 			continue
 		}
 		existing, err := d.Projects.FindByFullName(ctx, r.FullName)
-		existingZh := ""
-		if existing != nil {
-			existingZh = existing.DescriptionZh
+		if err != nil {
+			// 查询出错跳过：用新建对象 UPSERT 会重置 first_seen、抹掉中文描述
+			log.Printf("[discover] 查询项目 %s 失败（跳过）: %v", r.FullName, err)
+			continue
 		}
-		if err != nil || existing == nil {
+		if existing == nil {
 			p, cerr := github.New(r.FullName, r.HTMLURL, r.Stars, now)
 			if cerr != nil {
 				continue
 			}
 			p.Description = github.NormalizeDescription(r.Description, 300)
-			p.DescriptionZh = github.NormalizeDescription(existingZh, 300)
+			p.DescriptionZh = ""
 			p.Language = r.Language
 			p.Topics = r.Topics
 			p.Forks = r.Forks

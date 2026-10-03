@@ -43,6 +43,13 @@ func DefaultSources(now time.Time) []source.Source {
 		mk("rss-the-decoder", "The Decoder", source.KindRSS, source.TierMedia, "https://the-decoder.com/feed/", "媒体"),
 		mk("rss-simon-willison", "Simon Willison", source.KindRSS, source.TierMedia, "https://simonwillison.net/atom/everything/", "个人"),
 		mk("rss-import-ai", "Import AI", source.KindRSS, source.TierMedia, "https://importai.substack.com/feed", "个人", "周刊"),
+		// 第二批（2026-10 新增，实测可用）：中文源提高同事件多源覆盖，"N 个来源"更厚
+		mk("rss-qbitai", "量子位", source.KindRSS, source.TierMedia, "https://www.qbitai.com/feed", "媒体", "中文"),
+		mk("rss-infoq-cn", "InfoQ 中文", source.KindRSS, source.TierMedia, "https://www.infoq.cn/feed", "媒体", "中文", "开发者"),
+		mk("rss-sspai", "少数派", source.KindRSS, source.TierMedia, "https://sspai.com/feed", "个人", "中文", "工具"),
+		mk("rss-wired-ai", "WIRED AI", source.KindRSS, source.TierMedia, "https://www.wired.com/feed/tag/ai/latest/rss", "媒体"),
+		mk("rss-mit-tr", "MIT Technology Review", source.KindRSS, source.TierMedia, "https://www.technologyreview.com/feed/", "媒体", "研究"),
+		mk("rss-ars-lab", "Ars Technica Lab", source.KindRSS, source.TierMedia, "https://feeds.arstechnica.com/arstechnica/technology-lab", "媒体"),
 	}
 
 	hn := source.Source{

@@ -80,6 +80,7 @@ func BuildStoryDetail(ctx context.Context, d Deps, id string) (*StoryDetailView,
 					URL: it.URL, Reason: it.Selection.Reason,
 					ScoreA: it.Selection.ScoreA, ScoreB: it.Selection.ScoreB,
 					Published: it.PublishedAt.Format("2006-01-02 15:04"),
+					ContentZh: it.ContentZh,
 				})
 			}
 		}

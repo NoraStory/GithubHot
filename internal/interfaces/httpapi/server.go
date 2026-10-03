@@ -36,6 +36,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]string{"status": "ok", "version": s.Version})
 	})
+	r.Get("/favicon.ico", s.favicon)
 	r.Get("/llms.txt", s.llmsTxt)
 		r.Get("/api/v1/site/config", s.siteConfig)
 		r.Get("/api/v1/music/playlist", s.musicPlaylist)

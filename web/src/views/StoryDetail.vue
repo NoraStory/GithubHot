@@ -29,6 +29,7 @@ function maxHot(history) {
       <div id="post-firstinfo">
         <div class="meta-firstline">
           <router-link class="post-meta-original" to="/">事件</router-link>
+          <a v-if="detail.story.url" class="post-meta-original read-origin" :href="detail.story.url" target="_blank" rel="noopener" title="原文链接，可能需翻墙">阅读原文 ↗</a>
           <span class="article-meta tags">
             <a v-for="t in detail.story.tags" :key="t" class="article-meta__tags"><span><i class="anzhiyufont anzhiyu-icon-hashtag"></i>{{ t }}</span></a>
           </span>
@@ -93,7 +94,13 @@ function maxHot(history) {
         <div v-if="!detail.members.length" class="empty">无成员条目</div>
         <div v-for="m in detail.members" :key="m.id" class="story-line fade-up">
           <a class="member-link" :href="m.url" target="_blank" rel="noopener">{{ m.titleZh || m.title }}</a>
-          <span class="desc">{{ m.sourceName }} · {{ m.published }} · 评分 {{ m.scoreA.toFixed(1) }}/{{ m.scoreB.toFixed(1) }}</span>
+          <span class="desc">{{ m.sourceName }} · {{ m.published }} · 评分 {{ m.scoreA.toFixed(1) }}/{{ m.scoreB.toFixed(1) }}
+            <a v-if="m.url" class="read-origin-mini" :href="m.url" target="_blank" rel="noopener">原文 ↗</a>
+          </span>
+          <details v-if="m.contentZh" class="member-zh">
+            <summary>📄 本地 AI 译文（原站打不开时读这份）</summary>
+            <p>{{ m.contentZh }}</p>
+          </details>
         </div>
       </div>
     </div>
@@ -117,6 +124,13 @@ function maxHot(history) {
 .member-link { font-weight: 600; color: var(--anzhiyu-fontcolor); }
 .member-link:hover { color: var(--anzhiyu-hover); }
 .desc { color: var(--anzhiyu-gray); font-size: .8rem; }
+.read-origin { background: var(--anzhiyu-main) !important; }
+.read-origin-mini { margin-left: 8px; color: var(--anzhiyu-main); }
+.read-origin-mini:hover { color: var(--anzhiyu-hover); }
+.member-zh { margin-top: 6px; border: 1px dashed var(--anzhiyu-card-border); border-radius: 8px; padding: 8px 12px; background: var(--anzhiyu-background); }
+.member-zh summary { cursor: pointer; font-size: .82rem; color: var(--anzhiyu-main); user-select: none; }
+.member-zh summary:hover { color: var(--anzhiyu-hover); }
+.member-zh p { margin: 8px 0 2px; font-size: .9rem; line-height: 1.9; color: var(--anzhiyu-secondary); white-space: pre-line; }
 @media (max-width: 768px) { .post-bg { height: 18rem; } .post-title { font-size: 1.4rem; } }
 </style>
 

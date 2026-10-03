@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/NoraStory/GithubHot/internal/application"
 )
@@ -24,7 +25,7 @@ func (Markdown) Render(_ context.Context, v application.DigestView) (string, err
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# GithubHot 双热点%s · %s\n\n", title, v.PeriodLabel)
-	fmt.Fprintf(&b, "> 生成于 %s · 模型 %s", v.Generated.Format("2006-01-02 15:04 MST"), v.Stats.ModelA)
+	fmt.Fprintf(&b, "> 生成于 %s（东八区）· 模型 %s", v.Generated.In(shanghaiLoc()).Format("2006-01-02 15:04"), v.Stats.ModelA)
 	if v.Stats.ModelB != "" && v.Stats.ModelB != v.Stats.ModelA {
 		b.WriteString(" / " + v.Stats.ModelB)
 	}
@@ -100,6 +101,15 @@ func (Markdown) Render(_ context.Context, v application.DigestView) (string, err
 	b.WriteString("---\n\n")
 	b.WriteString("*由 [GithubHot](https://github.com/NoraStory/GithubHot) 自动生成：GitHub 开源热点 × AI 资讯热点，双热度追踪。*\n")
 	return b.String(), nil
+}
+
+// shanghaiLoc 日报时间按东八区展示（与领域层期号计算口径一致）。
+func shanghaiLoc() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
 }
 
 func orDash(s string) string {

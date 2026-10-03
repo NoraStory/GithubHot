@@ -5,6 +5,7 @@ package notify
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -22,14 +23,29 @@ func (w Webhook) Notify(ctx context.Context, title, text string) error {
 	if w.URL == "" {
 		return nil
 	}
+	// json.Marshal 生成合法 JSON 字符串转义（fmt %q 的 Go 转义对控制字符不是合法 JSON）
 	var payload []byte
+	var err error
 	switch w.Format {
 	case "feishu":
-		payload = []byte(fmt.Sprintf(`{"msg_type":"text","content":{"text":%q}}`, title+"\n"+text))
+		payload, err = json.Marshal(map[string]any{
+			"msg_type": "text",
+			"content":  map[string]string{"text": title + "\n" + text},
+		})
 	case "wecom":
-		payload = []byte(fmt.Sprintf(`{"msgtype":"markdown","markdown":{"content":%q}}`, "**"+title+"**\n"+text))
+		payload, err = json.Marshal(map[string]any{
+			"msgtype":  "markdown",
+			"markdown": map[string]string{"content": "**" + title + "**\n" + text},
+		})
 	default:
-		payload = []byte(fmt.Sprintf(`{"title":%q,"text":%q,"timestamp":%q}`, title, text, time.Now().UTC().Format(time.RFC3339)))
+		payload, err = json.Marshal(map[string]string{
+			"title":     title,
+			"text":      text,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
+	}
+	if err != nil {
+		return fmt.Errorf("构造 webhook 请求体: %w", err)
 	}
 	headers := map[string]string{"Content-Type": "application/json"}
 	_, status, err := safehttp.Do(ctx, "POST", w.URL, headers, bytes.NewReader(payload))

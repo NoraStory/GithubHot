@@ -47,6 +47,9 @@ func Search(ctx context.Context, d Deps, q string, limit int) ([]SearchResult, e
 				continue
 			}
 			if containsFold(s.TitleZh, q) || containsFold(s.SummaryZh, q) {
+				if s.URL != "" {
+					seenURL[s.URL] = true // 成员条目与事件同 URL 时去重
+				}
 				out = append(out, SearchResult{
 					TitleZh: s.TitleZh, URL: s.URL, SummaryZh: s.SummaryZh,
 					Hotness: s.Hotness, Kind: "story",

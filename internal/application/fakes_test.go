@@ -166,6 +166,34 @@ func (m *memItems) FindByIDs(_ context.Context, ids []string) ([]item.Item, erro
 	return out, nil
 }
 
+func (m *memItems) PendingContentZh(_ context.Context, limit int) ([]item.Item, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []item.Item
+	for _, it := range m.m {
+		if (it.Selection.Stage == item.StageWritten || it.Selection.Stage == item.StageClustered) &&
+			it.ContentZh == "" && (it.Content != "" || it.Summary != "") {
+			out = append(out, it)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (m *memItems) SaveContentZh(_ context.Context, id string, zh string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	it, ok := m.m[id]
+	if !ok {
+		return fmt.Errorf("not found")
+	}
+	it.ContentZh = zh
+	m.m[id] = it
+	return nil
+}
+
 type memProjects struct {
 	mu   sync.Mutex
 	m    map[string]github.Project
@@ -484,6 +512,9 @@ func (f *fakeLLM) ChatJSON(_ context.Context, _, user, _ string, _ float64) (str
 
 	case strings.Contains(user, "整合成一段事件综述"): // 事件综述
 		return `{"overview":"多源报道整合的事件综述。"}`, nil
+
+	case strings.Contains(user, "忠实翻译"): // 原文本地存档翻译
+		return `{"zh":"这是原文的忠实中文译文。"}`, nil
 
 	case strings.Contains(user, "GitHub 热门项目"): // 融合链接
 		// 从提示中取第一条 story 与第一个项目

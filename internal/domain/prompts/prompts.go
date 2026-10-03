@@ -122,6 +122,21 @@ const TranslateDesc = `把下面的 GitHub 仓库英文描述翻译成简洁中�
 输出 JSON：
 {"items":[{"fullName":"owner/repo","zh":"中文描述"}]}`
 
+// TranslateContent 把资讯正文（无正文时退化为摘要）忠实翻译成中文，
+// 作为本地存档——原站打不开时也能读，Agent 抓取也有干净语料。
+const TranslateContent = `把下面这篇技术资讯的原文忠实翻译成简体中文。
+
+要求：
+1. 逐段对应翻译，保留段落结构（段落之间用换行分隔），不增删信息、不加评论。
+2. 产品名、公司名、库名、型号、版本号保留英文。
+3. 原文已是中文则原样返回。
+
+原文：
+{{CONTENT}}
+
+输出 JSON：
+{"zh":"中文译文"}`
+
 // RenderPrompt 用值替换 {{PLACEHOLDER}} 占位符。
 func RenderPrompt(tpl, placeholder, value string) string {
 	return strings.ReplaceAll(tpl, "{{"+placeholder+"}}", value)

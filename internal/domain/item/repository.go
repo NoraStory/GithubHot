@@ -21,4 +21,8 @@ type Repository interface {
 	FindByIDs(ctx context.Context, ids []string) ([]Item, error)
 	// Search 在已写作条目中按关键词检索（中文标题/摘要/原标题）。
 	Search(ctx context.Context, q string, limit int) ([]Item, error)
+	// PendingContentZh 已写作但还没有本地中文译文的条目（有正文或摘要可译）。
+	PendingContentZh(ctx context.Context, limit int) ([]Item, error)
+	// SaveContentZh 写入正文/摘要的中文译文（本地存档，幂等可重复调用）。
+	SaveContentZh(ctx context.Context, id string, zh string) error
 }

@@ -107,6 +107,7 @@ type DiagRow struct {
 	ScoreA     float64 `json:"scoreA"`
 	ScoreB     float64 `json:"scoreB"`
 	Published  string  `json:"publishedAt"`
+	ContentZh  string  `json:"contentZh,omitempty"` // 原文的本地 AI 译文（存档）
 }
 
 // DigestMeta 期号元信息。

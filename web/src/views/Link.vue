@@ -23,7 +23,7 @@ const groups = [
       { name: 'llms.txt', desc: '站点说明与端点索引', url: '/llms.txt', icon: '📄' },
       { name: 'Agent Markdown', desc: '双榜 Markdown 报告', url: '/api/v1/agent/hot.md', icon: '📝' },
       { name: 'JSON API', desc: '/api/v1/hot 三榜合一', url: '/api/v1/hot', icon: '🔗' },
-      { name: 'MCP 服务器', desc: 'githubhot mcp（stdio）', url: 'https://github.com/NoraStory/GithubHot#mcp--脚本推送--精选校准', icon: '🔌' }
+      { name: 'MCP 服务器', desc: 'githubhot mcp（stdio）', url: 'https://github.com/NoraStory/GithubHot', icon: '🔌' }
     ]
   },
   {
@@ -80,18 +80,15 @@ function goSubmit() { applyOpen.value = false; window.open('https://github.com/N
         <div v-for="g in groups" :key="g.title" class="flink">
           <h2>{{ g.title }}（{{ g.sites.length }}）</h2>
           <div class="site-card-group">
-            <div v-for="s in g.sites" :key="s.url + s.name" class="site-card fade-up">
-              <a class="img" :href="s.url" :target="s.url.startsWith('http') ? '_blank' : '_self'">
-                <span class="flink-avatar">{{ s.icon }}</span>
-              </a>
-              <a class="info" :href="s.url" :target="s.url.startsWith('http') ? '_blank' : '_self'">
-                <div class="site-card-avatar"><span class="flink-avatar">{{ s.icon }}</span></div>
-                <div class="site-card-text">
-                  <div class="site-card-name">{{ s.name }}</div>
-                  <div class="site-card-desc">{{ s.desc }}</div>
-                </div>
-              </a>
-            </div>
+            <!-- 整卡单链接，全部新窗口打开（资源均为订阅/API/外部内容，不离开当前页） -->
+            <a v-for="s in g.sites" :key="s.url + s.name" class="site-card fade-up" :href="s.url" target="_blank" rel="noopener" :title="s.name">
+              <span class="flink-avatar">{{ s.icon }}</span>
+              <span class="site-card-text">
+                <span class="site-card-name">{{ s.name }}</span>
+                <span class="site-card-desc">{{ s.desc }}</span>
+              </span>
+              <i class="anzhiyufont anzhiyu-icon-arrow-right site-card-arrow"></i>
+            </a>
           </div>
         </div>
       </div>
@@ -117,13 +114,16 @@ function goSubmit() { applyOpen.value = false; window.open('https://github.com/N
 .flink h2::before { content: '✽'; position: absolute; left: 0; color: #fb7061; animation: ccc 1.6s linear infinite; }
 @keyframes ccc { 0% { transform: rotate(0); } to { transform: rotate(-1turn); } }
 .site-card-group { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; min-width: 0; }
-.site-card { min-width: 0; background: var(--anzhiyu-card-bg); border-radius: var(--anzhiyu-radius); box-shadow: var(--card-box-shadow); overflow: hidden; transition: box-shadow .3s, transform .3s; display: block; }
-.site-card:hover { box-shadow: var(--card-hover-box-shadow); transform: translateY(-3px); }
-.site-card .img { display: flex; align-items: center; justify-content: center; height: 70px; background: var(--anzhiyu-theme-op); font-size: 2rem; }
-.flink-avatar { font-size: 2rem; }
-.site-card .info { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
-.site-card-name { font-weight: 700; font-size: .95rem; }
-.site-card-desc { color: var(--anzhiyu-gray); font-size: .8rem; }
+/* 主题 index.css 里有 .site-card-group > a { width: calc(25% - 0.5rem); height: 150px; float: left }
+   的友链卡片旧式布局，会把这里的网格卡片压塌——显式复位让网格布局生效 */
+.site-card { min-width: 0; width: auto; height: auto; float: none; display: flex; align-items: center; gap: 12px; background: var(--anzhiyu-card-bg); border: 1px solid var(--anzhiyu-card-border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--card-box-shadow); transition: box-shadow .3s, transform .3s, border-color .3s; }
+.site-card:hover { box-shadow: var(--card-hover-box-shadow); transform: translateY(-3px); border-color: var(--anzhiyu-theme); }
+.flink-avatar { display: flex; align-items: center; justify-content: center; width: 46px; height: 46px; border-radius: 12px; background: var(--anzhiyu-theme-op); font-size: 1.5rem; flex-shrink: 0; }
+.site-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.site-card-name { font-weight: 700; font-size: .95rem; color: var(--anzhiyu-fontcolor); }
+.site-card-desc { color: var(--anzhiyu-gray); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site-card-arrow { color: var(--anzhiyu-gray); font-size: .9rem; flex-shrink: 0; transition: transform .2s, color .2s; }
+.site-card:hover .site-card-arrow { color: var(--anzhiyu-hover); transform: translateX(3px); }
 
 /* 申请友链 */
 .apply-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }

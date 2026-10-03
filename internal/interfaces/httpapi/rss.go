@@ -124,10 +124,7 @@ func (s *Server) feedDigest(w http.ResponseWriter, r *http.Request) {
 			} else if kind == "monthly" {
 				label = "月报"
 			}
-			desc := dg.Markdown
-			if len(desc) > 900 {
-				desc = desc[:900] + " …"
-			}
+			desc := truncStr(dg.Markdown, 900)
 			items = append(items, rssItem{
 				Title:       fmt.Sprintf("GithubHot %s %s", label, dg.Date),
 				Link:        fmt.Sprintf("%s/api/v1/digest/%s?format=raw", s.baseURL(r), dg.Date),
