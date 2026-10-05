@@ -2,7 +2,7 @@
 
 > 交付对象：Coding Agent（自动化执行）。本文档是唯一需求来源，执行时不需要额外上下文。
 > 覆盖范围：仅安全/指纹体系。不涉及业务功能（榜单、日报、信源）。
-> 阶段划分：P0 硬伤修复 → P1 指纹浏览器识别 → P2 算法升级 → P3 TLS+JA4 → P4 平台证明与高级项。
+> 阶段划分：P0 硬伤修复 → P1 指纹浏览器识别 → P2 算法升级 → P3 TLS+JA4 → P4 平台证明与高级项 → P5 行为机器学习 → P6 图算法升级（Louvain / GNN / MIDAS）。
 
 ---
 
@@ -19,7 +19,7 @@
    - JA4（TLS 客户端指纹算法本体）BSD-3，可自由使用。
    - JA4S/H/L/X/SSH/T 等"+"系列为 FoxIO License 1.1：本项目（开源、非售卖）内部使用允许，但**禁止**将其实现代码用于商业产品转售，且需在 `NOTICE` 或 README 致谢标注。
    - CreepJS 的检测思路可参考，**禁止**复制其代码（license 不明确）。
-   - 每引入一个第三方库，落地时核对仓库 LICENSE 文件并在本文档 §9 表格中回填实际 license。
+   - 每引入一个第三方库，落地时核对仓库 LICENSE 文件并在本文档 §11 表格中回填实际 license。
 
 ---
 
@@ -365,9 +365,107 @@ for each target:
 
 ---
 
-## 8. 数据模型与 API 变更汇总
+## 8. P5 — 行为机器学习分类（3-4 天开发 + 2-4 周数据积累期）
 
-### 8.1 DDL 汇总（迁移脚本一次执行，幂等写法参照现有迁移）
+> 前置：P4-5 行为采集已上线并积累数据；P5-1 标注管道不依赖行为数据，可在 P4 期间并行开发。
+> 核心纪律：**所有 ML 分数一律先 shadow（复用 `FP_SCORE_SHADOW`），达到指标门槛且灰度 7 天假阳性 < 0.5% 后才允许计分**。规则版（P4-5 服务端规则）保留为兜底，ML 是叠加不是替换。
+
+### P5-1 标注体系与数据管道（一切模型的前提）
+
+- **DDL**：`fp_labels` 表见 §10.1 汇总（fp + label + source + confidence）。
+- **弱标签**（source=rule，每日 cron 生成刷新）：曾入三层封禁记录 → `bot`(0.7)；P1 灰度期命中 ≥2 项 `fpb_*`/`botd_*` → `bot`(0.6)；近 30 天零 flag 且有行为数据 → `human`(0.8)；其余 `uncertain`。
+- **金标签**：管理端指纹下钻页加"标注"操作（`POST /api/v1/admin/fp/label`，body `{fp, label, notes}`），source=admin、confidence=1.0，覆盖弱标签。标注操作同时给 P6 GNN 提供训练标签。
+- **导出**：`githubhot ml export --out data/ml/behavior.jsonl`，每行 `{fp, features:{...}, label, weight=confidence}`。特征清单（全部统计量，不含原始事件）：behavior 各特征（dwell/flight 均值方差、速度均值方差、曲率、jerk 方差、方向变化率、事件量）、`entropy_bits`、`stability`、`clock_skew_ppm`、灰度 flags 命中计数、会话时长、近 30 天 IP 数。
+- `data/ml/`、`data/models/`、`scripts/ml/.venv` 加入 `.gitignore`。
+
+### P5-2 Isolation Forest 无监督异常分（不需要标签，最早可上线）
+
+- 自研纯 Go（iTree 递归随机分割，~200 行，零依赖；或用 e-XpertSolutions/go-iforest，41★ 纯 Go——二选一，倾向自研以免外部依赖）。
+- 输入：P5-1 特征清单，z-score 标准化（scaler 参数随模型 JSON 存储）。
+- 调度：每日 cron（04:00，独立于 HOT_CRON）对近 7 天活跃指纹训练+打分 → 写 `ip_fingerprints.anomaly_score`。
+- 阈值：99.5 分位仅记录；99.9 分位入管理端 review 队列。**永远 shadow 不直接计分**，主要作为 P5-3/P5-4 监督模型的输入特征。
+
+### P5-3 监督模型 v1：逻辑回归（Go 原生前向）
+
+- **训练**：`scripts/ml/train_behavior.py`。Python 环境建在项目内：`scripts/ml/` 下 `python -m venv .venv`，`requirements.txt` 锁版本（scikit-learn/numpy/pandas）。**按时间切分**：前 80% 训练 / 后 20% 验证（防时间泄漏），输出 AUC 与混淆矩阵。
+- **模型文件**：`data/models/behavior_lr_v1.json`：`{version, feature_names[], mu[], sigma[], weights[], bias, metrics:{auc,fpr}, trained_at, train_size, active:true}`。
+- **Go 推理**：`internal/domain/fpmath/lr.go`——标准化 + 点积 + sigmoid，~30 行零依赖；serve 内 goroutine 监听 `ML_MODEL_DIR` 目录 mtime 热加载。
+- **输出**：`behavior_ml_score`（0-1）入 flags，shadow 纪律同 §0.7。**出 shadow 门槛：验证集 AUC ≥ 0.85 且 FPR ≤ 0.5%**。
+- **训练触发**：`githubhot ml export` → `scripts/ml/run_train.ps1`（封装 venv 激活 + 训练 + 导出），每周一次（服务器 cron / Windows 计划任务，不进 Go 进程）。
+
+### P5-4 监督模型 v2：GBDT 树模型（条件触发升级）
+
+- **触发条件**：LR 验证 AUC < 0.85，或标注样本 > 5 万。
+- **训练**：LightGBM（追加进 requirements）；**导出**：`scripts/ml/export_lgbm_json.py` 把 `booster.dump_model()` 转纯 JSON 树 `{trees:[{feature,threshold,left,right,leaf_value}...]}`。
+- **Go 推理**：`internal/domain/fpmath/treemodel.go`——JSON 树遍历求和，~120 行零依赖；与 LR 共存时按模型文件 `active` 标记取生效版本。
+- **红线**：禁止引入 onnxruntime（CGO，破坏纯 Go 单二进制）；禁止 Python 进入运行时。
+
+### P5-5 持续认证（可选，P5-3 验收后评估）
+
+- 每指纹维护行为模板（历史特征均值 μ、对角协方差 Σ）；新会话算马氏距离 `d²=(x-μ)ᵀΣ⁻¹(x-μ)`，超 99 分位 → 触发 ALTCHA 难度 +4 的加强挑战而非直接拒绝。
+
+### P5-6 漂移监控与评估闭环
+
+- **PSI**：每特征按周算 `Σ(Aᵢ-Eᵢ)·ln(Aᵢ/Eᵢ)`（本周分布 vs 训练分布），任一特征 PSI > 0.2 → 管理端诊断页告警并触发再训练。
+- 管理端"ML 诊断"页：当前模型版本与指标、混淆矩阵、PSI 表、shadow 命中分布直方图。
+
+### P5-7 验收
+
+1. `ml export` 输出可被 train_behavior.py 直接消费（字段对齐单测）；
+2. LR 前向 Go 实现与 Python `predict_proba` 对拍，固定权重下误差 < 1e-9；
+3. 注入 patchright 流量一周，`anomaly_score` 分布显著右移（均值差 > 2σ）；
+4. 出 shadow 前：验证集指标达标 + 灰度 7 天假阳性 < 0.5%。
+
+---
+
+## 9. P6 — 图算法升级：Louvain → GNN → MIDAS（5-6 天）
+
+> 前置：P4-4 聚类边数据积累 ≥ 2 周。本阶段把连通分量手工启发式升级为三件武器：**Louvain**（结构分层）、**GNN**（半监督节点风险）、**MIDAS**（实时涌现检测），三者与 P5 行为分正交互补。
+
+### P6-1 图快照管道
+
+- `githubhot ml export-graph --out data/ml/graph.jsonl`：节点 = fp / ip / ua 三类（带类型与节点特征：fp 节点挂 P5-1 特征向量，ip 节点挂 ASN 类型）；边 = P4-4 四类边 + 新增"时间共现边"（同 5 分钟窗口同 IP 出现）；边属性 `{type, weight, first_seen, last_seen}`；30 天窗口。
+
+### P6-2 Louvain 社区发现（gonum，纯 Go）
+
+- `go get gonum.org/v1/gonum/graph/community`（Go 科学计算标准库，纯 Go，CGO=0；落地核对该包 Louvain API 细节）。
+- 每日 cron：内存构图 → Louvain → 社区划分覆盖 `cluster_id`，记录模块度。
+- **社区风险分**：`risk = ban成员占比 × min(1, size/10)` → `fp_clusters.risk_score`；risk > 0.5 或模块度 > 0.3 的社区入 review 队列。
+- **相对连通分量的增益**：连通分量被桥接节点并成巨团；Louvain 按模块度分层，能区分"核心团伙"与"边缘关联"。
+- **验收**：单测构造"双团伙 + 单桥接节点"图，Louvain 正确切分而连通分量并为一团。
+
+### P6-3 GNN 离线训练（PyTorch Geometric，Go 零推理）
+
+- **环境**：`scripts/ml/requirements-graph.txt`（torch CPU 版 + torch_geometric），复用项目内 venv。
+- **模型优先级**：GraphSAGE（归纳式，新节点无需重训——首选）→ CARE-GNN（参考 DGFraud 762★ 实现，过滤低相似邻居、抗马甲混入）→ GCN 基线。
+- **半监督设定**：`fp_labels` 中 admin/rule 标签节点作训练标签，无标签节点参与消息传递；任务 = fp 节点二分类（bot 概率）。
+- **输出**：`githubhot ml import-gnn data/models/graph_gnn_v1.json`——每 fp 写回 `gnn_score`（bot 概率）与 64 维 `gnn_embedding`，同时写模型卡（指标/训练集规模/日期）。
+- **冷启动**：新 fp 未被上次训练覆盖 → 取其 Louvain 社区内已评估节点 gnn_score 均值兜底，下次训练覆盖。
+- **频率**：每周随 run_train.ps1 跑；图 < 1e5 节点，CPU 训练分钟级。
+- **红线**：GNN 只离线训练导出分数，Go 进程零推理、零 Python 依赖。
+
+### P6-4 MIDAS 流式边异常（实时层，抓正在发生的协同攻击）
+
+- 算法：MIDAS（WSDM 2020）——维护两张 count-min sketch（当前时间片计数 / 历史累计计数），对边 (ip→fp) 算卡方型统计量 `Σ(aᵢ-sᵢ)²/(2·sᵢ)`，σ 超限 = "突然涌现的稠密子图"。参考 Stream-AD/MIDAS（777★，C++），Go 自实现核心 ~300 行。
+- **挂载**：一层防护旁（`ipguard.go:449` 附近），每请求更新边计数，时间片 60s；`midas_score` 存内存（随一层重启丢失，可接受）。
+- **动作**：>3σ → 实时积分 +15（先 shadow，仍受 `FP_SCORE_SHADOW` 控制）；>5σ → 直接进 review 队列。
+- **验收**：模拟 20 IP × 20 fp 两个时间片内互联 → 告警命中；平稳流量一周零误报。
+
+### P6-5 管理端图可视化
+
+- `web/` 加 `d3-force`（npm 装项目内）；`GET /api/v1/admin/ipguard/graph` 返回当前图（节点/边/分数，按风险截断上限 500 节点）。
+- 集群视图升级为力导向图：节点色 = gnn_score（绿→红）、节点大小 = 度、点击下钻指纹详情、就地联动 P5-1 标注按钮。
+
+### P6-6 融合规则（正交性检查 + 接入三层）
+
+- 上线时验证 `behavior_ml_score` 与 `gnn_score` 皮尔逊相关 < 0.6（≥ 0.6 说明特征泄漏，回炉重做）。
+- 融合：两者均 > 0.8 → severe 违规（走三层积分 :349 通道）；单项超 → review 队列 + 低权计分。
+
+---
+
+## 10. 数据模型与 API 变更汇总
+
+### 10.1 DDL 汇总（迁移脚本一次执行，幂等写法参照现有迁移）
 
 ```sql
 ALTER TABLE ip_fingerprints ADD COLUMN ja4 TEXT;
@@ -404,7 +502,27 @@ ALTER TABLE ip_profiles ADD COLUMN geo_country TEXT;
 ALTER TABLE ip_profiles ADD COLUMN geo_tz TEXT;
 ```
 
-### 8.2 端点汇总
+P5/P6 增量迁移（在上述迁移之后执行）：
+
+```sql
+ALTER TABLE ip_fingerprints ADD COLUMN anomaly_score REAL;
+ALTER TABLE ip_fingerprints ADD COLUMN behavior_ml_score REAL;
+ALTER TABLE ip_fingerprints ADD COLUMN gnn_score REAL;
+ALTER TABLE ip_fingerprints ADD COLUMN gnn_embedding TEXT;   -- 64 维，JSON 数组
+ALTER TABLE fp_clusters ADD COLUMN risk_score REAL;
+
+CREATE TABLE IF NOT EXISTS fp_labels (
+  fp TEXT NOT NULL,
+  label TEXT NOT NULL CHECK(label IN ('human','bot','uncertain')),
+  source TEXT NOT NULL CHECK(source IN ('admin','rule','model')),
+  confidence REAL NOT NULL,
+  labeled_at TEXT NOT NULL,
+  notes TEXT,
+  PRIMARY KEY (fp, source)
+);
+```
+
+### 10.2 端点汇总
 
 | 端点 | 方法 | 阶段 | 鉴权 |
 |---|---|---|---|
@@ -414,8 +532,11 @@ ALTER TABLE ip_profiles ADD COLUMN geo_tz TEXT;
 | `/admin/passkey/*` | POST | P4 | 会话（注册）/无（登录） |
 | `/api/v1/fp/report` | POST | P1-P4 | 现有，字段向后兼容扩展 |
 | `githubhot admin seed` / `geo download` / `ja4 update` | CLI | P0/P2/P3 | — |
+| `POST /api/v1/admin/fp/label` | POST | P5 | 管理会话（人工标注 human/bot/uncertain，金标签） |
+| `GET /api/v1/admin/ipguard/graph` | GET | P6 | 管理会话（集群图数据：节点/边/分数，力导向可视化） |
+| `githubhot ml export` / `ml export-graph` / `ml import-gnn` / `ml load-model` | CLI | P5/P6 | 训练数据导出、GNN 分数回写、模型热加载 |
 
-### 8.3 env 汇总（同步更新 .env.example 与 README 配置表）
+### 10.3 env 汇总（同步更新 .env.example 与 README 配置表）
 
 ```
 APP_SIGN_SEED=            # P0 必填，32B base64；等于默认值时 serve 拒启
@@ -428,11 +549,13 @@ TLS_CERT= / TLS_KEY= / ACME_DOMAIN= / REDIRECT_HTTP=   # P3
 WEBAUTHN_ENABLED= / WEBAUTHN_RP_ID= / WEBAUTHN_ORIGIN= / WEBAUTHN_ONLY=   # P4
 PLAY_INTEGRITY_PACKAGE= / PLAY_INTEGRITY_SA_JSON= / APP_EXPECTED_CERT_SHA256= / ATTEST_REQUIRED=   # P4
 ALTCHA_SECRET= / ALTCHA_DIFFICULTY=   # P4
+ML_MODEL_DIR=            # P5 默认 data/models，模型 JSON 热加载目录
+ML_TRAIN_VENV=           # P5 默认 scripts/ml/.venv，Python 训练环境（项目内）
 ```
 
 ---
 
-## 9. 依赖清单（落地时逐项核对 LICENSE 并回填本表）
+## 11. 依赖清单（落地时逐项核对 LICENSE 并回填本表）
 
 | 依赖 | 用途 | 引入阶段 | 备注 |
 |---|---|---|---|
@@ -442,45 +565,53 @@ ALTCHA_SECRET= / ALTCHA_DIFFICULTY=   # P4
 | `go-webauthn/webauthn` | 通行密钥 | P4 | 1343★，FIDO2 认证 |
 | `golang.org/x/crypto/acme/autocert` | 证书自动签发 | P3 | — |
 | 自研 | pHash/MinHash/LSH/熵/ALTCHA | P2/P4 | 优先自研，算法见 §5 与 P4-3 |
+| `gonum.org/v1/gonum` | Louvain 社区发现 | P6 | 纯 Go 科学计算标准库；graph/community 的 Louvain API 落地核对 |
+| `d3-force`（web/） | 集群力导向可视化 | P6 | 前端，npm 装项目内 |
+| Python：scikit-learn / lightgbm / torch+PyG | 离线训练（scripts/ml/.venv，项目内 venv，不入运行时） | P5/P6 | CPU 版即可；requirements 锁版本 |
+| 自研（ML 推理） | LR 前向 / GBDT 树遍历 / iForest / MIDAS sketch | P5/P6 | 全部纯 Go，保持 CGO=0 单二进制 |
 
 情报参考（**不引入**）：camoufox（12.3k★，内核级反检测）、patchright（4.8k★）、fingerprint-suite（2.6k★）、untidetect-tools（2k★，敌方装备目录）、CreepJS（2.5k★，思路参考禁抄码）、curl_cffi（6.7k★，攻击侧 TLS 模拟）。
 
 ---
 
-## 10. 测试计划与总验收
+## 12. 测试计划与总验收
 
-### 10.1 单测（go test ./... 必须全绿）
+### 12.1 单测（go test ./... 必须全绿）
 
-- `internal/domain/fpmath`：pHash 汉明距离、MinHash 签名与 Jaccard 估计、LSH 分桶、熵计算、EWMA、线性回归斜率。
-- `internal/interfaces/httpapi`：UA↔TLS 矛盾规则、flags 计分映射、altcha challenge/verify 往返、attestation mock 三态解析、管理会话 IP 校验。
+- `internal/domain/fpmath`：pHash 汉明距离、MinHash 签名与 Jaccard 估计、LSH 分桶、熵计算、EWMA、线性回归斜率；P5 起新增——LR 前向（与 Python `predict_proba` 固定权重对拍，误差 < 1e-9）、GBDT JSON 树遍历（与 LightGBM predict 对拍）、MIDAS sketch 计数与告警阈值；P6 起新增——Louvain 桥接团伙切分用例（gonum）。
+- `internal/interfaces/httpapi`：UA↔TLS 矛盾规则、flags 计分映射、altcha challenge/verify 往返、attestation mock 三态解析、管理会话 IP 校验、标注端点权限。
 - 前端：`web/src/lib/phash.js`、`altcha.js` 用 `node --test` 跑纯函数用例。
+- Python（不进 CI 门槛，训练前自检）：`scripts/ml/selftest.py`——数据切分无泄漏、特征清单与 Go 侧对齐。
 
-### 10.2 对抗性手动验收（每阶段末执行，结果记入交付说明）
+### 12.2 对抗性手动验收（每阶段末执行，结果记入交付说明）
 
 | 对手 | 工具 | 期望 |
 |---|---|---|
 | 裸脚本 | curl + Chrome UA | P3：ua_tls_mismatch 命中 |
-| JS 层 stealth | `npx patchright` 访问 | P1：≥2 项 fpb_*/botd_* 命中 |
+| JS 层 stealth | `npx patchright` 访问 | P1：≥2 项 fpb_*/botd_* 命中；P5 后：anomaly_score 右移 > 2σ |
 | 内核级反检测 | camoufox（可装则测） | ①②允许漏，⑤⑥至少一项命中 |
 | 换指纹轮换 | 手动改 canvas 毒化参数 | P2：pHash/MinHash 关联 + rotation_detected |
-| 多马甲 | 同机多浏览器身份 | P4：图聚类合并同簇 |
+| 多马甲 | 同机多浏览器身份 | P4：图聚类合并同簇；P6：Louvain 切分核心团伙，GNN 分数高 |
+| 协同攻击模拟 | 20 IP × 20 fp 短时互联 | P6：MIDAS 1-2 个时间片内告警 |
 | 正常用户 | Chrome/Edge/Safari/安卓 Chrome | 全程零命中（假阳性红线 0.5%） |
+| ML 模型质量 | 验证集 + shadow 期 | AUC ≥ 0.85、FPR ≤ 0.5% 才出 shadow；行为分与 GNN 分相关性 < 0.6 |
 
-### 10.3 交付物清单
+### 12.3 交付物清单
 
 1. 代码 + 全部测试绿；
 2. `.env.example`、README 配置表、`docs/architecture.md` 增补"指纹与防护"章节；
 3. 每阶段一条 commit（中文 scope 前缀）；
-4. 交付说明文档：各对抗验收的实际结果、灰度面板截图路径、已知假阳性清单。
+4. 交付说明文档：各对抗验收的实际结果、灰度面板截图路径、已知假阳性清单；
+5. P5/P6 追加：`scripts/ml/` 训练管道（requirements 锁版本 + run_train.ps1）与模型卡（每个模型 JSON 附特征清单、指标、训练集规模、训练日期）。
 
 ---
 
-## 11. 明确不做（边界）
+## 13. 明确不做（边界）
 
 1. 不做 mTLS 客户端证书（WebAuthn 已覆盖管理端场景，APP 场景由 Play Integrity 覆盖）；
 2. 不做 VDF（ALTCHA PoW 对当前威胁面足够，VDF 留待 PoW 被绕过再评估）；
-3. 不做 ML 版行为分类（规则版先行，等积累标注数据）；
-4. 不做 Louvain/图神经网络版团伙检测（连通分量版够用）；
+3. 不做在线/实时 GNN 推理，也禁止 Python 与 CGO 依赖进入运行时（GNN 仅离线周训练导出分数，Go 侧只读——保持纯 Go 单二进制）；
+4. 不做深度序列模型（LSTM/Transformer 级行为建模，当前数据量不支持；监督侧止步 GBDT，序列特征以滑动窗口统计量近似）；
 5. 不动业务层（榜单/日报/信源/LLM 流水线）；
 6. 不重构现有三层 IP 防护与积分通道（新检测全部挂现有通道）；
 7. Android 侧改动在独立仓库 GithubHot-App 执行，本文档只约束其行为契约（attest 端点、ALTCHA 算法、seed 构建期注入）。
@@ -495,5 +626,10 @@ ALTCHA_SECRET= / ALTCHA_DIFFICULTY=   # P4
 - **EWMA**：`S_t=α·X_t+(1-α)·S_{t-1}`，α=0.3。
 - **时钟偏移**：`offset(t)=Date.now()-performance.now()`，20 点最小二乘斜率 ×1e6 = ppm。
 - **getter 时序**：N=1e5 循环摊薄；判定 `p50_target > max(1µs, 20×p50_base)`；3 轮取中位数；只记录不计分（灰度）。
+- **马氏距离**（持续认证）：`d²=(x-μ)ᵀΣ⁻¹(x-μ)`，模板 = 历史特征均值，协方差取对角近似。
+- **PSI**（漂移监控）：`Σ(Aᵢ-Eᵢ)·ln(Aᵢ/Eᵢ)`，> 0.2 触发再训练。
+- **MIDAS**（流式边异常）：双 count-min sketch（当前时间片 / 历史累计），卡方统计量 `Σ(aᵢ-sᵢ)²/(2·sᵢ)`，σ 超限告警（WSDM 2020 论文，参考 Stream-AD/MIDAS 777★）。
+- **GNN 部署形态**：训练（PyG GraphSAGE 优先，周级）产出 `gnn_score` + 64 维嵌入写库；Go 零推理；冷启动用 Louvain 社区均值。
+- **社区风险分**：`risk = ban成员占比 × min(1, size/10)`，> 0.5 入 review。
 - **归一化再哈希原则**（贯穿所有自研指纹）：凡对攻击者可控输入做指纹，先排序归一化、剔除 GREASE/噪音值，再哈希——JA4 对 JA3 的核心改进，同样适用于 fingerprint.js:188 的分量融合顺序。
 
