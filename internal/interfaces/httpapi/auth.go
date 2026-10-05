@@ -9,9 +9,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/NoraStory/GithubHot/internal/domain/netident"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/adminauth"
 )
 
@@ -60,7 +62,7 @@ func (s *Server) adminAuth(next http.Handler) http.Handler {
 	})
 }
 
-// checkAdminSession 校验会话 Cookie；有效时滑动续期，无效写 401。
+// checkAdminSession 校验会话 Cookie（含来源网段绑定）；有效时滑动续期，无效写 401。
 // 返回 false 表示已处理响应（调用方应中断）。
 func (s *Server) checkAdminSession(w http.ResponseWriter, r *http.Request) bool {
 	cookie, err := r.Cookie(adminCookieName)
@@ -70,7 +72,7 @@ func (s *Server) checkAdminSession(w http.ResponseWriter, r *http.Request) bool 
 	}
 	ctx, cancel := contextWithTimeout(r.Context())
 	defer cancel()
-	created, expires, _, found, err := s.Admin.FindAdminSession(ctx, cookie.Value)
+	created, expires, sessIP, found, err := s.Admin.FindAdminSession(ctx, cookie.Value)
 	if err != nil || !found {
 		if err != nil {
 			log.Printf("[admin] 会话查询失败: %v", err)
@@ -84,6 +86,27 @@ func (s *Server) checkAdminSession(w http.ResponseWriter, r *http.Request) bool 
 		_ = s.Admin.DeleteAdminSession(ctx2, cookie.Value)
 		cancel2()
 		writeErr(w, 401, errorString("会话已过期，请重新登录"))
+		return false
+	}
+	// 会话绑定来源网段：Cookie 被搬运到别处（或被拷走后异地使用）时立即注销会话。
+	// 默认放宽到 IPv4 /24、IPv6 /64（移动网络出口漂移），ADMIN_SESSION_IP_STRICT=1 收紧为完全一致。
+	curIP := clientIPFromRequest(r)
+	if sessIP != "" && !netident.SameScope(sessIP, curIP, adminSessionIPStrict()) {
+		ctx2, cancel2 := contextWithTimeout(r.Context())
+		_ = s.Admin.DeleteAdminSession(ctx2, cookie.Value)
+		if s.Guard != nil {
+			// 强证据（身份类）但**不**给到单类即时封禁线（100）：会话已就地注销，
+			// 安全效果已达成；而管理员换宽带 / 手机切基站会落到别的网段，
+			// 一上来就封会把他自己挡在登录页外（被封 IP 连 /admin/login 都是 404）。
+			// 80 分：重复跨网段（多次会话）或与其它证据互证才封。
+			s.Guard.Event(ctx2, curIP, "admin-session-ip-mismatch",
+				"管理会话跨网段使用（签发 "+sessIP+"，当前 "+curIP+"）", 80, false)
+		}
+		cancel2()
+		// 只记前 8 位：会话 ID 本身就是可用凭证，不该整条落到日志里
+		log.Printf("[admin] 会话来源不符，已注销：签发 %s / 当前 %s（会话 %s…）",
+			sessIP, curIP, truncateSessionID(cookie.Value))
+		writeErr(w, 401, errorString("会话与访问来源不符，已注销，请重新登录"))
 		return false
 	}
 	// 活跃会话滑动续期：剩余不足一半时延长一个完整周期
@@ -100,9 +123,23 @@ func (s *Server) checkAdminSession(w http.ResponseWriter, r *http.Request) bool 
 	}
 	// 有效管理会话的 IP 加入防护白名单（免封禁，TTL 与会话一致）
 	if s.Guard != nil {
-		s.Guard.Whitelist(clientIPFromRequest(r), ttl)
+		s.Guard.Whitelist(curIP, ttl)
 	}
 	return true
+}
+
+// adminSessionIPStrict 会话 IP 严格模式（默认 0 = 放宽到 /24 与 /64）。
+func adminSessionIPStrict() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("ADMIN_SESSION_IP_STRICT")))
+	return v == "1" || v == "true"
+}
+
+// truncateSessionID 日志用的会话 ID 前缀（凭证不落全文）。
+func truncateSessionID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
 }
 
 // clientIP 从 RemoteAddr 取纯 IP（去掉随机源端口，否则每次连接都像新客户端）。
@@ -179,7 +216,9 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errorString("服务端未启用密码登录（未配置 ADMIN_PASSWORD_HASH）"))
 		return
 	}
-	ip := clientIP(r.RemoteAddr)
+	// 与 checkAdminSession 用同一套口径（受信代理下取真实客户端 IP），
+	// 否则会话记录的 IP 与后续校验的 IP 不可比，正常管理员会被自己踢下线。
+	ip := clientIPFromRequest(r)
 	if !adminLoginGuard.allow(ip) {
 		writeErr(w, 429, errorString("失败次数过多，已锁定 10 分钟"))
 		return
@@ -199,7 +238,7 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 		// 而非旧实现的 7 天——管理员自己连错 5 次密码不应被月级封禁）
 		if s.Guard != nil && !adminLoginGuard.allow(ip) {
 			ctx2, cancel2 := contextWithTimeout(r.Context())
-			s.Guard.Event(ctx2, clientIP(r.RemoteAddr), "admin-brute", "管理端密码爆破锁定", 100, false)
+			s.Guard.Event(ctx2, ip, "admin-brute", "管理端密码爆破锁定", 100, false)
 			cancel2()
 		}
 		log.Printf("[admin] %s 登录失败", ip)

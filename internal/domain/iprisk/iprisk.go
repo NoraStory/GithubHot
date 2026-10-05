@@ -99,7 +99,8 @@ func ClassOf(kind string) string {
 		return ClassProtocol
 	case "env-flag":
 		return ClassEnv
-	case "id-forgery", "id-token-stale", "id-ip-drift", "device-mismatch", "admin-brute":
+	case "id-forgery", "id-token-stale", "id-ip-drift", "device-mismatch", "admin-brute",
+		"admin-session-ip-mismatch":
 		return ClassIdentity
 	case "fp-linked", "fp-linked-watch", "fp-churn":
 		return ClassDevice
