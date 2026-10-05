@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/NoraStory/GithubHot/internal/domain/fpstats"
 )
 
 // ---------- 指纹上报（公开端点，第二层入口） ----------
@@ -154,8 +156,32 @@ func (s *Server) ipGuardSummaryAPI(w http.ResponseWriter, r *http.Request) {
 		"events":       events,
 		"fingerprints": fps,
 		"bans":         bans,
+		"flag_stats":   s.flagStats(ctx),
 	})
 }
+
+// flagStatsWindow flag 命中统计的观察窗口（灰度判断假阳性率的基准窗）。
+const flagStatsWindow = 7 * 24 * time.Hour
+
+// flagStats 近 7 天各检测 flag 的命中排行（Top flagStatsTop），供管理端灰度观察：
+// P1/P2 新增检测先只记录不计分，靠这里的命中数判断假阳性率是否达标。
+func (s *Server) flagStats(ctx context.Context) []fpstats.FlagStat {
+	since := time.Now().Add(-flagStatsWindow)
+	fps, err := s.Guard.Store().ListFingerprintsSince(ctx, since, 5000)
+	if err != nil {
+		return []fpstats.FlagStat{}
+	}
+	samples := make([]fpstats.FlagSample, 0, len(fps))
+	for _, f := range fps {
+		samples = append(samples, fpstats.FlagSample{
+			FP: f.Fingerprint, Flags: f.Flags, Visits: f.Hits, LastSeen: f.LastSeen,
+		})
+	}
+	return fpstats.AggregateFlags(samples, since, flagStatsTop)
+}
+
+// flagStatsTop 面板展示条数（Top-N 横向条形）。
+const flagStatsTop = 15
 
 // ipGuardBanAPI POST /api/v1/admin/ipguard/ban {ip, hours, reason} 手动封禁。
 func (s *Server) ipGuardBanAPI(w http.ResponseWriter, r *http.Request) {

@@ -82,6 +82,18 @@ func (g guardStore) ListFingerprints(ctx context.Context, limit int) ([]httpapi.
 	if err != nil {
 		return nil, err
 	}
+	return toFingerprintDTOs(rows), nil
+}
+
+func (g guardStore) ListFingerprintsSince(ctx context.Context, since time.Time, limit int) ([]httpapi.FingerprintDTO, error) {
+	rows, err := g.db.ListFingerprintsSince(ctx, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	return toFingerprintDTOs(rows), nil
+}
+
+func toFingerprintDTOs(rows []sqlite.FingerprintRow) []httpapi.FingerprintDTO {
 	out := make([]httpapi.FingerprintDTO, 0, len(rows))
 	for _, f := range rows {
 		out = append(out, httpapi.FingerprintDTO{
@@ -89,7 +101,7 @@ func (g guardStore) ListFingerprints(ctx context.Context, limit int) ([]httpapi.
 			FirstSeen: f.FirstSeen, LastSeen: f.LastSeen, Hits: f.Hits,
 		})
 	}
-	return out, nil
+	return out
 }
 
 func (g guardStore) FindBan(ctx context.Context, ip string) (*httpapi.BanDTO, error) {

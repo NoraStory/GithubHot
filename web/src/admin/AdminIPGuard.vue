@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { api } from '../lib/api'
+import FlagStatsCard from './components/FlagStatsCard.vue'
+import { flagInfo } from './flagLabels'
 
 const data = ref(null)
 const error = ref('')
@@ -8,6 +10,8 @@ const banIp = ref('')
 const banHours = ref(24)
 const banReason = ref('')
 const ipFilter = ref('')
+// 检测 flag 筛选（点击「检测命中统计」条目联动）
+const flagFilter = ref('')
 // 时间筛选：违规事件只看近 N 小时（0 = 全部）
 const eventsHours = ref(0)
 const RANGES = [[0, '全部时间'], [1, '近 1 小时'], [24, '近 24 小时'], [168, '近 7 天']]
@@ -23,8 +27,9 @@ const match = (ip) => !ipFilter.value || (ip || '').includes(ipFilter.value.trim
 const talkers = computed(() => (data.value?.talkers || []).filter(t => match(t.ip)))
 const bansFiltered = computed(() => (data.value?.bans || []).filter(b => match(b.IP)))
 const eventsFiltered = computed(() => (data.value?.events || []).filter(e => match(e.IP)))
-// 指纹筛选：除 IP 外同时匹配型号/显卡/UA/指纹串
+// 指纹筛选：除 IP 外同时匹配型号/显卡/UA/指纹串；flag 筛选为并集（命中该检测项）
 const fpsFiltered = computed(() => (data.value?.fingerprints || []).filter(f => {
+  if (flagFilter.value && !(f.Flags || []).includes(flagFilter.value)) return false
   const q = ipFilter.value.trim()
   if (!q) return true
   const hay = [...f.IPs, f.UA, f.Components?.model || '', f.Components?.renderer || '', f.Fingerprint].join(' ')
@@ -140,24 +145,7 @@ const short = s => s ? s.slice(0, 12) + '…' : '-'
 const comp = s => s ? s.slice(0, 8) : '-'
 const levelName = n => ['', '30 分钟', '24 小时', '7 天', '30 天'][Math.min(n, 4)] || (n + ' 级')
 
-// 环境核验命中项的中文说明（第三层）
-const FLAG_LABELS = {
-  'navigator-webdriver': ['navigator.webdriver = true', '典型自动化驱动特征'],
-  'automation-global': ['自动化框架全局变量', 'Selenium/CDP 注入痕迹'],
-  'headless-ua': ['无头浏览器', 'UA 含 headless/phantom/selenium 标记'],
-  'ua-platform-mismatch': ['UA 与系统矛盾', 'navigator.platform 与 UA 声明系统不一致'],
-  'ua-ch-mismatch': ['Client Hints 与 UA 矛盾', 'Sec-CH-UA-Platform 与 UA 声明系统不一致'],
-  'lang-tz-mismatch': ['语言与时区矛盾', '语言环境与系统时区不匹配，常见于伪造 header'],
-  'no-plugins': ['桌面环境无插件', '桌面 Chrome 无插件接口，无头/精简环境特征'],
-  'env-incoherent': ['环境不自洽', '客户端上报环境参数存在矛盾'],
-  // APP 威胁检测（components.threat 落入 flags 的 app-* 前缀键）
-  'app-root': ['Root 环境', 'APP 自检检测到设备已 Root'],
-  'app-emulator': ['模拟器/云机', 'APP 自检检测到模拟器特征'],
-  'app-debugger': ['调试器附加', 'APP 自检检测到调试器'],
-  'app-hook': ['Hook 框架', 'APP 自检检测到 Xposed/Frida'],
-  'app-installer': ['非可信安装渠道', 'APP 安装来源不在可信渠道列表']
-}
-const flagInfo = f => FLAG_LABELS[f] || [f, '']
+// 环境核验命中项的中文说明见 ./flagLabels.js（与「检测命中统计」卡共用同一份文案）
 
 // 显卡名截断：ANGLE 长串取括号内首段（如 "ANGLE (AMD, AMD Radeon ...)" → "AMD Radeon ..." 截断）
 const shortGpu = s => {
@@ -277,6 +265,10 @@ const rtcLeak = f => (f.Webrtc || []).some(x => x && x !== detail.value?.ip)
           <option v-for="[h, label] in RANGES" :key="h" :value="h">{{ label }}</option>
         </select>
         <button v-if="ipFilter" class="btn small" @click="ipFilter = ''">清除</button>
+        <span v-if="flagFilter" class="chip flag-chip">
+          🧪 {{ flagInfo(flagFilter)[0] }}
+          <button class="x" title="取消 flag 筛选" @click="flagFilter = ''">×</button>
+        </span>
         <span class="hint">点击任意 IP 可下钻查看完整档案与指纹；筛选同时匹配型号/显卡/UA；时间筛选作用于违规事件</span>
       </div>
 
@@ -288,6 +280,14 @@ const rtcLeak = f => (f.Webrtc || []).some(x => x && x !== detail.value?.ip)
         <div class="stat" :class="{ warn: stats.multiIp }"><b class="num">⚠ {{ stats.multiIp }}</b><span>多 IP 指纹</span></div>
         <div class="stat" :class="{ hot: stats.hot }"><b class="num">🔥 {{ stats.hot }}</b><span>高频换 IP</span></div>
       </div>
+
+      <!-- 检测命中统计（P0-4：灰度观察各检测 flag 的假阳性率） -->
+      <FlagStatsCard
+        v-if="data"
+        :stats="data.flag_stats || []"
+        :active="flagFilter"
+        @select="k => flagFilter = k"
+      />
 
       <!-- IP 下钻详情 -->
       <div v-if="detail || detailLoading || detailError" ref="detailPanel" :key="detail?.ip || 'pending'" class="card detail-panel">
@@ -561,6 +561,8 @@ th { color: var(--anzhiyu-gray); font-weight: 500; }
 .num { font-variant-numeric: tabular-nums; text-align: right; }
 .hot { color: var(--anzhiyu-red); font-weight: 700; }
 .chip { background: var(--anzhiyu-theme-op); color: #a8766f; border-radius: 50px; padding: 1px 9px; font-size: .75rem; }
+.flag-chip { display: inline-flex; align-items: center; gap: 4px; }
+.flag-chip .x { border: none; background: transparent; color: inherit; cursor: pointer; font-size: .9rem; line-height: 1; padding: 0 2px; }
 .empty { color: var(--anzhiyu-gray); padding: 14px 4px; }
 .err { color: var(--anzhiyu-red); margin: 8px 0; }
 .ban-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

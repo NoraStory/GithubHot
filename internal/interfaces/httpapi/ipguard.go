@@ -83,6 +83,7 @@ type GuardStore interface {
 	ListIPEventsSince(ctx context.Context, limit int, since time.Time) ([]IPEventDTO, error)
 	UpsertFingerprint(ctx context.Context, fp, ip, ua string, meta FingerprintMeta) ([]string, error)
 	ListFingerprints(ctx context.Context, limit int) ([]FingerprintDTO, error)
+	ListFingerprintsSince(ctx context.Context, since time.Time, limit int) ([]FingerprintDTO, error)
 	FindBan(ctx context.Context, ip string) (*BanDTO, error)
 	BannedAmong(ctx context.Context, ips []string) ([]string, error)
 	UpsertBan(ctx context.Context, ip string, strikes, level int, reason string, duration time.Duration) error

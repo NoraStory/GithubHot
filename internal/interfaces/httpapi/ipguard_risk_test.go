@@ -15,6 +15,7 @@ type fakeGuardStore struct {
 	mu     sync.Mutex
 	events []IPEventDTO
 	bans   map[string]*BanDTO
+	fps    []FingerprintDTO
 }
 
 func newFakeStore() *fakeGuardStore { return &fakeGuardStore{bans: map[string]*BanDTO{}} }

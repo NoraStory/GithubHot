@@ -223,6 +223,22 @@ func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow
 	return scanFingerprintRows(rows)
 }
 
+// ListFingerprintsSince 时间窗内的活跃指纹（flag 命中统计用）。
+// last_seen 按 RFC3339 文本存储，同格式比较即字典序比较。
+func (db *DB) ListFingerprintsSince(ctx context.Context, since time.Time, limit int) ([]FingerprintRow, error) {
+	if limit <= 0 {
+		limit = 5000
+	}
+	rows, err := db.QueryContext(ctx,
+		"SELECT "+fingerprintCols+" FROM ip_fingerprints WHERE last_seen >= ? ORDER BY last_seen DESC LIMIT ?",
+		since.Format(time.RFC3339), limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询窗口内指纹: %w", err)
+	}
+	defer rows.Close()
+	return scanFingerprintRows(rows)
+}
+
 // ListFingerprintsByIP 反查：IPS JSON 中包含该 IP 的指纹（IP 下钻用）。
 func (db *DB) ListFingerprintsByIP(ctx context.Context, ip string) ([]FingerprintRow, error) {
 	rows, err := db.QueryContext(ctx,
