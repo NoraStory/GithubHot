@@ -133,10 +133,19 @@ type GuardStore interface {
 	UpdateEntropyBits(ctx context.Context, fp string, bits float64) error
 	UpdateIPGeo(ctx context.Context, ip string, asn uint, asnType, country, tz string) error
 	UpdateAttestation(ctx context.Context, fp string, attestationJSON string) error
+	UpdateAnomalyScore(ctx context.Context, fp string, score float64) error
 	// P4-4 图聚类：每日 cron 全量重算簇并写回 cluster_id / fp_clusters
 	ReplaceClusters(ctx context.Context, clusters []ClusterDTO) error
 	ListAllFPLinks(ctx context.Context, since time.Time, limit int) ([]FPLinkDTO, error)
 	ListClusters(ctx context.Context, limit int) ([]ClusterDTO, error)
+	// P5-1 标注体系：金标签写回 + 弱标签每日重建 + 训练导出
+	UpsertFpLabel(ctx context.Context, fp, label, source string, confidence float64, notes string) error
+	ListFpLabels(ctx context.Context) ([]FpLabelRow, error)
+	BestFpLabels(ctx context.Context) (map[string]struct {
+		Label      string
+		Confidence float64
+	}, error)
+	DeleteFpRuleLabels(ctx context.Context) error
 	FindBan(ctx context.Context, ip string) (*BanDTO, error)
 	BannedAmong(ctx context.Context, ips []string) ([]string, error)
 	UpsertBan(ctx context.Context, ip string, strikes, level int, reason string, duration time.Duration) error
@@ -194,6 +203,16 @@ type MinHashSigRow struct {
 type LSHBand struct {
 	Band int
 	Hash string
+}
+
+// FpLabelRow 标注行（P5-1）。
+type FpLabelRow struct {
+	FP         string
+	Label      string // human | bot | uncertain
+	Source     string // admin | rule | model
+	Confidence float64
+	LabeledAt  time.Time
+	Notes      string
 }
 
 // FPLinkDTO 指纹关联边。
@@ -315,6 +334,7 @@ type IPGuard struct {
 	key   []byte // HMAC 密钥
 	geo   GeoProvider
 	ja4   JA4Mapper
+	ml    *lrLoader
 
 	enabled    bool
 	localOK    bool // 回环/内网放行
@@ -362,6 +382,7 @@ func NewIPGuard(store GuardStore) *IPGuard {
 		fpReport:     map[string][]time.Time{},
 		whitelist:    map[string]time.Time{},
 		fpColl:       newFPCollision(),
+		ml:           newLRLoader(os.Getenv("ML_MODEL_DIR")),
 	}
 	if g.geo.Enabled() {
 		log.Printf("[ipguard] GeoIP 已启用（%s）", countryPath)
@@ -968,6 +989,8 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	g.tlsCheck(ctx, ip, ua, meta)
 	// P4-5 行为生物特征：滑窗统计量入库 + 机器特征规则（完全匀速/纯直线/机械击键）。
 	g.behaviorCheck(ctx, ip, meta)
+	// P5-3 行为 ML 打分（模型达标才生效，shadow 纪律同规格 §0.7）。
+	g.scoreBehaviorML(ctx, ip, fp, meta)
 	// 连坐双因子：干净设备连到被封的共享出口（酒店/机场/运营商 NAT 被前任搞封）
 	// 不算违规，只记低分观察；只有"该指纹名下其他 IP 近期也有劣迹"（代理池轮换
 	// 特征）才升级封禁。防误封核心：身份信号必须与设备劣迹叠加。

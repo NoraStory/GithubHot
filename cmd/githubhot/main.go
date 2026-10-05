@@ -54,6 +54,27 @@ func main() {
 		}
 		fmt.Fprintln(os.Stderr, "用法: githubhot geo download")
 		os.Exit(2)
+	case "ml":
+		// P5 机器学习数据管道：ml export（训练数据导出）/ ml check（模型门槛校验）。
+		if len(os.Args) >= 3 {
+			switch os.Args[2] {
+			case "export":
+				out := flagArg(os.Args[3:], "--out")
+				if err := cli.MLExport(cfg, out); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				return
+			case "check":
+				if err := cli.MLCheck(cfg); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				return
+			}
+		}
+		fmt.Fprintln(os.Stderr, "用法: githubhot ml export --out data/ml/behavior.jsonl | githubhot ml check")
+		os.Exit(2)
 	case "ja4":
 		// JA4 映射表下载（P3-3）：不依赖完整配置，先于 config.Load 处理。
 		if len(os.Args) >= 3 && os.Args[2] == "update" {
@@ -129,6 +150,7 @@ func usage() {
   githubhot admin    管理端工具：admin hash [密码] 生成 Argon2id 哈希；admin seed 生成 APP 签名种子
   githubhot geo      GeoIP 数据：geo download 下载 ip-location-db 国家/ASN 库（P2-5，CC BY 4.0）
   githubhot ja4      TLS 指纹数据：ja4 update 下载 FoxIO JA4→应用映射表（P3-3，BSD-3）
+  githubhot ml       机器学习管道：ml export --out … 导出训练数据；ml check 校验模型门槛（P5）
   githubhot version  版本号
 
 配置: 见 .env.example（LLM_API_KEY 必选；GITHUB_TOKEN 建议配置）`)

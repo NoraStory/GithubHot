@@ -478,6 +478,51 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
       服务端 finish-login 未被调用，攻击者无法探测会话状态）。
   存活验证：管理端会话签发后 admin/usage 正常访问 ✓。
 
+---
+
+## P5 — 行为机器学习（批一：标注体系 + iForest + LR 推理 ✅）
+
+### P5-1 标注体系与数据管道 ✅
+
+- DDL：`fp_labels` 表（fp+source 主键；label human/bot/uncertain；source admin/rule/model；
+  confidence）+ `ip_fingerprints.anomaly_score` 列。
+- 金标签：`POST /api/v1/admin/fp/label`（守卫组内，source=admin confidence=1.0，覆盖弱标签；
+  非法 label 400）。弱标签：`RefreshRuleLabels` 每日 cron（与熵权/聚类同调度）——曾封禁 →
+  bot(0.7)；灰度期命中 ≥2 项 fpb_*/botd_* → bot(0.6)；近 30 天零 flag 且有行为数据 →
+  human(0.8)；uncertain 不落表。重建前清 source=rule（admin 金标签保留）。
+- 导出：`githubhot ml export --out data/ml/behavior.jsonl`——16 维特征 map（键名与
+  train_behavior.FEATURE_NAMES 严格一致），label/weight 取每 fp 最高置信标注，
+  uncertain 行不导出。活体：金标签 2 条（human+bot）→ 导出 human 1 / bot 1、weight=1.0 ✓。
+- 数据/gitignore：data/ml/、data/models/、scripts/ml/.venv/ 已忽略。
+
+### P5-2 Isolation Forest ✅
+
+- 自研纯 Go `internal/domain/fpmath/iforest.go`（~120 行零依赖，固定种子确定性）：
+  100 树 × 256 子采样，c(n) = 2·H(n−1) − 2(n−1)/n（初版公式把 (n−1)/n 写成乘法，
+  单测"内群 vs 极端离群"暴露后修正）。分数 = 2^(−E[h]/c(n)) ∈ (0,1)。
+- 引擎 `RefreshAnomalyScores`（每日 cron）：近 7 天指纹 → 16 维特征向量 → 训练+打分 →
+  anomaly_score 列；99.5 分位仅记录、99.9 分位记 anomaly-p999 0 分事件（进 review 关注）。
+  样本 <10 跳过。单测：离群分显著高于内群、同种子确定性、分位阈值。
+
+### P5-3 LR 推理 ✅（shadow 纪律全链路）
+
+- `internal/domain/fpmath/lr.go`：标准化 + 点积 + sigmoid（~30 行零依赖）。单测手算对拍
+  1e-9 精度（σ=0 防除零、未激活/维度不符返回 -1 哨兵）。
+- 热加载：`lrLoader` 按 `ML_MODEL_DIR/behavior_lr_v1.json` 的 mtime 变化惰性重读
+  （读失败保留旧模型）。fp/report 时 `scoreBehaviorML`：模型 **gate.pass 且 AUC≥0.85**
+  才生效——先 shadow（0 分记录 behavior-ml-score）；出 shadow 后 score ≥0.8 才 20 分
+  （与 P6-6 融合规则一致）。
+- `githubhot ml check`：模型门槛透传校验（gate 未达标/文件缺失 → exit 1；达标 → exit 0），
+  部署流水线可用作启用前置检查。活体：缺失/未达标/达标三态 exit 码实测 ✓。
+
+### 记录待办
+
+- P5-4 GBDT（treemodel.go）：条件触发项（LR AUC<0.85 或标注 >5 万）——沙盒
+  export_lgbm_json.py 已就绪，Go 树遍历留待触发条件满足时实现。
+- P5-6 PSI 漂移监控 + ML 诊断页：随 §10 管理端可视化整合交付。
+- 弱标签"近 30 天 IP 数/会话时长"特征由导出端动态计算（session_minutes 用
+  first_seen−last_seen 近似），行为特征需 fp/report 已携带 behavior（P4-5 前置）。
+
 ## 已知边界 / 后续项
 
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，

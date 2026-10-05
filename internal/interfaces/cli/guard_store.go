@@ -270,3 +270,35 @@ func (g guardStore) ListClusters(ctx context.Context, limit int) ([]httpapi.Clus
 	}
 	return out, nil
 }
+
+func (g guardStore) UpsertFpLabel(ctx context.Context, fp, label, source string, confidence float64, notes string) error {
+	return g.db.UpsertFpLabel(ctx, fp, label, source, confidence, notes)
+}
+
+func (g guardStore) ListFpLabels(ctx context.Context) ([]httpapi.FpLabelRow, error) {
+	rows, err := g.db.ListFpLabels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]httpapi.FpLabelRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, httpapi.FpLabelRow{FP: r.FP, Label: r.Label, Source: r.Source,
+			Confidence: r.Confidence, LabeledAt: r.LabeledAt, Notes: r.Notes})
+	}
+	return out, nil
+}
+
+func (g guardStore) BestFpLabels(ctx context.Context) (map[string]struct {
+	Label      string
+	Confidence float64
+}, error) {
+	return g.db.BestFpLabels(ctx)
+}
+
+func (g guardStore) DeleteFpRuleLabels(ctx context.Context) error {
+	return g.db.DeleteFpRuleLabels(ctx)
+}
+
+func (g guardStore) UpdateAnomalyScore(ctx context.Context, fp string, score float64) error {
+	return g.db.UpdateAnomalyScore(ctx, fp, score)
+}

@@ -171,6 +171,18 @@ func migrate(db *sql.DB) error {
 		first_seen TEXT NOT NULL, reason TEXT)`); err != nil {
 		return fmt.Errorf("建表 fp_clusters: %w", err)
 	}
+	// P5-1 标注体系（规格书 §11.1）：弱标签（rule）+ 金标签（admin）双轨；P5-2 异常分
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN anomaly_score REAL")
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS fp_labels (
+		fp TEXT NOT NULL,
+		label TEXT NOT NULL CHECK(label IN ('human','bot','uncertain')),
+		source TEXT NOT NULL CHECK(source IN ('admin','rule','model')),
+		confidence REAL NOT NULL,
+		labeled_at TEXT NOT NULL,
+		notes TEXT,
+		PRIMARY KEY (fp, source))`); err != nil {
+		return fmt.Errorf("建表 fp_labels: %w", err)
+	}
 	// P2-5 地理与 ASN（ip-location-db mmdb，缺失时全部降级跳过）
 	_, _ = db.Exec("ALTER TABLE ip_profiles ADD COLUMN asn INTEGER NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE ip_profiles ADD COLUMN asn_type TEXT NOT NULL DEFAULT ''")

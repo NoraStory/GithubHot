@@ -58,6 +58,8 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 			r.Post("/probes/run", s.probesRunAPI)
 			// 资源监测（进程 RSS / CPU / Go 运行时 / sidecar 状态）
 			r.Get("/system/stats", s.systemStatsAPI)
+			// P5-1 标注（金标签，source=admin）
+			r.Post("/fp/label", s.fpLabelAPI)
 			// P4-2 通行密钥管理（注册需已登录）
 			r.Post("/passkey/begin-register", s.beginPasskeyRegister)
 			r.Post("/passkey/finish-register", s.finishPasskeyRegister)

@@ -35,3 +35,8 @@ serve-out.log
 android-app/
 tools/
 .ci_deploy_key*
+
+# P5 机器学习产物（训练数据/模型/venv，规格书 §8 P5-1）
+data/ml/
+data/models/
+scripts/ml/.venv/

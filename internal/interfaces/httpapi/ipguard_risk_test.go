@@ -570,4 +570,28 @@ func TestBanWallAndRescuePath(t *testing.T) {
 	}
 }
 
+func (f *fakeGuardStore) UpsertFpLabel(context.Context, string, string, string, float64, string) error {
+	return nil
+}
 
+func (f *fakeGuardStore) ListFpLabels(context.Context) ([]FpLabelRow, error) {
+	return nil, nil
+}
+
+func (f *fakeGuardStore) BestFpLabels(context.Context) (map[string]struct {
+	Label      string
+	Confidence float64
+}, error) {
+	return map[string]struct {
+		Label      string
+		Confidence float64
+	}{}, nil
+}
+
+func (f *fakeGuardStore) DeleteFpRuleLabels(context.Context) error {
+	return nil
+}
+
+func (f *fakeGuardStore) UpdateAnomalyScore(context.Context, string, float64) error {
+	return nil
+}
