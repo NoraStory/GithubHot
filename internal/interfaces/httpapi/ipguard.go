@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/NoraStory/GithubHot/internal/domain/iprisk"
 )
 
 // ---------- 三层 IP 身份识别体系 ----------
@@ -243,35 +245,54 @@ func (g *IPGuard) issueIDToken(ip, fp string) (string, time.Time) {
 	return "v2." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(sig), exp
 }
 
-// verifyIDToken 核验令牌签名与有效期；返回 (有效, 令牌绑定指纹, 令牌绑定IP, 过期时间)。
-func (g *IPGuard) verifyIDToken(token, currentIP string) (bool, string, string, time.Time) {
+// tokenStatus 令牌核验结果。区分"结构非法"（真伪造）与"签名失效"（多为服务重启 /
+// IP_GUARD_SECRET 轮换后的老令牌）——后者绝不能按伪造处理，否则每次重启都会把
+// 全部老访客打成 7 天封禁（旧实现的灾难路径，见 docs/ip-guard-scoring.md）。
+type tokenStatus int
+
+const (
+	tokenOK        tokenStatus = iota // 有效
+	tokenMalformed                    // 结构/载荷非法 → 伪造尝试
+	tokenBadSig                       // 结构合法但签名不符 → 疑密钥轮换
+	tokenExpired                      // 签名有效但已过期 → 正常重签
+)
+
+// verifyIDTokenEx 核验令牌并给出三态结果。
+func (g *IPGuard) verifyIDTokenEx(token, currentIP string) (tokenStatus, string, string, time.Time) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 || parts[0] != "v2" {
-		return false, "", "", time.Time{}
+		return tokenMalformed, "", "", time.Time{}
 	}
 	payload, err1 := base64.RawURLEncoding.DecodeString(parts[1])
 	sig, err2 := base64.RawURLEncoding.DecodeString(parts[2])
 	if err1 != nil || err2 != nil || len(sig) != 32 {
-		return false, "", "", time.Time{}
-	}
-	mac := hmac.New(sha256.New, g.key)
-	mac.Write(payload)
-	if !hmac.Equal(sig, mac.Sum(nil)) {
-		return false, "", "", time.Time{}
+		return tokenMalformed, "", "", time.Time{}
 	}
 	f := strings.Split(string(payload), "|")
 	if len(f) != 4 {
-		return false, "", "", time.Time{}
+		return tokenMalformed, "", "", time.Time{}
 	}
 	expUnix, err := strconv.ParseInt(f[3], 10, 64)
 	if err != nil {
-		return false, "", "", time.Time{}
+		return tokenMalformed, "", "", time.Time{}
 	}
 	exp := time.Unix(expUnix, 0)
-	if time.Now().After(exp) {
-		return false, f[1], f[0], exp
+	// 先验签：签名为身份的唯一依据，签名不符时不采信任何载荷内容
+	mac := hmac.New(sha256.New, g.key)
+	mac.Write(payload)
+	if !hmac.Equal(sig, mac.Sum(nil)) {
+		return tokenBadSig, "", "", time.Time{}
 	}
-	return true, f[1], f[0], exp
+	if time.Now().After(exp) {
+		return tokenExpired, f[1], f[0], exp
+	}
+	return tokenOK, f[1], f[0], exp
+}
+
+// verifyIDToken 向后兼容包装：仅保留"有效/无效 + 绑定信息"。
+func (g *IPGuard) verifyIDToken(token, currentIP string) (bool, string, string, time.Time) {
+	st, fp, ip, exp := g.verifyIDTokenEx(token, currentIP)
+	return st == tokenOK, fp, ip, exp
 }
 
 // ---------- 封禁执行 ----------
@@ -322,8 +343,17 @@ func (g *IPGuard) isWhitelisted(ip string) bool {
 }
 
 // ban 执行封禁（升级制：查旧记录 strikes+1，超 30 天衰减回初犯档）；severe 直接不低于 7 天档。
+//
+// 幂等保护：同一"正在进行中"的封禁期内不再升级 strikes——否则同一次违规被多类事件
+// 反复触发会一路跳到 30 天（旧实现的升级放大器，会把一次误判放大成月级封禁）。
+// 解封后再次违规仍按累犯正常升级。
 func (g *IPGuard) ban(ctx context.Context, ip, reason string, severe bool) {
 	old, err := g.store.FindBan(ctx, ip)
+	if old != nil && err == nil && time.Now().Before(old.ExpiresAt) {
+		log.Printf("[ipguard] 已在封禁中，不重复升级 %s（剩余 %v）：%s",
+			ip, time.Until(old.ExpiresAt).Round(time.Minute), reason)
+		return
+	}
 	strikes := 1
 	if old != nil && err == nil {
 		strikes = old.Strikes + 1
@@ -346,7 +376,9 @@ func (g *IPGuard) ban(ctx context.Context, ip, reason string, severe bool) {
 	log.Printf("[ipguard] 封禁 %s（第 %d 次，%v）：%s", ip, strikes, dur, reason)
 }
 
-// event 记一条违规事件并检查积分是否到封禁线；severe 跳过积分直接封。
+// event 记一条违规事件并做封禁决策。severe=true 仅用于**无歧义的即时严重事件**
+// （流量攻击 / 结构非法的身份令牌）；其余一律走 iprisk 多证据判定，
+// 避免共享出口、浏览器缩放、链接预览爬虫等场景的误封。
 func (g *IPGuard) event(ctx context.Context, ip, kind, detail string, score int, severe bool) {
 	if severe {
 		_ = g.store.AddIPEvent(ctx, ip, kind, detail, score)
@@ -366,13 +398,46 @@ func (g *IPGuard) event(ctx context.Context, ip, kind, detail string, score int,
 		log.Printf("[ipguard] 事件写入失败: %v", err)
 		return
 	}
-	total, err := g.store.RecentIPEventsScore(ctx, ip, banWindowSeconds)
+	g.decideBan(ctx, ip, kind)
+}
+
+// decideBan 取该 IP 近期事件做多证据决策（算法见 internal/domain/iprisk）：
+// 单信号（速率/环境核验/爬虫 UA/管理端探测）在结构上无法单独致封，
+// 必须"不同违规类型 ≥2 互证"或"单类型持续越线"才封。
+func (g *IPGuard) decideBan(ctx context.Context, ip, trigger string) {
+	events, err := g.store.ListIPEventsByIP(ctx, ip, 80)
 	if err != nil {
+		// 取不到明细时回退粗口径，并把门槛抬到 1.5×（宁可放过，不可误封）
+		if total, err2 := g.store.RecentIPEventsScore(ctx, ip, banWindowSeconds); err2 == nil &&
+			total >= int(iprisk.Threshold*1.5) {
+			g.ban(ctx, ip, "累计积分 "+strconv.Itoa(total)+"（回退口径）", false)
+		}
 		return
 	}
-	if total >= scoreBanThreshold {
-		g.ban(ctx, ip, kind+"(积分 "+ strconv.Itoa(total) + ")", false)
+	evs := make([]iprisk.Event, 0, len(events))
+	for _, e := range events {
+		evs = append(evs, iprisk.Event{Kind: e.Kind, Score: e.Score, At: e.At})
 	}
+	d := iprisk.Evaluate(evs, time.Now(), g.uaDiversity(ip))
+	if d.Ban {
+		g.ban(ctx, ip, d.Reason, false)
+		return
+	}
+	// 接近阈值时打观察日志，便于评估算法（不改判定）
+	if d.Effective >= iprisk.Threshold*0.6 {
+		log.Printf("[ipguard] 观察 %s（触发 %s）：有效分 %.0f，%d 种类型，稀释 %.2f，UA 种类 %d",
+			ip, trigger, d.Effective, d.Kinds, d.Dilution, d.UADiversity)
+	}
+}
+
+// uaDiversity 该 IP 窗口内不同 UA 数（共享出口识别，iprisk 稀释依据）。
+func (g *IPGuard) uaDiversity(ip string) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if w := g.windows[ip]; w != nil {
+		return len(w.uaSet)
+	}
+	return 0
 }
 
 // ---------- 中间件 ----------
@@ -569,12 +634,19 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 	}
 	ok, tokFp, tokIP, exp := g.verifyIDToken(cookie.Value, ip)
 	if !ok {
-		if !exp.IsZero() && time.Now().After(exp) {
+		st, _, _, _ := g.verifyIDTokenEx(cookie.Value, ip)
+		switch st {
+		case tokenMalformed:
+			// 结构非法 = 明确伪造尝试（无歧义，可即时封）
+			g.event(ctx, ip, "id-forgery", "身份令牌结构非法", 100, true)
+		case tokenBadSig:
+			// 结构合法但签名失效：绝大多数是服务重启 / IP_GUARD_SECRET 轮换后的老令牌。
+			// 按低分观察处理并重签，避免"重启即封光老访客"（旧实现的灾难路径）。
+			g.event(ctx, ip, "id-token-stale", "身份令牌签名失效（疑密钥轮换）", 15, false)
+			g.issue(w, ip, fp)
+		default: // tokenExpired
 			g.issue(w, ip, fp) // 过期属正常，重新签发
-			return
 		}
-		// 签名错误且未过期 = 伪造/篡改 → 严重违规
-		g.event(ctx, ip, "id-forgery", "身份令牌签名无效", 100, true)
 		return
 	}
 	// 令牌绑定的 IP 与当前不符：Cookie 被搬到别的网络。
@@ -658,7 +730,9 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	if err == nil && len(bannedKin) > 0 && !contains(knownIPs[:len(knownIPs)-1], ip) {
 		// 只在"本 IP 新出现在该指纹下"时判定，避免已封 IP 反复上报刷日志
 		if g.fpHasRecentViolations(ctx, knownIPs, ip) {
-			g.event(ctx, ip, "fp-linked", sprintf("指纹曾关联封禁 IP %s 且设备有劣迹", strings.Join(bannedKin, ",")), 100, true)
+			// 指纹连坐：分数降到强类上限 70（不单独致封）。指纹碰撞（同型号设备/同镜像
+			// 电脑）会造成无辜用户命中，需与 fp-churn 等第二种证据互证才封。
+			g.event(ctx, ip, "fp-linked", sprintf("指纹曾关联封禁 IP %s 且设备有劣迹", strings.Join(bannedKin, ",")), 70, false)
 			out["banned"] = true
 			return out, true
 		}

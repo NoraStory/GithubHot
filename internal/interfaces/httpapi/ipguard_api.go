@@ -27,18 +27,20 @@ type fpPayload struct {
 }
 
 // flagScore 第三层各命中项的违规积分与严重级别。
+// 注意：环境核验 flags 来自客户端 JS 自报，可被伪造、也会被共享出口分摊，
+// 因此**全部不设 severe**（不再即时封禁）——由 iprisk 多证据算法决定是否封禁。
 var flagScore = map[string]struct {
 	score  int
 	severe bool
 }{
-	"navigator-webdriver":   {60, true},
-	"automation-global":     {60, true},
-	"headless-ua":           {50, true},
-	"ua-platform-mismatch":  {30, false},
-	"ua-ch-mismatch":        {35, false},
-	"lang-tz-mismatch":      {15, false},
-	"no-plugins":            {10, false},
-	"env-incoherent":        {30, false},
+	"navigator-webdriver":  {60, false},
+	"automation-global":    {60, false},
+	"headless-ua":          {50, false},
+	"ua-platform-mismatch": {30, false},
+	"ua-ch-mismatch":       {35, false},
+	"lang-tz-mismatch":     {15, false},
+	"no-plugins":           {10, false},
+	"env-incoherent":       {30, false},
 }
 
 // fpReportAPI POST /api/v1/fp/report：浏览器上报设备指纹，服务端登记并做连坐判定。
@@ -96,13 +98,15 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 
 	meta := FingerprintMeta{Webrtc: p.WebRTC, Components: p.Components, Flags: flags}
 	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, meta)
-	// 每个命中项记违规事件（积分见 flagScore）
+	// 每个命中项记违规事件（积分见 flagScore）。
+	// kind 按 flag 细分（env-flag:<flag>）：使不同命中项成为**独立证据**参与互证，
+	// 同时让 5 分钟去重按 flag 粒度生效——否则多条 flag 会被压成同一条事件。
 	for _, f := range flags {
 		fs, ok := flagScore[f]
 		if !ok {
 			fs = flagScore["env-incoherent"]
 		}
-		s.Guard.Event(ctx, ip, "env-flag", "环境核验命中 "+f, fs.score, fs.severe)
+		s.Guard.Event(ctx, ip, "env-flag:"+f, "环境核验命中 "+f, fs.score, fs.severe)
 	}
 	writeJSON(w, 200, out)
 }
