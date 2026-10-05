@@ -366,8 +366,8 @@ const rtcLeak = f => (f.Webrtc || []).some(x => x && x !== detail.value?.ip)
               <th>关联 IP 数</th><th>WebRTC 真实 IP</th><th>最近使用</th><th>上报次数</th>
             </tr></thead>
             <tbody>
-              <tr v-for="f in detail.fingerprints" :key="f.Fingerprint"
-                  class="fp-row" :class="{ 'row-risk': isRisk(f) }"
+              <template v-for="f in detail.fingerprints" :key="f.Fingerprint">
+              <tr class="fp-row" :class="{ 'row-risk': isRisk(f) }"
                   @click="expandedFp = expandedFp === f.Fingerprint ? '' : f.Fingerprint">
                 <td class="mono" :title="f.Fingerprint + '\n' + f.UA">
                   <span class="caret">{{ expandedFp === f.Fingerprint ? '▾' : '▸' }}</span>
@@ -433,6 +433,7 @@ const rtcLeak = f => (f.Webrtc || []).some(x => x && x !== detail.value?.ip)
                   </div>
                 </td>
               </tr>
+              </template>
             </tbody>
           </table>
           <div v-else class="empty">无关联指纹</div>
