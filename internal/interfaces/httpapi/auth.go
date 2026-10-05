@@ -195,10 +195,11 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		adminLoginGuard.fail(ip)
-		// 联动 IP 防护：连续爆破触发锁定时按严重违规封禁
+		// 联动 IP 防护：连续爆破触发锁定 → 按强证据计分（非 severe：初犯档 30 分钟，
+		// 而非旧实现的 7 天——管理员自己连错 5 次密码不应被月级封禁）
 		if s.Guard != nil && !adminLoginGuard.allow(ip) {
 			ctx2, cancel2 := contextWithTimeout(r.Context())
-			s.Guard.Event(ctx2, clientIP(r.RemoteAddr), "admin-brute", "管理端密码爆破锁定", 100, true)
+			s.Guard.Event(ctx2, clientIP(r.RemoteAddr), "admin-brute", "管理端密码爆破锁定", 100, false)
 			cancel2()
 		}
 		log.Printf("[admin] %s 登录失败", ip)

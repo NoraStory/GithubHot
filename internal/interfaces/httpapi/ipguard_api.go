@@ -26,6 +26,25 @@ type fpPayload struct {
 	Coherent    bool              `json:"coherent"` // 旧客户端兼容：UA 与 platform 一致性
 }
 
+// sanitizeComponents 清洗上报的分量明细：键值长度上限 + 键数上限，
+// 防止伪造超大/超多的 components 撑爆存储（键名 32 字节、值 128 字节、最多 16 项）。
+func sanitizeComponents(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		if len(out) >= 16 {
+			break
+		}
+		if k == "" || len(k) > 32 || len(v) > 128 {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // flagScore 第三层各命中项的违规积分与严重级别。
 // 注意：环境核验 flags 来自客户端 JS 自报，可被伪造、也会被共享出口分摊，
 // 因此**全部不设 severe**（不再即时封禁）——由 iprisk 多证据算法决定是否封禁。
@@ -96,7 +115,7 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 		flags = append(flags, "headless-ua")
 	}
 
-	meta := FingerprintMeta{Webrtc: p.WebRTC, Components: p.Components, Flags: flags}
+	meta := FingerprintMeta{Webrtc: p.WebRTC, Components: sanitizeComponents(p.Components), Flags: flags}
 	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, meta)
 	// 每个命中项记违规事件（积分见 flagScore）。
 	// kind 按 flag 细分（env-flag:<flag>）：使不同命中项成为**独立证据**参与互证，

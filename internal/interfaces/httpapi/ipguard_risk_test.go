@@ -148,6 +148,7 @@ func tail(in []IPEventDTO, n int) []IPEventDTO {
 func TestTokenKeyRotationDoesNotBan(t *testing.T) {
 	store := newFakeStore()
 	t.Setenv("IP_GUARD_ENABLED", "1")
+	t.Setenv("TRUSTED_PROXY", "127.0.0.1/32") // 测试用 XFF 模拟公网客户端，需声明受信代理
 
 	// 模拟"重启前"的实例签发令牌
 	t.Setenv("IP_GUARD_SECRET", "secret-before-rotation-0123456789")
@@ -160,6 +161,7 @@ func TestTokenKeyRotationDoesNotBan(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/hot", nil)
+	req.RemoteAddr = "127.0.0.1:5555" // 以本机反向代理为直连方（TRUSTED_PROXY 生效）
 	req.Header.Set("X-Forwarded-For", "1.2.3.4")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0")
 	req.AddCookie(&http.Cookie{Name: idCookieName, Value: token})
@@ -186,11 +188,13 @@ func TestTokenKeyRotationDoesNotBan(t *testing.T) {
 func TestMalformedTokenStillBans(t *testing.T) {
 	store := newFakeStore()
 	t.Setenv("IP_GUARD_ENABLED", "1")
+	t.Setenv("TRUSTED_PROXY", "127.0.0.1/32") // 测试用 XFF 模拟公网客户端，需声明受信代理
 	t.Setenv("IP_GUARD_SECRET", "secret-0123456789abcdef")
 	g := NewIPGuard(store)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/hot", nil)
+	req.RemoteAddr = "127.0.0.1:5555" // 以本机反向代理为直连方（TRUSTED_PROXY 生效）
 	req.Header.Set("X-Forwarded-For", "5.6.7.8")
 	req.Header.Set("User-Agent", "Mozilla/5.0 Chrome/126.0")
 	req.AddCookie(&http.Cookie{Name: idCookieName, Value: "v2.bm90LWJhc2U2NA.c2hvcnQ"})
@@ -212,6 +216,7 @@ func TestMalformedTokenStillBans(t *testing.T) {
 func TestSingleEnvFlagDoesNotBan(t *testing.T) {
 	store := newFakeStore()
 	t.Setenv("IP_GUARD_ENABLED", "1")
+	t.Setenv("TRUSTED_PROXY", "127.0.0.1/32") // 测试用 XFF 模拟公网客户端，需声明受信代理
 	g := NewIPGuard(store)
 	ctx := context.Background()
 
@@ -226,6 +231,7 @@ func TestSingleEnvFlagDoesNotBan(t *testing.T) {
 func TestRepeatedAdminProbeDoesNotBan(t *testing.T) {
 	store := newFakeStore()
 	t.Setenv("IP_GUARD_ENABLED", "1")
+	t.Setenv("TRUSTED_PROXY", "127.0.0.1/32") // 测试用 XFF 模拟公网客户端，需声明受信代理
 	g := NewIPGuard(store)
 	ctx := context.Background()
 	const ip = "9.9.9.8"
@@ -248,6 +254,7 @@ func TestRepeatedAdminProbeDoesNotBan(t *testing.T) {
 func TestCorroboratedEnvFlagsBan(t *testing.T) {
 	store := newFakeStore()
 	t.Setenv("IP_GUARD_ENABLED", "1")
+	t.Setenv("TRUSTED_PROXY", "127.0.0.1/32") // 测试用 XFF 模拟公网客户端，需声明受信代理
 	g := NewIPGuard(store)
 	ctx := context.Background()
 	const ip = "3.3.3.3"
@@ -265,6 +272,7 @@ func TestCorroboratedEnvFlagsBan(t *testing.T) {
 func TestDistinctEnvFlagKindsAreIndependent(t *testing.T) {
 	store := newFakeStore()
 	t.Setenv("IP_GUARD_ENABLED", "1")
+	t.Setenv("TRUSTED_PROXY", "127.0.0.1/32") // 测试用 XFF 模拟公网客户端，需声明受信代理
 	g := NewIPGuard(store)
 	ctx := context.Background()
 	const ip = "3.3.3.4"
@@ -285,6 +293,7 @@ func TestDistinctEnvFlagKindsAreIndependent(t *testing.T) {
 func TestCorroboratedEvidenceBans(t *testing.T) {
 	store := newFakeStore()
 	t.Setenv("IP_GUARD_ENABLED", "1")
+	t.Setenv("TRUSTED_PROXY", "127.0.0.1/32") // 测试用 XFF 模拟公网客户端，需声明受信代理
 	g := NewIPGuard(store)
 	ctx := context.Background()
 
@@ -307,6 +316,7 @@ func TestCorroboratedEvidenceBans(t *testing.T) {
 func TestGuardDilutesSharedOutlet(t *testing.T) {
 	store := newFakeStore()
 	t.Setenv("IP_GUARD_ENABLED", "1")
+	t.Setenv("TRUSTED_PROXY", "127.0.0.1/32") // 测试用 XFF 模拟公网客户端，需声明受信代理
 	g := NewIPGuard(store)
 	ctx := context.Background()
 	ip := "7.7.7.7"
@@ -316,6 +326,7 @@ func TestGuardDilutesSharedOutlet(t *testing.T) {
 	h := g.Middleware(next)
 	for i := 0; i < 5; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/hot", nil)
+		req.RemoteAddr = "127.0.0.1:5555" // 以本机反向代理为直连方（TRUSTED_PROXY 生效）
 		req.Header.Set("X-Forwarded-For", ip)
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0) Chrome/12"+string(rune('0'+i)))
 		h.ServeHTTP(httptest.NewRecorder(), req)
@@ -340,6 +351,7 @@ func TestGuardDilutesSharedOutlet(t *testing.T) {
 func TestBanWallAndRescuePath(t *testing.T) {
 	store := newFakeStore()
 	t.Setenv("IP_GUARD_ENABLED", "1")
+	t.Setenv("TRUSTED_PROXY", "127.0.0.1/32") // 测试用 XFF 模拟公网客户端，需声明受信代理
 	g := NewIPGuard(store)
 	if err := store.UpsertBan(context.Background(), "6.6.6.6", 3, 3, "测试封禁", time.Hour); err != nil {
 		t.Fatal(err)
@@ -349,6 +361,7 @@ func TestBanWallAndRescuePath(t *testing.T) {
 
 	blocked := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/hot", nil)
+	req.RemoteAddr = "127.0.0.1:5555" // 以本机反向代理为直连方（TRUSTED_PROXY 生效）
 	req.Header.Set("X-Forwarded-For", "6.6.6.6")
 	h.ServeHTTP(blocked, req)
 	if blocked.Code != http.StatusNotFound {
@@ -357,9 +370,12 @@ func TestBanWallAndRescuePath(t *testing.T) {
 
 	rescue := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ipguard/summary", nil)
+	req2.RemoteAddr = "127.0.0.1:5555"
 	req2.Header.Set("X-Forwarded-For", "6.6.6.6")
 	h.ServeHTTP(rescue, req2)
 	if rescue.Code == http.StatusNotFound {
 		t.Fatalf("被封 IP 应能访问 ipguard 自救端点")
 	}
 }
+
+

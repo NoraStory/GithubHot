@@ -166,13 +166,18 @@ function webrtcIPs() {
   })
 }
 
-// 环境参数信号
+// 环境参数信号（构成身份哈希的稳定项）
+//
+// 注意：devicePixelRatio **刻意不参与身份哈希**——浏览器缩放（Ctrl+/-）、窗口拖到
+// 不同缩放比的显示器都会改变它，若并入哈希会导致同一台设备产生新指纹，进而触发
+// 服务端 device-mismatch（旧实现 +80 分，10 分钟内缩放两次即可致封）。
+// DPR 作为软信号单独上报（components.dpr），仅供管理端排查，不影响身份判定。
 function envSignals() {
   const n = navigator
   return [
     n.userAgent, n.platform || '', (n.languages || []).join(','),
     -new Date().getTimezoneOffset(), screen.width + 'x' + screen.height,
-    screen.colorDepth, window.devicePixelRatio, n.hardwareConcurrency || 0,
+    screen.colorDepth, n.hardwareConcurrency || 0,
     n.deviceMemory || 0, n.maxTouchPoints || 0,
     'ontouchstart' in window ? 1 : 0
   ].join('|')
@@ -197,7 +202,8 @@ export async function reportFingerprint() {
         components: {
           canvas, webgl: webgl.hash, audio, fonts,
           screen: screen.width + 'x' + screen.height,
-          renderer: webgl.renderer
+          renderer: webgl.renderer,
+          dpr: String(window.devicePixelRatio)   // 软信号：不参与身份哈希
         },
         flags
       })

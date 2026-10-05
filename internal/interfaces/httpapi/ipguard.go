@@ -174,6 +174,8 @@ type IPGuard struct {
 	fpReport map[string][]time.Time // 指纹上报限频
 	// whitelist 管理端会话 IP 临时免封禁（登录/会话校验时刷新，TTL 与会话一致）
 	whitelist map[string]time.Time
+	// fpColl 指纹碰撞检测（同型号设备指纹重合 → 豁免连坐）
+	fpColl *fpCollision
 }
 
 type banCacheEntry struct {
@@ -202,6 +204,7 @@ func NewIPGuard(store GuardStore) *IPGuard {
 		banCache:     map[string]banCacheEntry{},
 		fpReport:     map[string][]time.Time{},
 		whitelist:    map[string]time.Time{},
+		fpColl:       newFPCollision(),
 	}
 }
 
@@ -214,19 +217,7 @@ func isLocalIP(ip string) bool {
 	return p.IsLoopback() || p.IsPrivate() || p.IsLinkLocalUnicast()
 }
 
-// clientIPFromRequest 取客户端 IP（优先 X-Forwarded-For / X-Real-IP）。
-func clientIPFromRequest(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.Index(xff, ","); i > 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-	return clientIP(r.RemoteAddr)
-}
+// clientIPFromRequest 见 clientip.go（受信代理解析：默认不信任 X-Forwarded-For）。
 
 // ---------- 身份令牌（第三层·特殊标识） ----------
 //
@@ -463,7 +454,8 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 		// 未授权入口）。
 		if g.isBanned(ctx, ip) {
 			if local || g.isWhitelisted(ip) || strings.HasPrefix(r.URL.Path, "/api/v1/admin/ipguard/") ||
-				strings.HasPrefix(r.URL.Path, "/api/v1/admin/probes") {
+				strings.HasPrefix(r.URL.Path, "/api/v1/admin/probes") ||
+				strings.HasPrefix(r.URL.Path, "/api/v1/admin/system/") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -661,9 +653,12 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 		g.issue(w, ip, fp)
 		return
 	}
-	// 设备指纹与令牌绑定的不符：Cookie 被搬到别的设备 → 高危
+	// 设备指纹与令牌绑定的不符：Cookie 被搬到别的设备 → 高危。
+	// 计分后立即按新指纹重新签发：同一次变更只留一条证据，避免被反复计分
+	// （前端指纹算法升级、显示器缩放等会造成一次性指纹变化，不应累积致封）。
 	if fp != "" && tokFp != "" && fp != tokFp {
 		g.event(ctx, ip, "device-mismatch", "设备指纹与身份令牌绑定不符", 80, false)
+		g.issue(w, ip, fp)
 	}
 	// 临近过期滑动续期
 	if time.Until(exp) < 24*time.Hour {
@@ -721,6 +716,12 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 		return out, false
 	}
 	if local {
+		return out, false
+	}
+	// 指纹碰撞检测：同一指纹近 10 分钟被多个不同 IP 使用 = 同型号设备指纹重合，
+	// 而不是"同一台设备换网络"。此类指纹豁免连坐与漂移升级，避免无关用户被连坐。
+	if g.fpColl.observe(fp, ip, time.Now()) {
+		g.event(ctx, ip, "fp-collision-watch", "同一指纹 10 分钟内多 IP 并发（疑指纹碰撞，已豁免连坐）", 0, false)
 		return out, false
 	}
 	// 连坐双因子：干净设备连到被封的共享出口（酒店/机场/运营商 NAT 被前任搞封）
