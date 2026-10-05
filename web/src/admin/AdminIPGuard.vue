@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { api } from '../lib/api'
 
 const data = ref(null)
@@ -15,6 +15,7 @@ const RANGES = [[0, '全部时间'], [1, '近 1 小时'], [24, '近 24 小时'],
 // IP 下钻详情
 const detail = ref(null)
 const detailLoading = ref(false)
+const detailPanel = ref(null)   // 详情面板 DOM 引用（点击 IP 后滚动定位）
 const detailError = ref('')
 
 const match = (ip) => !ipFilter.value || (ip || '').includes(ipFilter.value.trim())
@@ -84,6 +85,10 @@ async function showIP(ip) {
   detailError.value = ''
   detailLoading.value = true
   detail.value = null
+  // 面板位于页面上部，而 IP 链接分布在下方多个列表：加载后滚动到面板，
+  // 否则「点了没反应」（内容在视口外）
+  await nextTick()
+  detailPanel.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   try {
     const q = eventsHours.value > 0 ? '&hours=' + eventsHours.value : ''
     const d = await api.get('/api/v1/admin/ipguard/ip?ip=' + encodeURIComponent(ip) + q)
@@ -285,7 +290,7 @@ const rtcLeak = f => (f.Webrtc || []).some(x => x && x !== detail.value?.ip)
       </div>
 
       <!-- IP 下钻详情 -->
-      <div v-if="detail || detailLoading || detailError" class="card detail-panel">
+      <div v-if="detail || detailLoading || detailError" ref="detailPanel" :key="detail?.ip || 'pending'" class="card detail-panel">
         <div class="detail-head">
           <h3>🔎 IP 详情：{{ detail?.ip || ipFilter }}</h3>
           <div>
@@ -600,7 +605,11 @@ th { color: var(--anzhiyu-gray); font-weight: 500; }
 .dev.app { color: var(--anzhiyu-theme); font-weight: 600; }
 .dev.web { color: var(--anzhiyu-secondary); }
 .row-risk { box-shadow: inset 3px 0 0 var(--anzhiyu-red); }
-.detail-panel { border: 1px solid var(--anzhiyu-theme); }
+.detail-panel { border: 1px solid var(--anzhiyu-theme); scroll-margin-top: 12px; animation: panelIn .45s ease; }
+@keyframes panelIn {
+  0% { box-shadow: 0 0 0 4px var(--anzhiyu-theme-op); }
+  100% { box-shadow: var(--card-box-shadow); }
+}
 .detail-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
 .detail-head h3 { margin: 0; }
 .detail-head .btn { margin-left: 8px; }
