@@ -68,6 +68,11 @@ const (
 	fpViolationProbe    = 5
 	// 封禁累犯衰减期：超过该时长无违规，strike 回初犯档
 	banStrikeDecay = 30 * 24 * time.Hour
+
+	// 握手通道专用限流：/api/v1/site/config 免签（APP 冷启动要从这里拿远程封禁 /
+	// 强制更新策略）且会触发指纹归档写库，必须自己限流，否则可被无限重放。
+	handshakePath        = "/api/v1/site/config"
+	handshakeRateDefault = 30 // req/min/ip
 )
 
 // GuardStore 防护存储端口（sqlite.DB 实现，cli 层适配）。
@@ -155,6 +160,7 @@ type ipWindow struct {
 	uaSet    map[string]bool
 	lastFlush time.Time
 	dirty     bool
+	hsTimes   []time.Time // 握手通道请求时间（独立 60s 窗口，见 handshakeAllow）
 }
 
 // IPGuard 防护引擎。
@@ -463,24 +469,33 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// ② 第一层：滑动窗口记录（healthz 不计）
+		// ② 握手通道专用限流（/api/v1/site/config 免签 + 触发指纹归档写库）。
+		// 走独立计数窗口：与全站速率互不干扰，也不因"通用阈值很高"被绕过。
+		if !local && r.URL.Path == handshakePath {
+			if !g.handshakeAllow(ctx, ip) {
+				writeJSON(w, 429, map[string]any{"error": "too many requests"})
+				return
+			}
+		}
+
+		// ③ 第一层：滑动窗口记录（healthz 不计）
 		rec := &statusWriter{ResponseWriter: w, status: 200}
 		win := g.record(ip, r.UserAgent())
 		path := r.URL.Path
 
-		// ③ 第三层：身份令牌核验（API/带指纹请求）
+		// ④ 第三层：身份令牌核验（API/带指纹请求）
 		if !local {
 			g.verifyIdentity(ctx, w, r, ip, fp)
 		}
 
-		// ④ 速率与爬虫判定（除白名单）
+		// ⑤ 速率与爬虫判定（除白名单）
 		if !local && path != "/healthz" {
 			g.evaluate(ctx, ip, path, r.UserAgent(), win)
 		}
 
 		next.ServeHTTP(rec, r)
 
-		// ⑤ 404 率统计
+		// ⑥ 404 率统计
 		if rec.status == 404 {
 			g.mu.Lock()
 			if w := g.windows[ip]; w != nil {
@@ -489,6 +504,46 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 			g.mu.Unlock()
 		}
 	})
+}
+
+// handshakeAllow 握手通道滑动窗口（60s）判定：放行 true；超限 false 并计分。
+// 计数按 IP 独立存放（ipWindow.hsTimes），与全站速率窗口互不影响。
+func (g *IPGuard) handshakeAllow(ctx context.Context, ip string) bool {
+	limit := handshakeRatePerMin()
+	now := time.Now()
+	g.mu.Lock()
+	w := g.windows[ip]
+	if w == nil {
+		w = &ipWindow{uaSet: map[string]bool{}, lastFlush: now}
+		g.windows[ip] = w
+	}
+	cutoff := now.Add(-time.Minute)
+	keep := w.hsTimes[:0]
+	for _, t := range w.hsTimes {
+		if t.After(cutoff) {
+			keep = append(keep, t)
+		}
+	}
+	w.hsTimes = append(keep, now)
+	n := len(w.hsTimes)
+	g.mu.Unlock()
+
+	if n > limit {
+		// 弱证据（协议类）：限流命中只作为观察与互证素材，单条不封
+		g.event(ctx, ip, "handshake-rate", sprintf("握手通道 %d req/min（上限 %d）", n, limit), 30, false)
+		return false
+	}
+	return true
+}
+
+// handshakeRatePerMin 握手通道阈值（env HANDSHAKE_RATE_PER_MIN，默认 30）。
+func handshakeRatePerMin() int {
+	if v := strings.TrimSpace(os.Getenv("HANDSHAKE_RATE_PER_MIN")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return handshakeRateDefault
 }
 
 // statusWriter 捕获响应状态码。
