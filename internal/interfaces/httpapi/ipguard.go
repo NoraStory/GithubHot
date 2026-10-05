@@ -20,6 +20,7 @@ import (
 	"github.com/NoraStory/GithubHot/internal/domain/fpmath"
 	"github.com/NoraStory/GithubHot/internal/domain/iprisk"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/geoip"
+	"github.com/NoraStory/GithubHot/internal/infrastructure/ja4db"
 )
 
 // ---------- 三层 IP 身份识别体系 ----------
@@ -93,6 +94,8 @@ const (
 	geoHostingMobileUAScore = 15
 	// P2-4 轮换检测计分（换脸实锤：稳定分量突变 + 数学指纹关联旧指纹）
 	rotationDetectedScore = 25
+	// P3-3 UA↔TLS 交叉核验：浏览器 UA + 已知非浏览器 TLS 栈（高置信）
+	uaTLSMismatchScore = 25
 
 	// 握手通道专用限流：/api/v1/site/config 免签（APP 冷启动要从这里拿远程封禁 /
 	// 强制更新策略）且会触发指纹归档写库，必须自己限流，否则可被无限重放。
@@ -160,6 +163,7 @@ type FingerprintDTO struct {
 	EntropyBits float64            // P2-3 分量熵权（信息量 bit，每日 cron 刷新；0=未计算）
 	Stability   float64            // P2-4 整体时间稳定度（0-1）
 	CompStability map[string]float64 // P2-4 各分量稳定度（键 → EWMA，缺失键 = 无历史）
+	JA4         string             // P3-2 TLS 客户端指纹（TLS 模式下捕获；纯 HTTP 为空）
 }
 
 // PHashRowDTO 感知哈希候选行（同源关联扫描）。
@@ -200,6 +204,33 @@ type FingerprintMeta struct {
 	TZOffsetMin int                 // P2-5 客户端时区偏移（分钟，东八区=480），可选
 	Stability   float64             // P2-4 整体稳定度（引擎计算后随 upsert 落库）
 	CompStability map[string]float64 // P2-4 各分量稳定度（引擎计算后随 upsert 落库）
+	JA4         string              // P3-2 TLS 客户端指纹（TLS 模式下由连接上下文注入）
+}
+
+// ja4CtxKey TLS 指纹的 context 键（连接级注入，请求级读取）。
+type ja4CtxKey struct{}
+
+// JA4Resolver 延迟解析连接的 JA4：Go 的 TLS 握手是惰性的（首个请求读取时才发生），
+// ConnContext 执行时握手尚未开始、指纹还没算出来——所以上下文里放"解析器引用"，
+// 请求时刻（握手已完成）再取。
+type JA4Resolver interface {
+	ResolveJA4() string
+}
+
+// WithJA4 注入 JA4：v 为字符串（已知值，测试/直连场景）或 JA4Resolver（延迟解析）。
+func WithJA4(ctx context.Context, v any) context.Context {
+	return context.WithValue(ctx, ja4CtxKey{}, v)
+}
+
+// JA4FromContext 读取当前连接的 JA4 指纹（非 TLS 模式返回空串）。
+func JA4FromContext(ctx context.Context) string {
+	switch v := ctx.Value(ja4CtxKey{}).(type) {
+	case string:
+		return v
+	case JA4Resolver:
+		return v.ResolveJA4()
+	}
+	return ""
 }
 type BanDTO struct {
 	IP        string
@@ -250,11 +281,18 @@ type GeoProvider interface {
 	ASN(ip net.IP) (uint, string)
 }
 
+// JA4Mapper P3-3 JA4 → 应用名 映射源（ja4db.DB 实现；测试可注入 stub）。
+type JA4Mapper interface {
+	Loaded() bool
+	Lookup(ja4 string) (app string, ok bool)
+}
+
 // IPGuard 防护引擎。
 type IPGuard struct {
 	store GuardStore
 	key   []byte // HMAC 密钥
 	geo   GeoProvider
+	ja4   JA4Mapper
 
 	enabled    bool
 	localOK    bool // 回环/内网放行
@@ -772,7 +810,7 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 	if err != nil || cookie.Value == "" {
 		// 无令牌：带指纹的 API 请求直接签发；纯页面请求等首次 API 调用再签
 		if fp != "" {
-			g.issue(w, ip, fp)
+			g.issue(w, r, ip, fp)
 		}
 		return
 	}
@@ -787,9 +825,9 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 			// 结构合法但签名失效：绝大多数是服务重启 / IP_GUARD_SECRET 轮换后的老令牌。
 			// 按低分观察处理并重签，避免"重启即封光老访客"（旧实现的灾难路径）。
 			g.event(ctx, ip, "id-token-stale", "身份令牌签名失效（疑密钥轮换）", 15, false)
-			g.issue(w, ip, fp)
+			g.issue(w, r, ip, fp)
 		default: // tokenExpired
-			g.issue(w, ip, fp) // 过期属正常，重新签发
+			g.issue(w, r, ip, fp) // 过期属正常，重新签发
 		}
 		return
 	}
@@ -802,7 +840,7 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 		} else {
 			g.event(ctx, ip, "id-ip-drift", sprintf("令牌绑定 %s，当前 %s", tokIP, ip), 60, false)
 		}
-		g.issue(w, ip, fp)
+		g.issue(w, r, ip, fp)
 		return
 	}
 	// 设备指纹与令牌绑定的不符：Cookie 被搬到别的设备 → 高危。
@@ -810,16 +848,16 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 	// （前端指纹算法升级、显示器缩放等会造成一次性指纹变化，不应累积致封）。
 	if fp != "" && tokFp != "" && fp != tokFp {
 		g.event(ctx, ip, "device-mismatch", "设备指纹与身份令牌绑定不符", 80, false)
-		g.issue(w, ip, fp)
+		g.issue(w, r, ip, fp)
 	}
 	// 临近过期滑动续期
 	if time.Until(exp) < 24*time.Hour {
-		g.issue(w, ip, fp)
+		g.issue(w, r, ip, fp)
 	}
 }
 
 // issue 签发身份令牌 Cookie。
-func (g *IPGuard) issue(w http.ResponseWriter, ip, fp string) {
+func (g *IPGuard) issue(w http.ResponseWriter, r *http.Request, ip, fp string) {
 	token, exp := g.issueIDToken(ip, fp)
 	http.SetCookie(w, &http.Cookie{
 		Name:     idCookieName,
@@ -827,8 +865,10 @@ func (g *IPGuard) issue(w http.ResponseWriter, ip, fp string) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, // 允许页面导航正常回带
-		Secure:   false,                // 本地 HTTP 部署；HTTPS 下由反向代理改 Secure
-		Expires:  exp,
+		// P3-1：TLS 模式下带 Secure（直连 TLS 看 r.TLS；反代终止 TLS 看 X-Forwarded-Proto，
+		// 与管理端会话 Cookie 同一套口径）
+		Secure:  r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+		Expires: exp,
 	})
 }
 
@@ -900,6 +940,9 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	// P2-5 GeoIP 交叉核验：时区↔IP 归属国跨洲矛盾、机房 ASN + 移动端 UA 组合。
 	// 数据库缺失时整体降级（NewIPGuard 已处理），命中项受灰度控制。
 	g.geoEnrich(ctx, ip, ua, meta)
+	// P3-3 UA↔TLS 交叉核验：浏览器 UA 配上已知非浏览器 TLS 栈（curl/Go/Python 等）
+	// 是伪造 header 的硬证据；指纹未知（新客户端/新版本）只记录不计分。
+	g.tlsCheck(ctx, ip, ua, meta)
 	// 连坐双因子：干净设备连到被封的共享出口（酒店/机场/运营商 NAT 被前任搞封）
 	// 不算违规，只记低分观察；只有"该指纹名下其他 IP 近期也有劣迹"（代理池轮换
 	// 特征）才升级封禁。防误封核心：身份信号必须与设备劣迹叠加。
@@ -1173,6 +1216,42 @@ func (g *IPGuard) EntropyFactor(ctx context.Context, fp string) float64 {
 		return 1
 	}
 	return math.Min(1, row.EntropyBits/entropyFactorBits)
+}
+
+// SetJA4DB 注入 JA4 → 应用名 映射库（cli 装配时从 data/ja4-mapping.csv 加载）。
+// 未注入或未加载 → UA↔TLS 交叉核验整体降级跳过。
+func (g *IPGuard) SetJA4DB(db JA4Mapper) { g.ja4 = db }
+
+// tlsCheck UA↔TLS 交叉核验（P3-3，L1×L2 交汇点）：
+//   - JA4 ∈ 已知非浏览器栈 且 UA 声称浏览器 → env-flag:fpb_ua_tls_mismatch
+//     （高置信 +25，灰度期 0 分只记录）；
+//   - JA4 不在已知库 → env-flag:tls_unknown 仅记录（新版本浏览器/未知工具，不计分）；
+//   - 映射库未加载 / 纯 HTTP 部署（JA4 为空）→ 静默跳过。
+func (g *IPGuard) tlsCheck(ctx context.Context, ip, ua string, meta FingerprintMeta) {
+	if g.store == nil || g.ja4 == nil || !g.ja4.Loaded() || meta.JA4 == "" {
+		return
+	}
+	app, ok := g.ja4.Lookup(meta.JA4)
+	if !ok {
+		g.event(ctx, ip, "env-flag:tls_unknown",
+			sprintf("TLS 指纹 %s 不在已知库（新客户端或未知工具）", meta.JA4), 0, false)
+		return
+	}
+	if ja4db.IsNonBrowserApp(app) && uaClaimsBrowser(ua) {
+		score := 0
+		if !shadowScoring() {
+			score = uaTLSMismatchScore
+		}
+		g.event(ctx, ip, "env-flag:fpb_ua_tls_mismatch",
+			sprintf("TLS 栈为 %s（%s），UA 却声称浏览器", app, meta.JA4), score, false)
+	}
+}
+
+// uaClaimsBrowser UA 是否声称主流浏览器（Chrome/Edge/Firefox/Safari 系）。
+func uaClaimsBrowser(ua string) bool {
+	l := strings.ToLower(ua)
+	return strings.Contains(l, "chrome") || strings.Contains(l, "firefox") ||
+		strings.Contains(l, "safari") || strings.Contains(l, "edg/")
 }
 
 // geoEnrich GeoIP 交叉核验（P2-5）：补全 ip_profiles 的 ASN/国家，并做两项检测——

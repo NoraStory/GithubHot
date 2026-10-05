@@ -110,6 +110,9 @@ func (f *fakeGuardStore) UpsertFingerprint(_ context.Context, fp, ip, ua string,
 			if meta.MinHashSig != "" {
 				f.fps[i].MinHashSig = meta.MinHashSig
 			}
+			if meta.JA4 != "" {
+				f.fps[i].JA4 = meta.JA4
+			}
 			f.fps[i].Stability = meta.Stability
 			f.fps[i].CompStability = meta.CompStability
 			f.fps[i].LastSeen = time.Now()
@@ -119,6 +122,7 @@ func (f *fakeGuardStore) UpsertFingerprint(_ context.Context, fp, ip, ua string,
 	f.fps = append(f.fps, FingerprintDTO{
 		Fingerprint: fp, IPs: []string{ip}, UA: ua,
 		Components: meta.Components, CanvasPHash: meta.CanvasPHash, MinHashSig: meta.MinHashSig,
+		JA4:        meta.JA4,
 		Stability: meta.Stability, CompStability: meta.CompStability,
 		FirstSeen: time.Now(), LastSeen: time.Now(),
 	})

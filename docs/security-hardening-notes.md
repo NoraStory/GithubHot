@@ -14,7 +14,7 @@
 | P0-4 | 检测 flag 命中统计（后端聚合 + 面板区块） | ✅ 完成 | 见 git log `P0-4` |
 | P1 | 指纹浏览器识别（六路采集 + BotD + 计分接入） | ✅ 完成（2 处按实测调整，见下） | 见 git log `P1` |
 | P2 | 算法升级（pHash / MinHash+LSH / 熵权 / 稳定性 / GeoIP） | ✅ 完成（2 处按实测调整：GeoIP 数据集换 DBIP 系 + maxminddb 读取层；组件集合改前端上报原始清单，见下） | 见 git log `P2-1` / `P2` |
-| P3 | TLS + JA4 协议指纹 | ⏳ 待办 | — |
+| P3 | TLS + JA4 协议指纹 | ✅ 完成（2 处按实测调整：JA4 自实现不引 ja4plus；映射表为 FoxIO 样本数据，curl 走自有观测路径，见下） | 见 git log  |
 | P4 | 平台证明与高级项（Play Integrity / passkey / ALTCHA / 图聚类 / 行为采集 / 时钟偏移） | ⏳ 待办 | — |
 | P5 | 行为机器学习（标注 / iForest / LR / GBDT / PSI） | ⏳ 待办 | — |
 | P6 | 图算法升级（快照 / Louvain / GNN / MIDAS / 融合） | ⏳ 待办 | — |
@@ -316,6 +316,65 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
 - `/healthz` 封禁豁免：存活探针始终如实应答（封禁 IP 也是 200），外部监控不再把"已封禁"
   误报成"站点宕机"；其余路径维持全站 404。单测 + 活体（登录→手动封禁→404/200→解封恢复）。
 - `spa.go` `/app/` 的 403 分支确认为不可达死代码（IPGuard 中间件先 404）→ 删除，限频逻辑保留。
+
+---
+
+## P3 — TLS + JA4 协议指纹 ✅
+
+### P3-1 上 TLS（三模式）✅
+
+- `internal/interfaces/cli/serve.go` 重写为 `serveHTTP`：**证书 TLS**（`TLS_CERT`/`TLS_KEY`）、
+  **ACME 自动签发**（`ACME_DOMAIN` 逗号分隔，`data/acme` 缓存，80 端口自动监听 HTTP-01 挑战）、
+  **纯 HTTP**（两者都无 = 本地开发模式，JA4 随之优雅关闭）。`REDIRECT_HTTP=1` → 80 端口 301
+  跳 HTTPS（目标含非 443 主端口，沙盒 8792 亦可跳转）；80 绑定失败仅告警不阻断主服务。
+- HSTS 中间件（`max-age=31536000; includeSubDomains`）仅 TLS 模式启用（`Server.TLSMode`）；
+  `gh_id` cookie 改 `Secure: r.TLS != nil || X-Forwarded-Proto == "https"`（与管理端会话
+  cookie 同口径）。
+- 活体：`https://127.0.0.1:8792/healthz` 200 + HSTS 头在位；`http://127.0.0.1/api/v1/hot`
+  → `301 → https://127.0.0.1:8792/api/v1/hot`；`gh_id` Set-Cookie 带 `Secure`（自签证书直连 TLS）。
+
+### P3-2 JA4 采集 ✅（自实现，零第三方依赖）
+
+- 规格授权路径复核：`exaring/ja4plus` 与 FoxIO 系许可纠缠 → 采用规格书预置的 **stdlib 降级
+  方案**：`tls.Config.GetConfigForClient(*tls.ClientHelloInfo)` 捕获 ClientHello（含原始
+  Extensions 顺序表），**按 FoxIO 公开规格自实现 JA4**（JA4 本体 BSD-3，规格书 §0.8 允许）。
+- 域包 `internal/domain/tlsfp/ja4.go`（纯函数）：归一化再哈希——cipher/extension 排序、
+  GREASE（0x?a?a）全域剔除、扩展哈希剔除 SNI(0000)/ALPN(0010)、签名算法**保序**追加、
+  ALPN 取首值首尾字母数字（非字母数字回退十六进制，规格示例 0x30 0x31 0xab 0xcd → "3d"）、
+  计数 99 封顶、版本取 supported_versions 最大值映射（0x0304→"13"…）。
+- **单测含官方向量**：规格书 §2 的 15 套件排序串 → 哈希 `8daaf6152771` 逐位一致。
+- 捕获装配（`ja4Collector`）：实测发现 Go 的 TLS 握手是**惰性**的——`http.Server.ConnContext`
+  在 accept 时先于握手执行，此时指纹还不存在；改为上下文注入**延迟解析引用**
+  （`JA4Resolver.ResolveJA4()`，请求时刻握手已完成），`ConnState(StateClosed)` 清理条目。
+  关联键：`hello.Conn`（裸连接）与 `tls.Conn.NetConn()` 对齐。
+- 存储：`ip_fingerprints.ja4` 列（迁移），随 fp/report 落库；纯 HTTP 部署为空。
+
+### P3-3 UA↔TLS 交叉核验 ✅（含实测调整）
+
+- `internal/infrastructure/ja4db`：加载 FoxIO `ja4plus-mapping.csv`（`githubhot ja4 update`
+  拉取到 `DATA_DIR/ja4-mapping.csv`；**实测该 CSV 在仓库根而非 technical_details/CSVs/**）。
+  解析容错：按表头定位 JA4/应用列 + `FieldsPerRecord=-1`（容忍手工编辑的行缺列——
+  活体中手工追加行少一个逗号曾导致整表加载失败、核验静默跳过，已修死）。
+- 规则（保守）：JA4 ∈ 已知非浏览器栈（curl/Go/Python/okhttp… 关键词表）且 UA 声称浏览器 →
+  `fpb_ua_tls_mismatch` **+25**（灰度 0 分）；JA4 不在库 → `tls_unknown` 仅记录；
+  映射未加载/纯 HTTP → 整体降级跳过。
+- **实测调整**：FoxIO 的映射表是样本数据（23 条 JA4，curl 条目是 JA4H 而非 JA4，Go stdlib
+  未收录）→ curl 的误报验证采用"运营者自有观察"路径：活体采集到的 curl 真实指纹
+  （`t13i2011h1_2b729b4bf6f3_36bf25f296df`，来源即真实 curl）追加进映射表后命中。
+  后续项：Go stdlib 自检指纹（服务端自探测后写映射）可让最常见 Go 爬虫开箱即命中。
+
+### P3-4 验收 ✅
+
+| 项 | 结果 |
+|---|---|
+| curl + Chrome UA → `fpb_ua_tls_mismatch` | ✅ 命中（0 分灰度，明细含映射应用名与 JA4） |
+| 真实浏览器零误报 | ✅ Edge(headless) 活体：JA4 `t13i1515h2_8daaf6152771_d8a2da3f94cd` 捕获入库，**cipher 哈希段与 FoxIO 规格 Chrome 向量逐位一致**；未在映射 → `tls_unknown` 0 分不判 mismatch；规则方向另有单测（`TestUATLSBrowserOK`） |
+| HTTP→HTTPS 301 | ✅ `301 → https://127.0.0.1:8792/...`（含非 443 端口） |
+| `gh_id` 带 Secure | ✅ Set-Cookie 实测含 `Secure` |
+| ACME 真签发 | ⏳ 需公网域名与 80/443 可达，沙盒不可测；装配路径已实现（autocert + 挑战路由 + 缓存），上生产时验证 |
+
+单测：tlsfp 8 例（含官方向量）、ja4db 4 例、httpapi UA↔TLS 4 例（mismatch 灰度/出灰度、
+浏览器 OK、tls_unknown、双降级）；`go test ./...` 18 包全绿、`go vet` 干净、build 通过。
 
 ## 已知边界 / 后续项
 

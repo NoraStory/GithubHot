@@ -92,6 +92,10 @@ go build -o githubhot ./cmd/githubhot
 | `GEOIP_DB_PATH` | GeoIP | 国家库路径（默认 `data/geo.mmdb`，`githubhot geo download` 拉取 ip-location-db，CC BY 4.0，部署说明需保留致谢）。文件缺失时地理核验整体降级：时区↔IP 归属国跨洲矛盾（`fpb_tz_geo_mismatch`）不判定 |
 | `GEOIP_ASN_DB_PATH` | GeoIP | ASN 库路径（默认 `data/geo-asn.mmdb`）：机房出口识别（`ip_profiles.asn_type=hosting`）+ 移动端 UA 组合核验（`fpb_hosting_mobile_ua`）；两项灰度默认 0 分 |
 | `ENTROPY_CRON` | 熵值加权 | 分量熵权每日刷新调度（cron 五段式，默认 `30 4 * * *`）。熵权 = 各分量值出现频率的信息量之和；三层违规分 × `min(1, bits/40)` 作为封禁触发系数——大众配置只计分不硬封，罕见组合足额计分 |
+| `TLS_CERT` / `TLS_KEY` | TLS/JA4 | 证书与私钥路径，同时配置 → TLS 模式：HSTS、`gh_id` Secure cookie、**JA4 TLS 指纹捕获**（握手期 ClientHello）。与 `ACME_DOMAIN` 二选一；两者都无 → 纯 HTTP（JA4 核验自动关闭） |
+| `ACME_DOMAIN` | TLS/JA4 | ACME 自动签发域名（逗号分隔，需公网可达 80/443；证书缓存 `data/acme`）。80 端口自动监听 ACME HTTP-01 挑战 |
+| `REDIRECT_HTTP` | TLS/JA4 | `1` = 监听 80 端口把 HTTP 301 到 HTTPS（目标含非 443 端口；ACME 模式无需此开关） |
+| `githubhot ja4 update` | TLS/JA4 | 子命令：下载 FoxIO ja4plus-mapping.csv → `data/ja4-mapping.csv`（`DATA_DIR/ja4-mapping.csv`）。文件在位时启用 **UA↔TLS 交叉核验**：浏览器 UA + 已知非浏览器 TLS 栈（curl/Go/Python/okhttp 等）→ `fpb_ua_tls_mismatch`（高置信 +25，灰度 0 分）；JA4 不在库 → `tls_unknown` 仅记录。文件缺失 → 核验整体降级 |
 | `APP_SIGN_SEED` | APP/签名 | APP 请求签名种子（`githubhot admin seed` 生成，32B base64）。**serve 模式必填**：未配置或仍为出厂默认 `gh-dev-seed-v1` 时拒绝启动。APP 侧构建期注入同值，不再经 `/api/v1/site/config` 下发 |
 | `APP_SIGN_SEED_GRACE` | 过渡期 | 旧种子列表（逗号分隔）：存量 APP 未发版时兜底验签；过渡期内验签不通过只观察不计分，建议 ≤14 天后清空 |
 | `DATA_DIR` | | 数据目录，默认 `./data` |

@@ -65,7 +65,7 @@ func (g guardStore) UpsertFingerprint(ctx context.Context, fp, ip, ua string, me
 		}
 	}
 	return g.db.UpsertFingerprint(ctx, fp, ip, ua, meta.Webrtc, meta.Components, meta.Flags,
-		meta.CanvasPHash, meta.MinHashSig, meta.Stability, compStabilityJSON)
+		meta.CanvasPHash, meta.MinHashSig, meta.JA4, meta.Stability, compStabilityJSON)
 }
 
 func (g guardStore) UpsertLSHBands(ctx context.Context, fp string, bands []httpapi.LSHBand) error {
@@ -179,6 +179,7 @@ func toFingerprintDTOs(rows []sqlite.FingerprintRow) []httpapi.FingerprintDTO {
 			FirstSeen: f.FirstSeen, LastSeen: f.LastSeen, Hits: f.Hits,
 			CanvasPHash: f.CanvasPHash, MinHashSig: f.MinHashSig,
 			EntropyBits: f.EntropyBits, Stability: f.Stability, CompStability: f.CompStability,
+			JA4: f.JA4,
 		})
 	}
 	return out

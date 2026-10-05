@@ -29,7 +29,16 @@ type Server struct {
 	Images  *ImageResolver  // 卡片封面 og:image 懒抓取缓存（nil = 不下发图片）
 	Favicons *FaviconService // 信源 favicon 瓦片代理（nil = 无图卡片不回退图标）
 	Probes  ProbeReader   // 健康探针（nil = 未启用，管理端探针页不可用）
+	TLSMode bool          // P3-1：serve 以 TLS 运行（证书或 ACME）→ HSTS 中间件启用
 	Version string
+}
+
+// hstsMiddleware TLS 模式专用：告知浏览器后续访问强制 HTTPS（规格书 P3-1）。
+func hstsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Router 构建路由。
@@ -37,6 +46,9 @@ func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(cors)
+	if s.TLSMode {
+		r.Use(hstsMiddleware) // P3-1：仅 TLS 模式启用 HSTS
+	}
 	if s.Guard != nil {
 		r.Use(s.Guard.Middleware) // 三层 IP 防护：封禁 404 → 速率记录 → 身份核验
 	}

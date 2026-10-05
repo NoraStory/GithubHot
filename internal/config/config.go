@@ -35,6 +35,15 @@ type Config struct {
 	ProbeIntervalHours  int    // 探针轮询间隔小时数（信源与端点健康探测，默认 6）
 	AppSignSeed         string   // APP 请求签名种子（APP_SIGN_SEED）；serve 模式强制非默认
 	AppSignSeedGrace    []string // 过渡期旧种子（APP_SIGN_SEED_GRACE，逗号分隔），仅验签兼容
+	TLSCert             string   // P3 TLS 证书路径（TLS_CERT）；与 ACME 二选一
+	TLSKey              string   // P3 TLS 私钥路径（TLS_KEY）
+	ACMEDomains         string   // P3 ACME 域名（ACME_DOMAIN，逗号分隔）；启用 autocert 自动签发
+	RedirectHTTP        bool     // P3 REDIRECT_HTTP=1：80 端口 301 跳 HTTPS
+}
+
+// TLSEnabled 是否以 TLS 模式运行（决定 HSTS / Secure cookie / JA4 捕获是否启用）。
+func (c *Config) TLSEnabled() bool {
+	return (c.TLSCert != "" && c.TLSKey != "") || c.ACMEDomains != ""
 }
 
 // DevAppSignSeed 出厂默认 APP 签名种子：历史版本随 /api/v1/site/config 公开下发，
@@ -127,6 +136,10 @@ func Load() (*Config, error) {
 		ProbeIntervalHours:  getEnvInt("PROBE_INTERVAL_HOURS", 6),
 		AppSignSeed:         AppSignSeedFromEnv(),
 		AppSignSeedGrace:    AppSignSeedGraceFromEnv(),
+		TLSCert:             getEnv("TLS_CERT", ""),
+		TLSKey:              getEnv("TLS_KEY", ""),
+		ACMEDomains:         getEnv("ACME_DOMAIN", ""),
+		RedirectHTTP:        getEnv("REDIRECT_HTTP", "") == "1",
 	}
 	if cfg.LLMBaseURL != "" || cfg.LLMAPIKey != "" || cfg.LLMModelA != "" {
 		if cfg.LLMBaseURL == "" || cfg.LLMAPIKey == "" || cfg.LLMModelA == "" {

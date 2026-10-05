@@ -17,6 +17,7 @@ import (
 	"github.com/NoraStory/GithubHot/internal/application"
 	"github.com/NoraStory/GithubHot/internal/config"
 	"github.com/NoraStory/GithubHot/internal/domain/shared"
+	"github.com/NoraStory/GithubHot/internal/infrastructure/ja4db"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/fetcher"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/githubapi"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/llm"
@@ -144,6 +145,11 @@ func Serve(cfg *config.Config) error {
 	srv.AppGuard = httpapi.NewAppGuard(guardStore{db}, srv.Guard) // APP 签名/指纹/远程封禁
 	srv.Images = httpapi.NewImageResolver(linkImageStore{db}) // 卡片封面 og:image 懒抓取
 	srv.Favicons = httpapi.NewFaviconService(linkImageStore{db}) // 无图卡片回退信源 favicon 瓦片
+	srv.TLSMode = cfg.TLSEnabled() // P3-1：TLS 模式决定 HSTS 与 Secure cookie
+	if srv.TLSMode {
+		srv.Guard.SetJA4DB(ja4db.Load(filepath.Join(cfg.DataDir, "ja4-mapping.csv")))
+		fmt.Printf("[tls] TLS 模式已启用（JA4 指纹捕获激活）\n")
+	}
 
 	// 健康探针：启动后首轮探测，之后每 ProbeIntervalHours（默认 6h）一轮。
 	// 覆盖全部启用信源 + 关键端点（LLM 网关 / GitHub API / 音乐上游 / 背景对象存储 / 本地库）。
@@ -206,7 +212,7 @@ func Serve(cfg *config.Config) error {
 
 	srv.Probes = probeBridge{probeSvc}
 	probeSvc.Start(ctx, time.Duration(cfg.ProbeIntervalHours)*time.Hour)
-	return httpListen(ctx, addr, srv.Router())
+	return serveHTTP(ctx, cfg, addr, srv.Router())
 }
 
 // MCP 启动 stdio MCP 服务器（供 Claude 等 Agent 客户端接入）。

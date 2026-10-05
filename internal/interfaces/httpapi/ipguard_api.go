@@ -223,6 +223,7 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 		Sets:        sanitizeSets(p.Sets),
 		TZ:          sanitizeTZ(p.TZ),
 		TZOffsetMin: p.TZOffsetMin,
+		JA4:         JA4FromContext(ctx), // P3-2：TLS 模式下由连接上下文注入（纯 HTTP 为空）
 	}
 	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, meta)
 	// 每个命中项记违规事件（积分见 flagScore）。

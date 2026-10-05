@@ -145,6 +145,8 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN entropy_bits REAL NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN stability REAL NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN comp_stability TEXT NOT NULL DEFAULT '{}'")
+	// P3 TLS 客户端指纹（JA4，TLS 模式下由握手回调捕获；纯 HTTP 部署为空）
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN ja4 TEXT NOT NULL DEFAULT ''")
 	// P2-5 地理与 ASN（ip-location-db mmdb，缺失时全部降级跳过）
 	_, _ = db.Exec("ALTER TABLE ip_profiles ADD COLUMN asn INTEGER NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE ip_profiles ADD COLUMN asn_type TEXT NOT NULL DEFAULT ''")
