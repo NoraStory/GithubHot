@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { api } from '../lib/api'
 
 const data = ref(null)
@@ -162,7 +162,87 @@ const shortGpu = s => {
   return t.length > 26 ? t.slice(0, 26) + '…' : t
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  tickTimer = setInterval(() => { nowTs.value = Date.now() }, 1000)
+})
+onUnmounted(() => clearInterval(tickTimer))
+
+// ---------- 下钻增强：全部由下钻响应聚合，无新增接口 ----------
+const expandedFp = ref('')      // 展开的指纹行
+const nowTs = ref(Date.now())   // 封禁倒计时用（秒级刷新）
+let tickTimer = null
+
+const detailStats = computed(() => {
+  const d = detail.value
+  if (!d) return null
+  const fps = d.fingerprints || []
+  const evs = d.events || []
+  const times = [...fps.flatMap(f => [f.FirstSeen, f.LastSeen]),
+                 d.profile?.FirstSeen, d.profile?.LastSeen]
+    .filter(Boolean).map(t => new Date(t).getTime())
+  const first = times.length ? Math.min(...times) : null
+  const last = times.length ? Math.max(...times) : null
+  const spanDays = first && last ? (last - first) / 86400000 : 0
+  const reqs = d.profile?.Reqs || 0
+  return {
+    fps: fps.length,
+    multiIp: fps.filter(f => (f.IPs || []).length > 1).length,
+    riskFps: fps.filter(isRisk).length,
+    leaks: fps.filter(f => (f.Webrtc || []).length > 0).length,
+    events: evs.length,
+    score: evs.reduce((s, e) => s + (e.Score || 0), 0),
+    spanDays,
+    reqs,
+    rpm: spanDays > 0 ? reqs / (spanDays * 1440) : null,
+  }
+})
+
+// 违规事件按类型聚合（积分降序）
+const eventKinds = computed(() => {
+  const m = new Map()
+  for (const e of detail.value?.events || []) {
+    const k = m.get(e.Kind) || { kind: e.Kind, count: 0, score: 0 }
+    k.count++
+    k.score += e.Score || 0
+    m.set(e.Kind, k)
+  }
+  return [...m.values()].sort((a, b) => b.score - a.score)
+})
+
+// 同一 UA 被多个指纹使用 → 指纹漂移/多开线索
+const sameUaCount = computed(() => {
+  const m = new Map()
+  for (const f of detail.value?.fingerprints || []) {
+    const ua = f.UA || ''
+    m.set(ua, (m.get(ua) || 0) + 1)
+  }
+  let n = 0
+  for (const c of m.values()) if (c > 1) n += c
+  return n
+})
+
+// 封禁剩余倒计时
+const banRemain = computed(() => {
+  const b = detail.value?.ban
+  if (!b) return null
+  const ms = new Date(b.ExpiresAt).getTime() - nowTs.value
+  if (ms <= 0) return { text: '已到期', sec: 0 }
+  const s = Math.floor(ms / 1000)
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60)
+  return { text: (h ? h + ' 小时 ' : '') + m + ' 分 ' + (s % 60) + ' 秒', sec: s }
+})
+
+// 封禁总时长（小时）
+const banSpanText = computed(() => {
+  const b = detail.value?.ban
+  if (!b) return '-'
+  const h = (new Date(b.ExpiresAt).getTime() - new Date(b.BannedAt).getTime()) / 3600000
+  return h >= 24 ? (h / 24).toFixed(1) + ' 天' : h.toFixed(1) + ' 小时'
+})
+
+// WebRTC 泄漏的 IP 与当前访问 IP 不一致 → 代理/VPN 线索
+const rtcLeak = f => (f.Webrtc || []).some(x => x && x !== detail.value?.ip)
 </script>
 
 <template>
@@ -229,6 +309,21 @@ onMounted(load)
             <ul><li v-for="(u, i) in detail.profile.UASet" :key="i">{{ u }}</li></ul>
           </details>
 
+          <!-- 下钻概览（由本次响应聚合） -->
+          <div v-if="detailStats" class="stat-row mini">
+            <div class="stat"><b class="num">{{ detailStats.fps }}</b><span>关联指纹</span></div>
+            <div class="stat" :class="{ warn: detailStats.multiIp }"><b class="num">{{ detailStats.multiIp }}</b><span>多 IP 指纹</span></div>
+            <div class="stat" :class="{ warn: detailStats.riskFps }"><b class="num">{{ detailStats.riskFps }}</b><span>风险指纹</span></div>
+            <div class="stat" :class="{ warn: detailStats.leaks }"><b class="num">{{ detailStats.leaks }}</b><span>WebRTC 泄漏</span></div>
+            <div class="stat"><b class="num">{{ detailStats.events }}</b><span>违规事件</span></div>
+            <div class="stat" :class="{ hot: detailStats.score >= 100 }"><b class="num">{{ detailStats.score }}</b><span>违规积分合计</span></div>
+            <div class="stat"><b class="num">{{ detailStats.spanDays >= 1 ? detailStats.spanDays.toFixed(1) + ' 天' : '不足 1 天' }}</b><span>活跃跨度</span></div>
+            <div class="stat"><b class="num">{{ detailStats.rpm == null ? '-' : detailStats.rpm.toFixed(2) }}</b><span>平均请求/分</span></div>
+          </div>
+          <div v-if="sameUaCount" class="hint-line">
+            ⚠ 有 {{ sameUaCount }} 个指纹共用同一 UA —— 可能是同设备的指纹漂移或多开
+          </div>
+
           <!-- 第三层环境核验 -->
           <h4>环境核验（第三层）
             <span v-if="!detailFlags.length" class="ok-chip">✓ 通过</span>
@@ -250,6 +345,9 @@ onMounted(load)
               <div><span>违规次数</span><b class="num">{{ detail.ban.Strikes }}</b></div>
               <div><span>档位</span><b>{{ levelName(detail.ban.Level) }}</b></div>
               <div><span>原因</span><b>{{ detail.ban.Reason }}</b></div>
+              <div><span>封禁时长</span><b>{{ banSpanText }}</b></div>
+              <div><span>剩余</span><b :class="{ warn: banRemain && banRemain.sec > 0 }">{{ banRemain?.text }}</b></div>
+              <div><span>封禁时间</span><b>{{ fmt(detail.ban.BannedAt) }}</b></div>
               <div><span>解禁时间</span><b>{{ fmt(detail.ban.ExpiresAt) }}</b></div>
             </div>
           </template>
@@ -263,8 +361,11 @@ onMounted(load)
               <th>关联 IP 数</th><th>WebRTC 真实 IP</th><th>最近使用</th><th>上报次数</th>
             </tr></thead>
             <tbody>
-              <tr v-for="f in detail.fingerprints" :key="f.Fingerprint" :class="{ 'row-risk': isRisk(f) }">
+              <tr v-for="f in detail.fingerprints" :key="f.Fingerprint"
+                  class="fp-row" :class="{ 'row-risk': isRisk(f) }"
+                  @click="expandedFp = expandedFp === f.Fingerprint ? '' : f.Fingerprint">
                 <td class="mono" :title="f.Fingerprint + '\n' + f.UA">
+                  <span class="caret">{{ expandedFp === f.Fingerprint ? '▾' : '▸' }}</span>
                   {{ short(f.Fingerprint) }}<span v-if="(f.Flags || []).length" class="warn" :title="'核验命中: ' + f.Flags.map(x => flagInfo(x)[0]).join('、')">⚠</span>
                 </td>
                 <td><span class="dev" :class="clientInfo(f).kind" :title="f.UA"><span class="dev-icon">{{ clientInfo(f).icon }}</span>{{ clientInfo(f).label }}</span></td>
@@ -275,9 +376,57 @@ onMounted(load)
                 <td class="mono comp" :title="f.Components?.audio">{{ comp(f.Components?.audio) }}</td>
                 <td class="mono comp" :title="f.Components?.fonts">{{ comp(f.Components?.fonts) }}</td>
                 <td class="num" :class="{ hot: f.IPs.length > 8 }">{{ f.IPs.length }}</td>
-                <td class="mono rtc" :title="(f.Webrtc || []).join('\n')">{{ (f.Webrtc || []).join(', ') || '-' }}</td>
+                <td class="mono rtc" :class="{ warn: rtcLeak(f) }" :title="rtcLeak(f) ? '与访问 IP 不一致，可能经代理/VPN' : (f.Webrtc || []).join('\n')">{{ (f.Webrtc || []).join(', ') || '-' }}</td>
                 <td>{{ fmt(f.LastSeen) }}</td>
                 <td class="num">{{ f.Hits }}</td>
+              </tr>
+              <tr v-if="expandedFp === f.Fingerprint" class="fp-expand">
+                <td colspan="12">
+                  <div class="exp-grid">
+                    <div class="exp-col">
+                      <h5>完整环境分量（后端原始值）</h5>
+                      <div class="kv tight">
+                        <div v-for="(v, k) in (f.Components || {})" :key="k">
+                          <span>{{ k }}</span><b class="mono break">{{ v }}</b>
+                        </div>
+                      </div>
+                      <h5>WebRTC 真实 IP（STUN 探测）</h5>
+                      <div v-if="(f.Webrtc || []).length" class="chip-row">
+                        <span v-for="x in f.Webrtc" :key="x" class="chip" :class="{ bad: x !== detail.ip }">
+                          {{ x }}{{ x !== detail.ip ? ' ≠ 访问 IP' : ' ✓ 与访问 IP 一致' }}
+                        </span>
+                      </div>
+                      <div v-else class="empty">未泄漏（或浏览器已屏蔽）</div>
+                    </div>
+                    <div class="exp-col">
+                      <h5>该指纹出现过的 IP（{{ (f.IPs || []).length }} 个，点击切换下钻）</h5>
+                      <div class="chip-row">
+                        <a v-for="x in f.IPs" :key="x" class="ip-link mono" @click.stop="showIP(x)">{{ x }}</a>
+                      </div>
+                      <h5>时间与身份</h5>
+                      <div class="kv tight">
+                        <div><span>首见</span><b>{{ fmt(f.FirstSeen) }}</b></div>
+                        <div><span>末次</span><b>{{ fmt(f.LastSeen) }}</b></div>
+                        <div><span>上报次数</span><b class="num">{{ f.Hits }}</b></div>
+                      </div>
+                      <div class="kv tight">
+                        <div><span>UA</span><b class="ua">{{ f.UA || '-' }}</b></div>
+                        <div><span>融合指纹</span><b class="mono break">{{ f.Fingerprint }}</b></div>
+                      </div>
+                      <template v-if="(f.Flags || []).length">
+                        <h5>环境核验命中（{{ f.Flags.length }} 项）</h5>
+                        <div class="flag-list">
+                          <div v-for="fl in f.Flags" :key="fl" class="flag-item small">
+                            <span class="flag-name">{{ flagInfo(fl)[0] }}</span>
+                            <span class="flag-desc">{{ flagInfo(fl)[1] }}</span>
+                            <code class="flag-code">{{ fl }}</code>
+                          </div>
+                        </div>
+                      </template>
+                      <div v-else class="empty">该指纹环境核验全部通过</div>
+                    </div>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -285,6 +434,11 @@ onMounted(load)
 
           <!-- 违规事件 -->
           <h4>违规事件（近 {{ detail.events.length }} 条）</h4>
+          <div v-if="eventKinds.length" class="chip-row kind-row">
+            <span v-for="k in eventKinds" :key="k.kind" class="kind-chip">
+              <span class="chip">{{ k.kind }}</span> ×{{ k.count }} · 计 +{{ k.score }}
+            </span>
+          </div>
           <table v-if="detail.events.length">
             <thead><tr><th>时间</th><th>类型</th><th>详情</th><th>积分</th></tr></thead>
             <tbody>
@@ -456,4 +610,27 @@ th { color: var(--anzhiyu-gray); font-weight: 500; }
 .kv span { color: var(--anzhiyu-gray); font-size: .76rem; }
 .kv b { font-weight: 600; font-size: .88rem; }
 .kv .ua { max-width: 420px; white-space: normal; word-break: break-all; font-weight: 400; }
+/* ---- 下钻增强 ---- */
+.stat-row.mini { gap: 8px; margin: .6rem 0 1rem; }
+.stat-row.mini .stat { padding: 6px 14px; min-width: 84px; }
+.stat-row.mini .stat b { font-size: 1rem; }
+.hint-line { font-size: .82rem; color: #d48806; margin: 4px 0 10px; }
+.fp-row { cursor: pointer; }
+.fp-row:hover { background: var(--anzhiyu-theme-op); }
+.caret { color: var(--anzhiyu-gray); margin-right: 4px; font-size: .72rem; }
+.fp-expand td { background: var(--anzhiyu-background); white-space: normal; padding: 12px 16px; }
+.exp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 900px) { .exp-grid { grid-template-columns: 1fr; } }
+.exp-col h5 { margin: 10px 0 6px; font-size: .82rem; color: var(--anzhiyu-secondary); font-weight: 600; }
+.exp-col h5:first-child { margin-top: 0; }
+.kv.tight { gap: 16px; }
+.kv.tight > div { padding: 1px 0; }
+.kv.tight b { font-size: .8rem; font-weight: 500; }
+.break { white-space: normal; word-break: break-all; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; align-items: center; }
+.chip.bad { background: rgba(248, 81, 73, .16); color: var(--anzhiyu-red); }
+.kind-row { margin-bottom: 8px; }
+.kind-chip { font-size: .78rem; color: var(--anzhiyu-secondary); }
+.flag-item.small { font-size: .8rem; }
+.flag-item.small .flag-name { min-width: 150px; }
 </style>

@@ -18,6 +18,18 @@ const cpuPct = computed(() => {
   return last ? last.cpu : null
 })
 
+// 当量核数（= CPU 秒增量 / 墙钟秒）：空闲服务数值极小，比百分比更可读
+const cpuCores = computed(() => {
+  const last = hist.value[hist.value.length - 1]
+  return last ? last.cores : null
+})
+
+// 近 60s 峰值（最近 30 个 2s 样本的最大值）：空闲服务瞬时值恒为 0.00%，峰值才有信息量
+const cpuPeak = computed(() => {
+  const pts = hist.value.slice(-30).map(x => x.cpu).filter(v => v != null)
+  return pts.length ? Math.max(...pts) : null
+})
+
 const sidecar = computed(() => stats.value?.sidecar || { enabled: false })
 
 async function poll() {
@@ -25,13 +37,16 @@ async function poll() {
     const d = await api.get('/api/v1/admin/system/stats')
     error.value = ''
     const now = performance.now()
-    let cpu = null
+    let cpu = null, cores = null
     if (prev && d.cpu_seconds_total != null && d.cpu_seconds_total >= prev.cpu) {
       const wall = (now - prev.t) / 1000
-      cpu = Math.min(100, Math.max(0, ((d.cpu_seconds_total - prev.cpu) / wall / (d.num_cpu || 1)) * 100))
+      if (wall > 0) {
+        cores = (d.cpu_seconds_total - prev.cpu) / wall
+        cpu = Math.min(100, Math.max(0, (cores / (d.num_cpu || 1)) * 100))
+      }
     }
     prev = { cpu: d.cpu_seconds_total ?? 0, t: now }
-    hist.value.push({ rss: d.rss_mb, cpu })
+    hist.value.push({ rss: d.rss_mb, cpu, cores })
     if (hist.value.length > MAX_PTS) hist.value.shift()
     stats.value = d
   } catch (e) {
@@ -76,8 +91,9 @@ const fmtVer = v => (v || '').split('/').pop()
         </svg>
       </div>
       <div class="card">
-        <div class="num">{{ cpuPct == null ? '—' : cpuPct.toFixed(1) }}<small> %</small></div>
-        <div class="label">CPU（占全部核心）</div>
+        <div class="num">{{ cpuPct == null ? '—' : cpuPct.toFixed(2) }}<small> %</small></div>
+        <div class="label">CPU（占全部核心）· 当量 {{ cpuCores == null ? '—' : cpuCores.toFixed(3) }} 核
+          · 近60s峰值 {{ cpuPeak == null ? '—' : cpuPeak.toFixed(2) + '%' }}</div>
         <svg viewBox="0 0 240 44" preserveAspectRatio="none">
           <polyline :points="cpuPts" fill="none" stroke="#3fb950" stroke-width="1.5" />
         </svg>

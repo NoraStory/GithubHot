@@ -31,7 +31,8 @@ func (s *Server) systemStatsAPI(w http.ResponseWriter, _ *http.Request) {
 		"gc_cpu_percent": ms.GCCPUFraction * 100,
 	}
 	if secs, ok := processCPUSeconds(); ok {
-		resp["cpu_seconds_total"] = round2(secs)
+		// 微秒精度：空闲服务 2 秒窗口的 CPU 增量仅 ~0.001s，round2 会把它抹成 0
+		resp["cpu_seconds_total"] = round6(secs)
 	} else {
 		resp["cpu_seconds_total"] = nil
 	}
@@ -87,3 +88,5 @@ func trimRightSlash(s string) string {
 func mb(b uint64) float64 { return float64(int64(b)/1024/1024*100) / 100 }
 
 func round2(f float64) float64 { return float64(int64(f*100)) / 100 }
+
+func round6(f float64) float64 { return float64(int64(f*1e6)) / 1e6 }
