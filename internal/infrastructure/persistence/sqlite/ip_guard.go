@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/NoraStory/GithubHot/internal/domain/fpcluster"
 )
 
 // ---------- IP 治理存储：事件 / 指纹 / 封禁 ----------
@@ -99,13 +101,17 @@ type FingerprintRow struct {
 	CompStability     map[string]float64
 	JA4               string // P3-2 TLS 客户端指纹（TLS 模式下捕获；纯 HTTP 为空）
 	AttestationJSON   string // P4-1 平台证明结果（原始 JSON，'{}'=未验证）
+	BehaviorJSON      string // P4-5 行为生物特征（滑窗统计量 JSON，'{}'=未采集）
+	ClockSkewPPM      *float64 // P4-6 时钟偏移（ppm；NULL=未采集）
+	ClusterID         *int64  // P4-4 图聚类簇归属（NULL=未聚类）
 }
 
 // UpsertFingerprint 登记一次指纹上报；返回该指纹历史上出现过的所有 IP。
 // webrtc/components/flags 同前；canvasPhash/minhashSig 为 P2-1/P2-2 数学指纹；
 // stability >= 0 时落库整体稳定度（P2-4），compStabilityJSON 非空时落库各分量稳定度；
-// ja4 为 P3-2 TLS 客户端指纹（TLS 模式才有，非空覆盖）。
-func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string, components map[string]string, flags []string, canvasPhash, minhashSig, ja4 string, stability float64, compStabilityJSON string) ([]string, error) {
+// ja4 为 P3-2 TLS 客户端指纹（TLS 模式才有，非空覆盖）；
+// behaviorJSON / clockSkewPPM 为 P4-5/P4-6 行为与时钟信号（非空/非 nil 覆盖）。
+func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string, components map[string]string, flags []string, canvasPhash, minhashSig, ja4 string, stability float64, compStabilityJSON, behaviorJSON string, clockSkewPPM *float64) ([]string, error) {
 	row := db.QueryRowContext(ctx,
 		"SELECT ips, ua, hits, webrtc, flags FROM ip_fingerprints WHERE fp = ?", fp)
 	var ipsJSON, oldUA, rtcJSON, flagsJSON string
@@ -161,8 +167,8 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 		ips = []string{ip}
 		b, _ := json.Marshal(ips)
 		_, err = db.ExecContext(ctx,
-			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits, webrtc, components, flags, canvas_phash, minhash_sig, stability, comp_stability, ja4) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
-			fp, string(b), ua, now, now, string(rb), string(cb), string(fb), canvasPhash, minhashSig, stability, compStabilityJSON, ja4)
+			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits, webrtc, components, flags, canvas_phash, minhash_sig, stability, comp_stability, ja4, behavior, clock_skew_ppm) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			fp, string(b), ua, now, now, string(rb), string(cb), string(fb), canvasPhash, minhashSig, stability, compStabilityJSON, ja4, behaviorJSON, clockSkewPPM)
 		if err != nil {
 			return nil, fmt.Errorf("写入指纹: %w", err)
 		}
@@ -187,8 +193,8 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 		ua = oldUA
 	}
 	_, err = db.ExecContext(ctx,
-		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1, webrtc = ?, components = ?, flags = ?, canvas_phash = CASE WHEN ? != '' THEN ? ELSE canvas_phash END, minhash_sig = CASE WHEN ? != '' THEN ? ELSE minhash_sig END, stability = CASE WHEN ? >= 0 THEN ? ELSE stability END, comp_stability = CASE WHEN ? != '' THEN ? ELSE comp_stability END, ja4 = CASE WHEN ? != '' THEN ? ELSE ja4 END WHERE fp = ?",
-		string(b), ua, now, string(rb), string(cb), string(fb), canvasPhash, canvasPhash, minhashSig, minhashSig, stability, stability, compStabilityJSON, compStabilityJSON, ja4, ja4, fp)
+		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1, webrtc = ?, components = ?, flags = ?, canvas_phash = CASE WHEN ? != '' THEN ? ELSE canvas_phash END, minhash_sig = CASE WHEN ? != '' THEN ? ELSE minhash_sig END, stability = CASE WHEN ? >= 0 THEN ? ELSE stability END, comp_stability = CASE WHEN ? != '' THEN ? ELSE comp_stability END, ja4 = CASE WHEN ? != '' THEN ? ELSE ja4 END, behavior = CASE WHEN ? != '' THEN ? ELSE behavior END, clock_skew_ppm = COALESCE(?, clock_skew_ppm) WHERE fp = ?",
+		string(b), ua, now, string(rb), string(cb), string(fb), canvasPhash, canvasPhash, minhashSig, minhashSig, stability, stability, compStabilityJSON, compStabilityJSON, ja4, ja4, behaviorJSON, behaviorJSON, clockSkewPPM, fp)
 	if err != nil {
 		return nil, fmt.Errorf("更新指纹: %w", err)
 	}
@@ -202,7 +208,8 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 		var f FingerprintRow
 		var ipsJSON, rtcJSON, compJSON, flagsJSON, first, last string
 		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &rtcJSON, &compJSON, &flagsJSON, &f.UA, &first, &last, &f.Hits,
-			&f.CanvasPHash, &f.MinHashSig, &f.EntropyBits, &f.Stability, &f.CompStabilityJSON, &f.JA4, &f.AttestationJSON); err != nil {
+			&f.CanvasPHash, &f.MinHashSig, &f.EntropyBits, &f.Stability, &f.CompStabilityJSON, &f.JA4, &f.AttestationJSON,
+			&f.BehaviorJSON, &f.ClockSkewPPM, &f.ClusterID); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(ipsJSON), &f.IPs)
@@ -220,7 +227,7 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 }
 
 // fingerprintCols 指纹查询的统一列清单（P2 起含数学指纹与稳定度/熵权列；P3 起含 ja4）。
-const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits, canvas_phash, minhash_sig, entropy_bits, stability, comp_stability, ja4, attestation"
+const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits, canvas_phash, minhash_sig, entropy_bits, stability, comp_stability, ja4, attestation, behavior, clock_skew_ppm, cluster_id"
 
 // ListFingerprints 最近 limit 个活跃指纹。
 func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow, error) {
@@ -417,6 +424,101 @@ func (db *DB) UpdateAttestation(ctx context.Context, fp string, attestationJSON 
 		return fmt.Errorf("写平台证明: %w", err)
 	}
 	return nil
+}
+
+// ---------- P4-4 图聚类存储 ----------
+
+// ReplaceClusters 整表重写簇（每日 cron 全量重算）：先清 cluster_id 与旧簇行，
+// 再插入新簇并回填成员 cluster_id。簇数与成员规模小（<1e5），事务内完成。
+func (db *DB) ReplaceClusters(ctx context.Context, clusters []fpcluster.Cluster) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("开事务: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "UPDATE ip_fingerprints SET cluster_id = NULL WHERE cluster_id IS NOT NULL"); err != nil {
+		return fmt.Errorf("清空簇归属: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM fp_clusters"); err != nil {
+		return fmt.Errorf("清空簇表: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, cl := range clusters {
+		members, _ := json.Marshal(cl.Members)
+		res, err := tx.ExecContext(ctx,
+			"INSERT INTO fp_clusters (member_fps, size, first_seen, reason) VALUES (?, ?, ?, ?)",
+			string(members), cl.Size, now, cl.Reason)
+		if err != nil {
+			return fmt.Errorf("写簇: %w", err)
+		}
+		id, _ := res.LastInsertId()
+		for _, fp := range cl.Members {
+			if _, err := tx.ExecContext(ctx, "UPDATE ip_fingerprints SET cluster_id = ? WHERE fp = ?", id, fp); err != nil {
+				return fmt.Errorf("回填簇归属: %w", err)
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+// ListAllFPLinks 全部关联边（时间窗内，聚类构图用；与 ListFPLinks 的单指纹查询相对）。
+func (db *DB) ListAllFPLinks(ctx context.Context, since time.Time, limit int) ([]FPLinkRow, error) {
+	if limit <= 0 {
+		limit = 100000
+	}
+	rows, err := db.QueryContext(ctx,
+		"SELECT src, dst, kind, weight, first_seen, last_seen FROM fp_links WHERE last_seen >= ? ORDER BY last_seen DESC LIMIT ?",
+		since.Format(time.RFC3339), limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询关联边: %w", err)
+	}
+	defer rows.Close()
+	out := []FPLinkRow{}
+	for rows.Next() {
+		var l FPLinkRow
+		var fs, ls string
+		if err := rows.Scan(&l.Src, &l.Dst, &l.Kind, &l.Weight, &fs, &ls); err != nil {
+			return nil, err
+		}
+		l.FirstSeen, _ = time.Parse(time.RFC3339, fs)
+		l.LastSeen, _ = time.Parse(time.RFC3339, ls)
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// ClusterRowDTO 簇档案（管理端集群视图用）。
+type ClusterRowDTO struct {
+	ID        int64
+	Members   []string
+	Size      int
+	FirstSeen time.Time
+	Reason    string
+}
+
+// ListClusters 簇列表（按 size 降序）。
+func (db *DB) ListClusters(ctx context.Context, limit int) ([]ClusterRowDTO, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := db.QueryContext(ctx,
+		"SELECT id, member_fps, size, first_seen, reason FROM fp_clusters ORDER BY size DESC LIMIT ?", limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询簇: %w", err)
+	}
+	defer rows.Close()
+	out := []ClusterRowDTO{}
+	for rows.Next() {
+		var c ClusterRowDTO
+		var members, fs string
+		if err := rows.Scan(&c.ID, &members, &c.Size, &fs, &c.Reason); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(members), &c.Members)
+		c.FirstSeen, _ = time.Parse(time.RFC3339, fs)
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // FPLinkRow 指纹关联边（pHash 同源 / MinHash 相似 / 物理特征 / 时间共现）。

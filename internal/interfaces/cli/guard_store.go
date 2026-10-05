@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/NoraStory/GithubHot/internal/domain/fpcluster"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/persistence/sqlite"
 	"github.com/NoraStory/GithubHot/internal/interfaces/httpapi"
 )
@@ -65,7 +66,8 @@ func (g guardStore) UpsertFingerprint(ctx context.Context, fp, ip, ua string, me
 		}
 	}
 	return g.db.UpsertFingerprint(ctx, fp, ip, ua, meta.Webrtc, meta.Components, meta.Flags,
-		meta.CanvasPHash, meta.MinHashSig, meta.JA4, meta.Stability, compStabilityJSON)
+		meta.CanvasPHash, meta.MinHashSig, meta.JA4, meta.Stability, compStabilityJSON,
+		meta.Behavior, meta.ClockSkewPPM)
 }
 
 func (g guardStore) UpsertLSHBands(ctx context.Context, fp string, bands []httpapi.LSHBand) error {
@@ -180,6 +182,7 @@ func toFingerprintDTOs(rows []sqlite.FingerprintRow) []httpapi.FingerprintDTO {
 			CanvasPHash: f.CanvasPHash, MinHashSig: f.MinHashSig,
 			EntropyBits: f.EntropyBits, Stability: f.Stability, CompStability: f.CompStability,
 			JA4: f.JA4, Attestation: f.AttestationJSON,
+			BehaviorJSON: f.BehaviorJSON, ClockSkewPPM: f.ClockSkewPPM, ClusterID: f.ClusterID,
 		})
 	}
 	return out
@@ -234,4 +237,36 @@ func (g guardStore) FindIPProfile(ctx context.Context, ip string) (*httpapi.IPPr
 
 func (g guardStore) UpdateAttestation(ctx context.Context, fp string, attestationJSON string) error {
 	return g.db.UpdateAttestation(ctx, fp, attestationJSON)
+}
+
+func (g guardStore) ReplaceClusters(ctx context.Context, clusters []httpapi.ClusterDTO) error {
+	rows := make([]fpcluster.Cluster, 0, len(clusters))
+	for _, c := range clusters {
+		rows = append(rows, fpcluster.Cluster{Members: c.Members, Size: c.Size, Reason: c.Reason})
+	}
+	return g.db.ReplaceClusters(ctx, rows)
+}
+
+func (g guardStore) ListAllFPLinks(ctx context.Context, since time.Time, limit int) ([]httpapi.FPLinkDTO, error) {
+	rows, err := g.db.ListAllFPLinks(ctx, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]httpapi.FPLinkDTO, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, httpapi.FPLinkDTO{Src: r.Src, Dst: r.Dst, Kind: r.Kind, Weight: r.Weight, FirstSeen: r.FirstSeen, LastSeen: r.LastSeen})
+	}
+	return out, nil
+}
+
+func (g guardStore) ListClusters(ctx context.Context, limit int) ([]httpapi.ClusterDTO, error) {
+	rows, err := g.db.ListClusters(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]httpapi.ClusterDTO, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, httpapi.ClusterDTO{ID: r.ID, Members: r.Members, Size: r.Size, FirstSeen: r.FirstSeen, Reason: r.Reason})
+	}
+	return out, nil
 }

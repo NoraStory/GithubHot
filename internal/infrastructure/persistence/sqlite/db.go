@@ -149,6 +149,17 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN ja4 TEXT NOT NULL DEFAULT ''")
 	// P4-1 平台证明结果（Play Integrity 判定 / signature_fallback 摘要，JSON）
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN attestation TEXT NOT NULL DEFAULT '{}'")
+	// P4-5 行为生物特征（客户端滑窗统计量 JSON）+ P4-6 时钟偏移（ppm；NULL=未采集）
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN behavior TEXT NOT NULL DEFAULT '{}'")
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN clock_skew_ppm REAL")
+	// P4-4 图聚类：簇归属与簇档案
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN cluster_id INTEGER")
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS fp_clusters (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		member_fps TEXT NOT NULL, size INTEGER NOT NULL,
+		first_seen TEXT NOT NULL, reason TEXT)`); err != nil {
+		return fmt.Errorf("建表 fp_clusters: %w", err)
+	}
 	// P2-5 地理与 ASN（ip-location-db mmdb，缺失时全部降级跳过）
 	_, _ = db.Exec("ALTER TABLE ip_profiles ADD COLUMN asn INTEGER NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE ip_profiles ADD COLUMN asn_type TEXT NOT NULL DEFAULT ''")

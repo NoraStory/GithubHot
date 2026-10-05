@@ -418,6 +418,38 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
   证书在期望集 → signature_fallback 通过 ✓；证书不符 → valid=false ✓；**nonce 消费后重放
   → 拒绝** ✓；attestation 列落库 ✓。
 
+### P4-5 行为生物特征采集（规则版）✅ + P4-6 时钟偏移 ✅
+
+- 前端 \`web/src/lib/behavior.js\`：mousemove 节流 16ms 滑窗 500 → 速度均值/方差、曲率均值、
+  jerk（加加速度）方差、方向变化率；keydown/keyup 滑窗 100 → dwell/flight 均值方差；
+  时钟偏移：每 60s 采样 \`Date.now() - performance.now()\`（仅页面可见，后台节流假点规避），
+  20 点最小二乘斜率 × 1e6 = ppm。纯函数（node --test 5 例：机械匀速直线 → 方差/曲率 0、
+  真实抖动轨迹非零、等长按键 dwell 方差 0、固定漂移 → 50000ppm）。
+- 上报：每 5 分钟或页面隐藏/卸载（fetch keepalive）→ fp/report 增量携带 \`behavior\` +
+  \`clock_skew_ppm\`（可选字段；payload 字段用 json.RawMessage——活体中前端发对象、
+  服务端 string 字段曾致 400，已修）。
+- 服务端规则：清洗（\`behavior.Parse\`：事件数上限、NaN/Inf 拒绝）→ \`MachineSignals\`：
+  有数据前提下（鼠标 ≥20 事件 / 击键 ≥10）速度方差 0 / 曲率均值 0 / dwell 方差 0 →
+  \`behavior_machine\` +15（灰度 0 分）。活体：机械匀速+机械击键 → 命中（0 分）；
+  人类行为对照（方差非零）→ 零误报 ✓。落库：behavior/clock_skew_ppm 列实测写入 ✓。
+  隐私边界：只传时序统计量，不含坐标原值与按键内容。
+
+### P4-4 图聚类（连通分量版）✅
+
+- 域包 \`internal/domain/fpcluster\`：union-find 连通分量，四类边——①共享 IP ≥2；
+  ②fp_links 既有关联边（pHash/MinHash/相似/物理/时间共现，P2 产物）；③时钟偏移差
+  <5ppm 且 behavior 余弦 >0.9（双条件）；④JA4 相同且 UA 互异。单测 5 组（共享 IP 阈值、
+  传递闭包合并、双条件缺一不连、JA4+UA 异、孤立安全）。
+- 引擎 \`RefreshClusters\`：30 天窗口全量构图 → union-find → 整表重写 \`fp_clusters\` +
+  回填 \`cluster_id\`（事务）。cron：与熵权刷新同一每日调度（ENTROPY_CRON，默认 04:30）。
+- 管理端：summary additive 字段 \`clusters\`（Top-10，含 id/members/size/reason，
+  json 标签小写）；§10.4 的完整集群视图（Tab + 力导向图）留待前端整合冲刺。
+- 活体：cron 实跑 → 9 个测试指纹经"JA4同"边聚成 1 簇（同一 TLS 栈 + 互异 UA——
+  正是规则 4 的目标形态），cluster_id 全员回填，summary 可见 ✓。
+- **待办（记录）**：规格的"簇内成员被 ban → 连坐系数 ×1.5"尚未接入——现 fp-linked
+  70 分已顶到强类上限，×1.5 会越过单类封顶设计；拟以独立弱证据 kind（cluster-linked）
+  形式接入并与 iprisk 对齐，留待下批与 P5 review 队列一起做。
+
 ## 已知边界 / 后续项
 
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，

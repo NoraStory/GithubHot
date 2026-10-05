@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NoraStory/GithubHot/internal/domain/behavior"
+	"github.com/NoraStory/GithubHot/internal/domain/fpcluster"
 	"github.com/NoraStory/GithubHot/internal/domain/fpmath"
 	"github.com/NoraStory/GithubHot/internal/domain/iprisk"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/geoip"
@@ -96,6 +98,8 @@ const (
 	rotationDetectedScore = 25
 	// P3-3 UA↔TLS 交叉核验：浏览器 UA + 已知非浏览器 TLS 栈（高置信）
 	uaTLSMismatchScore = 25
+	// P4-5 行为机器特征计分（完全匀速/纯直线/机械击键，灰度 0 分）
+	behaviorMachineScore = 15
 
 	// 握手通道专用限流：/api/v1/site/config 免签（APP 冷启动要从这里拿远程封禁 /
 	// 强制更新策略）且会触发指纹归档写库，必须自己限流，否则可被无限重放。
@@ -129,6 +133,10 @@ type GuardStore interface {
 	UpdateEntropyBits(ctx context.Context, fp string, bits float64) error
 	UpdateIPGeo(ctx context.Context, ip string, asn uint, asnType, country, tz string) error
 	UpdateAttestation(ctx context.Context, fp string, attestationJSON string) error
+	// P4-4 图聚类：每日 cron 全量重算簇并写回 cluster_id / fp_clusters
+	ReplaceClusters(ctx context.Context, clusters []ClusterDTO) error
+	ListAllFPLinks(ctx context.Context, since time.Time, limit int) ([]FPLinkDTO, error)
+	ListClusters(ctx context.Context, limit int) ([]ClusterDTO, error)
 	FindBan(ctx context.Context, ip string) (*BanDTO, error)
 	BannedAmong(ctx context.Context, ips []string) ([]string, error)
 	UpsertBan(ctx context.Context, ip string, strikes, level int, reason string, duration time.Duration) error
@@ -166,6 +174,9 @@ type FingerprintDTO struct {
 	CompStability map[string]float64 // P2-4 各分量稳定度（键 → EWMA，缺失键 = 无历史）
 	JA4         string             // P3-2 TLS 客户端指纹（TLS 模式下捕获；纯 HTTP 为空）
 	Attestation string             // P4-1 平台证明结果（原始 JSON，'{}'=未验证）
+	BehaviorJSON string            // P4-5 行为生物特征（滑窗统计量 JSON，'{}'=未采集）
+	ClockSkewPPM *float64          // P4-6 时钟偏移（ppm；NULL=未采集）
+	ClusterID   *int64             // P4-4 图聚类簇归属（NULL=未聚类）
 }// PHashRowDTO 感知哈希候选行（同源关联扫描）。
 type PHashRowDTO struct {
 	Fingerprint string
@@ -192,6 +203,15 @@ type FPLinkDTO struct {
 	FirstSeen, LastSeen time.Time
 }
 
+// ClusterDTO 簇档案（P4-4 聚类写回与集群视图）。
+type ClusterDTO struct {
+	ID        int64     `json:"id"`
+	Members   []string  `json:"members"`
+	Size      int       `json:"size"`
+	FirstSeen time.Time `json:"first_seen"`
+	Reason    string    `json:"reason"`
+}
+
 // FingerprintMeta 指纹上报的附带信息（WebRTC IP、分量明细、环境核验命中、P2 数学指纹）。
 type FingerprintMeta struct {
 	Webrtc      []string
@@ -205,6 +225,8 @@ type FingerprintMeta struct {
 	Stability   float64             // P2-4 整体稳定度（引擎计算后随 upsert 落库）
 	CompStability map[string]float64 // P2-4 各分量稳定度（引擎计算后随 upsert 落库）
 	JA4         string              // P3-2 TLS 客户端指纹（TLS 模式下由连接上下文注入）
+	Behavior    string              // P4-5 行为生物特征 JSON（客户端滑窗统计量，已清洗）
+	ClockSkewPPM *float64           // P4-6 时钟偏移（ppm；nil=未采集）
 }
 
 // ja4CtxKey TLS 指纹的 context 键（连接级注入，请求级读取）。
@@ -944,6 +966,8 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	// 是伪造 header 的硬证据；指纹未知（新客户端/新版本）只记录不计分。
 	// P4-1 平台证明结果由 appattest.go 的 attest 端点独立写入 attestation 列。
 	g.tlsCheck(ctx, ip, ua, meta)
+	// P4-5 行为生物特征：滑窗统计量入库 + 机器特征规则（完全匀速/纯直线/机械击键）。
+	g.behaviorCheck(ctx, ip, meta)
 	// 连坐双因子：干净设备连到被封的共享出口（酒店/机场/运营商 NAT 被前任搞封）
 	// 不算违规，只记低分观察；只有"该指纹名下其他 IP 近期也有劣迹"（代理池轮换
 	// 特征）才升级封禁。防误封核心：身份信号必须与设备劣迹叠加。
@@ -1331,6 +1355,72 @@ func (g *IPGuard) RefreshEntropyBits(ctx context.Context) error {
 	}
 	log.Printf("[ipguard] 熵权刷新完成：%d 条指纹，均值 %.1f bit", len(rows), sum/float64(len(rows)))
 	return nil
+}
+
+// RefreshClusters 图聚类每日任务（P4-4）：30 天窗口内按四类边构连通分量，
+// 全量重写 fp_clusters 与 cluster_id。簇 ≥ 3 供管理端 review 关注（连坐系数
+// ×1.5 的接入留待与 iprisk 单类封顶设计对齐后启用，见交付笔记待办）。
+func (g *IPGuard) RefreshClusters(ctx context.Context) error {
+	if g.store == nil {
+		return nil
+	}
+	since := time.Now().Add(-30 * 24 * time.Hour)
+	rows, err := g.store.ListFingerprintsSince(ctx, since, entropyMaxRows)
+	if err != nil {
+		return err
+	}
+	links, err := g.store.ListAllFPLinks(ctx, since, 200000)
+	if err != nil {
+		return err
+	}
+	nodes := make([]fpcluster.NodeInput, 0, len(rows))
+	for _, r := range rows {
+		nodes = append(nodes, fpcluster.NodeInput{
+			FP: r.Fingerprint, IPs: r.IPs, UA: r.UA, JA4: r.JA4,
+			BehaviorJSON: r.BehaviorJSON, ClockSkew: r.ClockSkewPPM,
+		})
+	}
+	linksDTO := make([]fpcluster.LinkInput, 0, len(links))
+	for _, l := range links {
+		linksDTO = append(linksDTO, fpcluster.LinkInput{Src: l.Src, Dst: l.Dst, Kind: l.Kind})
+	}
+	clusters := fpcluster.Build(nodes, linksDTO)
+	dtos := make([]ClusterDTO, 0, len(clusters))
+	maxSize := 0
+	for _, c := range clusters {
+		if c.Size > maxSize {
+			maxSize = c.Size
+		}
+		dtos = append(dtos, ClusterDTO{Members: c.Members, Size: c.Size, FirstSeen: time.Now(), Reason: c.Reason})
+	}
+	if err := g.store.ReplaceClusters(ctx, dtos); err != nil {
+		return err
+	}
+	log.Printf("[ipguard] 图聚类：%d 指纹 / %d 簇（最大 %d 成员）", len(rows), len(clusters), maxSize)
+	return nil
+}
+
+// behaviorCheck 行为生物特征（P4-5）：清洗入库（meta.Behavior 已裁剪），机器特征规则
+// 命中记 env-flag:behavior_machine（+15，灰度 0 分）。无数据（headless 无鼠标事件）
+// 不等于机器——规则只在事件数达标时生效。
+func (g *IPGuard) behaviorCheck(ctx context.Context, ip string, meta FingerprintMeta) {
+	if g.store == nil || meta.Behavior == "" {
+		return
+	}
+	f := behavior.Parse(meta.Behavior)
+	if f == nil {
+		return
+	}
+	signals := behavior.MachineSignals(f)
+	if len(signals) == 0 {
+		return
+	}
+	score := 0
+	if !shadowScoring() {
+		score = behaviorMachineScore
+	}
+	g.event(ctx, ip, "env-flag:behavior_machine",
+		sprintf("行为机器特征 %s（鼠标 %d 事件 / 击键 %d 事件）", strings.Join(signals, ","), f.Mouse.Events, f.Keys.Events), score, false)
 }
 
 // fpHasRecentViolations 抽查指纹名下其他 IP 近期（7 天）是否有违规记录：// 区分"出差换网络的干净设备"与"代理池轮换的指纹"。

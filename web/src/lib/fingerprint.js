@@ -13,6 +13,7 @@ import { forensicsDetect } from './fp/forensics'
 import { botdDetect } from './fp/botd'
 import { phashFromImageData } from './phash'
 import { solveAltcha } from './altcha'
+import { initBehaviorReporting } from './behavior'
 
 const FP_KEY = 'gh_fp'
 const REPORTED_KEY = 'gh_fp_reported'
@@ -276,6 +277,8 @@ export async function reportFingerprint() {
     })
     if (!res.ok) throw new Error('http ' + res.status)
     sessionStorage.setItem(REPORTED_KEY, '1')
+    // P4-5/P4-6：指纹就绪后启动行为/时钟偏移的周期性补充上报（每 5 分钟 + 页面隐藏/卸载）
+    initBehaviorReporting(() => localStorage.getItem(FP_KEY) || '')
     const d = await res.json().catch(() => ({}))
     if (d.banned) location.reload()
   } catch {

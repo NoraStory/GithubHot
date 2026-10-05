@@ -19,6 +19,7 @@ type fakeGuardStore struct {
 	phashes []PHashRowDTO
 	links   []FPLinkDTO
 	lsh     []lshRow // P2-2 LSH 桶（fp × band × hash）
+	clusters []ClusterDTO // P4-4 聚类结果
 }
 
 // lshRow 一条 LSH 桶记录。
@@ -122,7 +123,7 @@ func (f *fakeGuardStore) UpsertFingerprint(_ context.Context, fp, ip, ua string,
 	f.fps = append(f.fps, FingerprintDTO{
 		Fingerprint: fp, IPs: []string{ip}, UA: ua,
 		Components: meta.Components, CanvasPHash: meta.CanvasPHash, MinHashSig: meta.MinHashSig,
-		JA4:        meta.JA4,
+		JA4:        meta.JA4, BehaviorJSON: meta.Behavior, ClockSkewPPM: meta.ClockSkewPPM,
 		Stability: meta.Stability, CompStability: meta.CompStability,
 		FirstSeen: time.Now(), LastSeen: time.Now(),
 	})
@@ -207,6 +208,51 @@ func (f *fakeGuardStore) UpdateEntropyBits(_ context.Context, fp string, bits fl
 
 func (f *fakeGuardStore) UpdateIPGeo(context.Context, string, uint, string, string, string) error {
 	return nil
+}
+
+func (f *fakeGuardStore) ReplaceClusters(_ context.Context, clusters []ClusterDTO) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.clusters = clusters
+	for i := range f.fps {
+		f.fps[i].ClusterID = nil
+	}
+	for id, c := range clusters {
+		for _, fp := range c.Members {
+			for i := range f.fps {
+				if f.fps[i].Fingerprint == fp {
+					cid := int64(id + 1)
+					f.fps[i].ClusterID = &cid
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (f *fakeGuardStore) ListAllFPLinks(_ context.Context, since time.Time, limit int) ([]FPLinkDTO, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []FPLinkDTO{}
+	for _, l := range f.links {
+		if !l.LastSeen.Before(since) {
+			out = append(out, l)
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (f *fakeGuardStore) ListClusters(_ context.Context, limit int) ([]ClusterDTO, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := f.clusters
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (f *fakeGuardStore) UpdateAttestation(_ context.Context, fp string, json string) error {

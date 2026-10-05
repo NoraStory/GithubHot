@@ -35,6 +35,8 @@ type fpPayload struct {
 	TZ          string              `json:"tz"`           // P2-5 客户端 IANA 时区（可选）
 	TZOffsetMin int                 `json:"tz_offset_min"` // P2-5 时区偏移分钟数（可选）
 	Altcha      *altchaSolution     `json:"altcha"`        // P4-3 PoW 解（强制开启时必需；可选字段，旧服务端忽略）
+	Behavior    json.RawMessage     `json:"behavior"`       // P4-5 行为滑窗统计量 JSON（可选）
+	ClockSkewPPM *float64           `json:"clock_skew_ppm"` // P4-6 时钟偏移 ppm（可选）
 }
 
 // sanitizePHash 校验客户端上报的感知哈希（P2-1）：必须 hex16，否则丢弃（不关联）。
@@ -72,6 +74,15 @@ func sanitizeSets(in map[string][]string) map[string][]string {
 		return nil
 	}
 	return out
+}
+
+// sanitizeBehavior 清洗行为特征 JSON（P4-5）：长度受限；结构合法性由引擎 behavior.Parse 校验。
+func sanitizeBehavior(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 8192 {
+		return ""
+	}
+	return s
 }
 
 // sanitizeTZ 清洗客户端 IANA 时区名（P2-5）：长度受限、仅允许时区名的合法字符。
@@ -230,6 +241,8 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 		TZ:          sanitizeTZ(p.TZ),
 		TZOffsetMin: p.TZOffsetMin,
 		JA4:         JA4FromContext(ctx), // P3-2：TLS 模式下由连接上下文注入（纯 HTTP 为空）
+		Behavior:    sanitizeBehavior(string(p.Behavior)),
+		ClockSkewPPM: p.ClockSkewPPM,
 	}
 	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, meta)
 	// 每个命中项记违规事件（积分见 flagScore）。
@@ -273,7 +286,17 @@ func (s *Server) ipGuardSummaryAPI(w http.ResponseWriter, r *http.Request) {
 		"fingerprints": fps,
 		"bans":         bans,
 		"flag_stats":   s.flagStats(ctx),
+		"clusters":     s.clusterOverview(ctx),
 	})
+}
+
+// clusterOverview 集群概览（P4-4）：按 size 降序 Top-10（additive 字段，零影响旧前端）。
+func (s *Server) clusterOverview(ctx context.Context) []ClusterDTO {
+	clusters, err := s.Guard.Store().ListClusters(ctx, 10)
+	if err != nil {
+		return []ClusterDTO{}
+	}
+	return clusters
 }
 
 // flagStatsWindow flag 命中统计的观察窗口（灰度判断假阳性率的基准窗）。

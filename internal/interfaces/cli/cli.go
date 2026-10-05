@@ -205,6 +205,10 @@ func Serve(cfg *config.Config) error {
 		if err := srv.Guard.RefreshEntropyBits(ctx); err != nil {
 			fmt.Printf("[cron] 熵权刷新失败: %v\n", err)
 		}
+		// P4-4 图聚类：同一每日调度顺带执行（全量重算 fp_clusters / cluster_id）
+		if err := srv.Guard.RefreshClusters(ctx); err != nil {
+			fmt.Printf("[cron] 图聚类失败: %v\n", err)
+		}
 	})
 	entropySched.start()
 	defer entropySched.stop()
