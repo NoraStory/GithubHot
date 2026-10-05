@@ -1,7 +1,7 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { adminLogin } from '../lib/api'
+import { adminLogin, passkeyLogin, webAuthnAvailable } from '../lib/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -9,7 +9,29 @@ const password = ref('')
 const remember = ref(true)
 const error = ref('')
 const loading = ref(false)
+const passkeyBusy = ref(false)
+const passkeyReady = ref(false)
 
+// P4-2：WebAuthn 可用且服务端启用时显示免密登录按钮
+onMounted(async () => {
+  if (!webAuthnAvailable()) return
+  try {
+    const res = await fetch('/api/v1/admin/passkey/begin-login', { method: 'HEAD' })
+    if (res.status !== 404 && res.status !== 503) passkeyReady.value = true
+  } catch { /* 忽略 */ }
+})
+
+async function loginWithPasskey() {
+  passkeyBusy.value = true
+  error.value = ''
+  try {
+    await passkeyLogin()
+    router.push(route.query.redirect || '/admin/usage')
+  } catch (e) {
+    error.value = e.message
+  }
+  passkeyBusy.value = false
+}
 async function login() {
   if (!password.value) {
     error.value = '请输入密码'
@@ -36,6 +58,9 @@ async function login() {
       <label class="remember"><input v-model="remember" type="checkbox"> 记住我（7 天内免登录）</label>
       <button :disabled="loading" @click="login">{{ loading ? '验证中…' : '进入控制台' }}</button>
       <div v-if="error" class="err">{{ error }}</div>
+      <button v-if="passkeyReady" class="passkey" :disabled="passkeyBusy" @click="loginWithPasskey">
+        🔑 通行密钥登录
+      </button>
     </div>
   </div>
 </template>

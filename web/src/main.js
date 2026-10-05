@@ -23,6 +23,7 @@ import Link from './views/Link.vue'
 import Charts from './views/Charts.vue'
 import AdminLayout from './admin/AdminLayout.vue'
 import AdminLogin from './admin/AdminLogin.vue'
+import AdminPasskeys from './admin/AdminPasskeys.vue'
 import AdminUsage from './admin/AdminUsage.vue'
 import AdminDiagnostics from './admin/AdminDiagnostics.vue'
 import AdminRuns from './admin/AdminRuns.vue'
@@ -69,6 +70,7 @@ const router = createRouter({
         { path: 'usage', component: AdminUsage },
         { path: 'diagnostics', component: AdminDiagnostics },
         { path: 'runs', component: AdminRuns },
+        { path: 'passkeys', component: AdminPasskeys },
         { path: 'sources', component: AdminSources },
         { path: 'stories', component: AdminStories },
         { path: 'digests', component: AdminDigests },

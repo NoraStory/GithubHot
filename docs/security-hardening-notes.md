@@ -450,6 +450,34 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
   70 分已顶到强类上限，×1.5 会越过单类封顶设计；拟以独立弱证据 kind（cluster-linked）
   形式接入并与 iprisk 对齐，留待下批与 P5 review 队列一起做。
 
+### P4-2 WebAuthn 通行密钥（管理端免密登录）✅
+
+- 依赖：go-webauthn v0.18.2（FIDO2，纯 Go）。存储：`admin_credentials` 表
+  （credential_id BLOB UNIQUE / public_key / attestation_type / sign_count / transports）。
+- 端点（/api/v1/admin/passkey/*）：begin-register / finish-register（守卫组内，注册绑
+  管理会话）；begin-login / finish-login（守卫外免密入口，成功后**复用 gh_admin_session
+  会话通道**并按 P0-2 口径绑定 IP）；credentials 列表 / 删除。登录会话一次性 token
+  （5 分钟 TTL，消费即失效）。
+- env：WEBAUTHN_ENABLED=1 + WEBAUTHN_RP_ID（=域名）+ WEBAUTHN_ORIGIN（=完整 origin，
+  **origin 的域必须与 RP ID 一致**——用 127.0.0.1 访问而 RP=localhost 会被浏览器拒，
+  沙盒实测踩到后改用 https://localhost:8792）；WEBAUTHN_ONLY=1 关闭密码登录。
+- 陷阱实录（每个都花了一轮排查，供后续实现者避坑）：
+  1. **Go 的 TLS 握手惰性**（P3 同款）：ConnContext 时 body 未读——本处无影响；
+  2. **finish-login 的 body 被 FinishLogin 二次消费**：本地解码后必须把 body 回填
+     （r.Body = NopCloser(NewReader(raw))），否则 Parse error for Assertion（EOF）；
+  3. **线格式全 base64url**（URLEncodedBase64 自定义解码，拒绝标准 base64 的 +/=）；
+     断言体的 id/rawId/type 在**顶层**而非 response 内（与 WebAuthn 标准形状一致）；
+  4. RP ID 必须是 origin 的可匹配域（localhost ↔ 127.0.0.1 不匹配）。
+- 前端：AdminPasskeys.vue 管理页（列表/注册/删除）+ AdminLogin.vue 免密按钮
+  （HEAD 探测 passkey 端点存在才显示；WebAuthn 不可用的浏览器自动隐藏）+ 路由 /admin/passkeys。
+- 验收（playwright + CDP 虚拟认证器，headless Edge）：
+  A. 密码登录 → 注册本设备密钥（认证器自动完成用户验证）→ 凭据落库 ✓；
+  B. 清 Cookie → 免密登录 → 断言通过、会话建立 ✓；
+  C. "错设备"（另一空虚拟认证器，无已注册密钥）→ 免密登录失败、错误展示 ✓
+     （错误为 NotAllowedError 超时——认证器无匹配密钥时浏览器快速拒绝，
+      服务端 finish-login 未被调用，攻击者无法探测会话状态）。
+  存活验证：管理端会话签发后 admin/usage 正常访问 ✓。
+
 ## 已知边界 / 后续项
 
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，

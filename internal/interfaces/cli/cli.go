@@ -17,6 +17,7 @@ import (
 	"github.com/NoraStory/GithubHot/internal/application"
 	"github.com/NoraStory/GithubHot/internal/config"
 	"github.com/NoraStory/GithubHot/internal/domain/attest"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/NoraStory/GithubHot/internal/domain/shared"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/ja4db"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/fetcher"
@@ -148,6 +149,19 @@ func Serve(cfg *config.Config) error {
 	srv.Favicons = httpapi.NewFaviconService(linkImageStore{db}) // 无图卡片回退信源 favicon 瓦片
 	srv.TLSMode = cfg.TLSEnabled() // P3-1：TLS 模式决定 HSTS 与 Secure cookie
 	srv.AttestNonces = attest.NewNonceStore() // P4-1 平台证明 nonce 内存存储
+	if cfg.WebAuthnEnabled() {
+		wa, err := webauthn.New(&webauthn.Config{
+			RPID:     cfg.WebAuthnRPID,
+			RPDisplayName: "GithubHot 管理端",
+			RPOrigins: []string{cfg.WebAuthnOrigin},
+		})
+		if err != nil {
+			return fmt.Errorf("WebAuthn 初始化失败: %w", err)
+		}
+		srv.WebAuthn = wa
+		srv.PasskeyStore = passkeyStore{db}
+		fmt.Printf("[webauthn] 通行密钥已启用（RP %s，origin %s）\n", cfg.WebAuthnRPID, cfg.WebAuthnOrigin)
+	}
 	if srv.TLSMode {
 		srv.Guard.SetJA4DB(ja4db.Load(filepath.Join(cfg.DataDir, "ja4-mapping.csv")))
 		fmt.Printf("[tls] TLS 模式已启用（JA4 指纹捕获激活）\n")

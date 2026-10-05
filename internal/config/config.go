@@ -39,6 +39,13 @@ type Config struct {
 	TLSKey              string   // P3 TLS 私钥路径（TLS_KEY）
 	ACMEDomains         string   // P3 ACME 域名（ACME_DOMAIN，逗号分隔）；启用 autocert 自动签发
 	RedirectHTTP        bool     // P3 REDIRECT_HTTP=1：80 端口 301 跳 HTTPS
+	WebAuthnRPID        string   // P4-2 通行密钥 RP ID（域名）
+	WebAuthnOrigin      string   // P4-2 通行密钥完整 origin
+}
+	
+// WebAuthnEnabled 通行密钥是否启用（RP ID 与 origin 齐备）。
+func (c *Config) WebAuthnEnabled() bool {
+	return strings.TrimSpace(os.Getenv("WEBAUTHN_ENABLED")) == "1" && c.WebAuthnRPID != "" && c.WebAuthnOrigin != ""
 }
 
 // TLSEnabled 是否以 TLS 模式运行（决定 HSTS / Secure cookie / JA4 捕获是否启用）。
@@ -140,6 +147,8 @@ func Load() (*Config, error) {
 		TLSKey:              getEnv("TLS_KEY", ""),
 		ACMEDomains:         getEnv("ACME_DOMAIN", ""),
 		RedirectHTTP:        getEnv("REDIRECT_HTTP", "") == "1",
+		WebAuthnRPID:        getEnv("WEBAUTHN_RP_ID", ""),
+		WebAuthnOrigin:      getEnv("WEBAUTHN_ORIGIN", ""),
 	}
 	if cfg.LLMBaseURL != "" || cfg.LLMAPIKey != "" || cfg.LLMModelA != "" {
 		if cfg.LLMBaseURL == "" || cfg.LLMAPIKey == "" || cfg.LLMModelA == "" {

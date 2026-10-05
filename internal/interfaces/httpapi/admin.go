@@ -30,6 +30,9 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 	r.Route("/admin", func(r chi.Router) {
 		r.Post("/login", s.adminLogin)
 		r.Get("/session", s.adminSessionCheck)
+		// P4-2 通行密钥免密登录入口（守卫外；成功后复用 gh_admin_session 通道）
+		r.Post("/passkey/begin-login", s.beginPasskeyLogin)
+		r.Post("/passkey/finish-login", s.finishPasskeyLogin)
 		r.Group(func(r chi.Router) {
 			r.Use(s.adminAuth)
 			r.Post("/logout", s.adminLogout)
@@ -55,6 +58,11 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 			r.Post("/probes/run", s.probesRunAPI)
 			// 资源监测（进程 RSS / CPU / Go 运行时 / sidecar 状态）
 			r.Get("/system/stats", s.systemStatsAPI)
+			// P4-2 通行密钥管理（注册需已登录）
+			r.Post("/passkey/begin-register", s.beginPasskeyRegister)
+			r.Post("/passkey/finish-register", s.finishPasskeyRegister)
+			r.Get("/passkey/credentials", s.listPasskeyCredentials)
+			r.Delete("/passkey/credentials/{id}", s.deletePasskeyCredential)
 		})
 	})
 }

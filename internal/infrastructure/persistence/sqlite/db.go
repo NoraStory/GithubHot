@@ -96,6 +96,17 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS admin_sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, ip TEXT NOT NULL)"); err != nil {
 		return fmt.Errorf("建表 admin_sessions: %w", err)
 	}
+	// P4-2 WebAuthn 通行密钥（管理端免密登录）
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS admin_credentials (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		credential_id BLOB NOT NULL UNIQUE,
+		public_key BLOB NOT NULL,
+		attestation_type TEXT NOT NULL DEFAULT '',
+		sign_count INTEGER NOT NULL DEFAULT 0,
+		transports TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL)`); err != nil {
+		return fmt.Errorf("建表 admin_credentials: %w", err)
+	}
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS ip_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, score INTEGER NOT NULL, created_at TEXT NOT NULL)"); err != nil {
 		return fmt.Errorf("建表 ip_events: %w", err)
 	}

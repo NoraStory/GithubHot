@@ -67,3 +67,65 @@ export async function loadSiteConfig() {
     return { music: [] }
   }
 }
+
+// ---- P4-2 WebAuthn 通行密钥 ----
+const b64uToBuf = (s) => {
+  const pad = s + '='.repeat((4 - (s.length % 4)) % 4)
+  const bin = atob(pad.replace(/-/g, '+').replace(/_/g, '/'))
+  return Uint8Array.from(bin, c => c.charCodeAt(0)).buffer
+}
+// WebAuthn JSON 线格式 = base64url（无 padding）；go-webauthn 字段均为 URLEncodedBase64
+const bufToB64u = (buf) => {
+  const bin = String.fromCharCode(...new Uint8Array(buf))
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+export const webAuthnAvailable = () => typeof window.PublicKeyCredential !== 'undefined'
+
+// 注册（需已登录）：begin → navigator.credentials.create → finish
+export async function passkeyBeginRegister() {
+  const options = await api.post('/api/v1/admin/passkey/begin-register', {})
+  const pk = options.publicKey
+  pk.challenge = b64uToBuf(pk.challenge)
+  pk.user.id = b64uToBuf(pk.user.id)
+  ;(pk.excludeCredentials || []).forEach(c => { c.id = b64uToBuf(c.id) })
+  const cred = await navigator.credentials.create({ publicKey: pk })
+  const body = {
+    id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type,
+    response: {
+      attestationObject: bufToB64u(cred.response.attestationObject),
+      clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+    }
+  }
+  return api.post('/api/v1/admin/passkey/finish-register', body)
+}
+
+// 免密登录（守卫外）：begin → navigator.credentials.get → finish（成功即建会话）
+export async function passkeyLogin() {
+  const { token, options } = await api.post('/api/v1/admin/passkey/begin-login', {})
+  const pk = options.publicKey
+  pk.challenge = b64uToBuf(pk.challenge)
+  ;(pk.allowCredentials || []).forEach(c => { c.id = b64uToBuf(c.id) })
+  const assertion = await navigator.credentials.get({ publicKey: pk })
+  const body = {
+    token,
+    id: assertion.id, rawId: bufToB64u(assertion.rawId), type: assertion.type,
+    response: {
+      clientDataJSON: bufToB64u(assertion.response.clientDataJSON),
+      authenticatorData: bufToB64u(assertion.response.authenticatorData),
+      signature: bufToB64u(assertion.response.signature),
+      userHandle: assertion.response.userHandle ? bufToB64u(assertion.response.userHandle) : null,
+    }
+  }
+  const res = await api.post('/api/v1/admin/passkey/finish-login', body)
+  adminAuthed.value = true
+  return res
+}
+
+export async function listPasskeys() {
+  return api.get('/api/v1/admin/passkey/credentials')
+}
+
+export async function deletePasskey(id) {
+  return api.del('/api/v1/admin/passkey/credentials/' + id)
+}

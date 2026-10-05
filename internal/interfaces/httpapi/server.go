@@ -13,6 +13,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-webauthn/webauthn/webauthn"
+	"sync"
 
 	"github.com/NoraStory/GithubHot/internal/application"
 	"github.com/NoraStory/GithubHot/internal/domain/digest"
@@ -30,6 +32,11 @@ type Server struct {
 	Favicons *FaviconService // 信源 favicon 瓦片代理（nil = 无图卡片不回退图标）
 	Probes  ProbeReader   // 健康探针（nil = 未启用，管理端探针页不可用）
 	AttestNonces AttestNonces // P4-1 平台证明 nonce 存储（nil = 未启用，attest 端点 503）
+	WebAuthn    *webauthn.WebAuthn // P4-2 通行密钥（nil = 未启用，passkey 端点 503）
+	PasskeyStore PasskeyStore      // P4-2 通行密钥存储（与 WebAuthn 成对）
+
+	passkeyOnce sync.Once
+	passkeyMaps *passkeySessionStore
 	TLSMode bool          // P3-1：serve 以 TLS 运行（证书或 ACME）→ HSTS 中间件启用
 	Version string
 }

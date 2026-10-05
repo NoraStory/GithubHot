@@ -211,6 +211,11 @@ type loginPayload struct {
 
 // adminLogin POST /api/v1/admin/login：验证密码 → 建会话 → 下发 Cookie。
 func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
+	// P4-2：WEBAUTHN_ONLY=1 时密码登录禁用（通行密钥是唯一入口）
+	if passwordLoginDisabled() {
+		writeErr(w, 403, errorString("密码登录已禁用（WEBAUTHN_ONLY），请使用通行密钥"))
+		return
+	}
 	passwordHash := os.Getenv("ADMIN_PASSWORD_HASH")
 	if passwordHash == "" {
 		writeErr(w, 400, errorString("服务端未启用密码登录（未配置 ADMIN_PASSWORD_HASH）"))
