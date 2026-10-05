@@ -2,7 +2,7 @@
 
 > 交付对象：Coding Agent（自动化执行）。本文档是唯一需求来源，执行时不需要额外上下文。
 > 覆盖范围：仅安全/指纹体系。不涉及业务功能（榜单、日报、信源）。
-> 阶段划分：P0 硬伤修复 → P1 指纹浏览器识别 → P2 算法升级 → P3 TLS+JA4 → P4 平台证明与高级项 → P5 行为机器学习 → P6 图算法升级（Louvain / GNN / MIDAS）。
+> 阶段划分：P0 硬伤修复 → P1 指纹浏览器识别 → P2 算法升级 → P3 TLS+JA4 → P4 平台证明与高级项 → P5 行为机器学习 → P6 图算法升级（Louvain / GNN / MIDAS，含 mlserve 在线推理 sidecar）。管理端 IP 守护的前端可视化整合规格见 §10（跨阶段，可随各阶段增量交付）。
 
 ---
 
@@ -19,7 +19,7 @@
    - JA4（TLS 客户端指纹算法本体）BSD-3，可自由使用。
    - JA4S/H/L/X/SSH/T 等"+"系列为 FoxIO License 1.1：本项目（开源、非售卖）内部使用允许，但**禁止**将其实现代码用于商业产品转售，且需在 `NOTICE` 或 README 致谢标注。
    - CreepJS 的检测思路可参考，**禁止**复制其代码（license 不明确）。
-   - 每引入一个第三方库，落地时核对仓库 LICENSE 文件并在本文档 §11 表格中回填实际 license。
+   - 每引入一个第三方库，落地时核对仓库 LICENSE 文件并在本文档 §12 表格中回填实际 license。
 
 ---
 
@@ -108,7 +108,7 @@ L0 客户端自报层 Canvas(pHash) · WebGL · 字体 · WebRTC · 行为生物
 - **改法**：`appguard.go:126` 的 `/api/v1/site/config` 免签白名单收窄——仍然免签（APP 冷启动需要），但挂一层滑动窗口限流（复用 ipguard.go:449 现有实现，阈值 env `HANDSHAKE_RATE_PER_MIN` 默认 30/min）。
 - **验收**：压测 60 req/min 命中限流响应 429 并计分。
 
-### P0-4 面板可见性（为 P1/P2 铺路）
+### P0-4 面板可见性（为 P1/P2 铺路，详见 §10.1）
 
 - `web/src/admin/` 的 IP 防护面板增加"检测 flag 命中统计"区块：读 `ip_fingerprints.flags` JSON 里的各 key 出现次数聚合（SQL json_each 或应用层聚合）。P1/P2 的灰度观察全靠它。
 
@@ -336,7 +336,7 @@ for each target:
   4. TLS 指纹相同 + UA 声称互异（P3 数据）。
 - **算法**：每日 cron 跑一次 BFS 连通分量（数据量 < 1e5 无需 Louvain）；簇大小 ≥ 3 → 标记 review，簇内任一成员被 ban → 全簇连坐系数 ×1.5（复用 BannedAmong 通道 :620）。
 - **DDL**：`ip_fingerprints.cluster_id INTEGER`；新表 `fp_clusters (id INTEGER PRIMARY KEY, member_fps TEXT/*JSON数组*/, size INTEGER, first_seen TEXT, reason TEXT)`。
-- **管理端**：IP 防护面板加"集群视图"（Tab 列表 + 成员下钻）。
+- **管理端**：IP 防护面板加"集群视图"（Tab 列表 + 成员下钻，详见 §10.4）。
 
 ### P4-5 行为生物特征采集（前端埋点，规则版先行）
 
@@ -372,7 +372,7 @@ for each target:
 
 ### P5-1 标注体系与数据管道（一切模型的前提）
 
-- **DDL**：`fp_labels` 表见 §10.1 汇总（fp + label + source + confidence）。
+- **DDL**：`fp_labels` 表见 §11.1 汇总（fp + label + source + confidence）。
 - **弱标签**（source=rule，每日 cron 生成刷新）：曾入三层封禁记录 → `bot`(0.7)；P1 灰度期命中 ≥2 项 `fpb_*`/`botd_*` → `bot`(0.6)；近 30 天零 flag 且有行为数据 → `human`(0.8)；其余 `uncertain`。
 - **金标签**：管理端指纹下钻页加"标注"操作（`POST /api/v1/admin/fp/label`，body `{fp, label, notes}`），source=admin、confidence=1.0，覆盖弱标签。标注操作同时给 P6 GNN 提供训练标签。
 - **导出**：`githubhot ml export --out data/ml/behavior.jsonl`，每行 `{fp, features:{...}, label, weight=confidence}`。特征清单（全部统计量，不含原始事件）：behavior 各特征（dwell/flight 均值方差、速度均值方差、曲率、jerk 方差、方向变化率、事件量）、`entropy_bits`、`stability`、`clock_skew_ppm`、灰度 flags 命中计数、会话时长、近 30 天 IP 数。
@@ -404,7 +404,7 @@ for each target:
 
 - 每指纹维护行为模板（历史特征均值 μ、对角协方差 Σ）；新会话算马氏距离 `d²=(x-μ)ᵀΣ⁻¹(x-μ)`，超 99 分位 → 触发 ALTCHA 难度 +4 的加强挑战而非直接拒绝。
 
-### P5-6 漂移监控与评估闭环
+### P5-6 漂移监控与评估闭环（详见 §10.5）
 
 - **PSI**：每特征按周算 `Σ(Aᵢ-Eᵢ)·ln(Aᵢ/Eᵢ)`（本周分布 vs 训练分布），任一特征 PSI > 0.2 → 管理端诊断页告警并触发再训练。
 - 管理端"ML 诊断"页：当前模型版本与指标、混淆矩阵、PSI 表、shadow 命中分布直方图。
@@ -442,7 +442,28 @@ for each target:
 - **输出**：`githubhot ml import-gnn data/models/graph_gnn_v1.json`——每 fp 写回 `gnn_score`（bot 概率）与 64 维 `gnn_embedding`，同时写模型卡（指标/训练集规模/日期）。
 - **冷启动**：新 fp 未被上次训练覆盖 → 取其 Louvain 社区内已评估节点 gnn_score 均值兜底，下次训练覆盖。
 - **频率**：每周随 run_train.ps1 跑；图 < 1e5 节点，CPU 训练分钟级。
-- **红线**：GNN 只离线训练导出分数，Go 进程零推理、零 Python 依赖。
+- **红线**：Python 与 CGO 依赖**禁止进入主二进制**；在线推理按下述 sidecar 形态独立部署。
+
+### P6-3b 在线推理服务（独立子项目 mlserve/，可选部署）
+
+> 用途：新指纹入库后近实时打分，不必等周级离线训练。独立项目、独立端口、内存受控；不部署则维持纯离线模式，功能无损降级。
+
+- **形态**：仓库内独立目录 `mlserve/`（与 `android-app/` 同等待遇：不进主二进制、独立部署单元、可随时拆独立仓库）。Python 3.11+ / FastAPI + uvicorn（**单 worker**）。
+- **推理引擎（低内存优先）**：
+  1. 首选 **ONNX Runtime CPU**：训练侧把 GraphSAGE 前向用纯张量算子重写（`index_select` + `scatter_add`）后 `torch.onnx.export` 导出，sidecar 只加载 ONNX——目标 RSS **≤ 200MB**；
+  2. 若 scatter 算子导出受阻 → 回退 torch 推理模式（`inference_mode` + Linear 层 int8 动态量化），RSS 上限 **≤ 512MB**。
+- **内存硬约束**：`OMP_NUM_THREADS=1`、`torch.set_num_threads(1)`、请求子图 ≤ 100 节点、批量恒为 1；systemd `MemoryMax=320M`（ONNX）/ `560M`（回退），OOM 自动重启。
+- **端口与安全**：仅绑定 `127.0.0.1:8790`；请求头 `X-Sidecar-Token` 共享密钥；`/healthz` 挂进现有健康探针框架（AdminProbes 定时探测）。
+- **接口**：
+  - `GET /healthz` → `{status, model_version, rss_mb, uptime_s, scored_24h, p99_ms}`；
+  - `POST /v1/score` body `{nodes:[{id, features:[…]}], edges:[[src,dst],…]}` → `{scores:{id: bot概率}, embeddings:{id:[64 维]}}`；延迟预算 P99 < 100ms。
+- **主服务集成（Go 侧）**：
+  - env：`GNN_SIDECAR_URL`（默认空 = 启用纯离线模式）、`GNN_SIDECAR_TOKEN`；
+  - 触发：`fp/report` 新指纹入库后由 goroutine 异步调用（fire-and-forget，超时 500ms，**不阻塞上报路径**）；
+  - 失败/超时/未配置 → 回落 P6-3 冷启动路径（Louvain 社区均值）；
+  - 结果写回 `gnn_score` / `gnn_embedding`（与离线分数同列共存，模型卡标注来源 online/offline）。
+- **部署**：`deploy/githubhot-gnn.service`（独立 systemd 单元，`After=githubhot.service`）；周训练产出新模型 → 写 `mlserve/models/gnn_vN.onnx` → `SIGHUP` 热换模型，不断服务。
+- **依赖隔离**：sidecar 的 Python 依赖（fastapi/uvicorn/onnxruntime 或 torch）全部装在 `mlserve/.venv`（项目内，gitignore），不进 `web/`、不进 `go.mod`。
 
 ### P6-4 MIDAS 流式边异常（实时层，抓正在发生的协同攻击）
 
@@ -451,7 +472,7 @@ for each target:
 - **动作**：>3σ → 实时积分 +15（先 shadow，仍受 `FP_SCORE_SHADOW` 控制）；>5σ → 直接进 review 队列。
 - **验收**：模拟 20 IP × 20 fp 两个时间片内互联 → 告警命中；平稳流量一周零误报。
 
-### P6-5 管理端图可视化
+### P6-5 管理端图可视化（详见 §10.4）
 
 - `web/` 加 `d3-force`（npm 装项目内）；`GET /api/v1/admin/ipguard/graph` 返回当前图（节点/边/分数，按风险截断上限 500 节点）。
 - 集群视图升级为力导向图：节点色 = gnn_score（绿→红）、节点大小 = 度、点击下钻指纹详情、就地联动 P5-1 标注按钮。
@@ -463,9 +484,113 @@ for each target:
 
 ---
 
-## 10. 数据模型与 API 变更汇总
+## 10. 管理端 IP 守护可视化（前端整合规格，跨阶段）
 
-### 10.1 DDL 汇总（迁移脚本一次执行，幂等写法参照现有迁移）
+> 本章节收拢散落在 P0-4 / P4-4 / P5-1 / P5-6 / P6-5 的全部管理端 UI 交付物，统一规格、统一验收。可以随各阶段增量执行，也可以作为一次前端冲刺整体交付。
+
+### 10.0 现状与设计原则
+
+**现状**：`web/src/admin/AdminIPGuard.vue`（459 行单文件）承载全部功能——`/api/v1/admin/ipguard/summary` 拉取（Top 访客 / 封禁 / 违规事件 / 指纹列表）、IP 筛选与时间筛选、IP 下钻面板（档案 / 封禁记录 / 关联指纹 / flags 并集）、手动封禁解封。路由 `/admin/ipguard` 挂在 `AdminLayout` 下（`web/src/main.js:74`）。项目**无图表库**。
+
+**原则**：
+
+1. 不引入重量级图表库（echarts/ChartJS 等）：条形图、直方图、漏斗、混淆矩阵全部手写纯 SVG 组件（每个 ≤ 100 行）；力导向图是唯一例外，用 `d3-force` + `d3-selection`（不装 d3 全量）。
+2. 沿用 AnZhiYu 复刻视觉与亮暗主题（CSS 变量复用，不新起样式体系）。
+3. **三态渲染**：有数据 / 未启用（GEOIP 未配置、模型未训练、sidecar 未连接 → 灰态徽标 + 引导文案，不报错）/ 空态（"数据积累中"）。
+4. 桌面优先，375px 宽度不塌陷即可。
+5. `AdminIPGuard.vue` 只做布局与 Tab 编排；新区块全部拆独立组件，阻止单文件继续膨胀。
+
+### 10.1 总览页升级（依赖 P0-4 数据）
+
+- `FlagStatsCard.vue`：近 7 天 `fpb_*` / `botd_*` 各 key 命中次数 Top-15 横向条形（SVG `<rect>`）；点击条目 → 联动过滤本页指纹列表。数据：summary 响应扩展字段 `flag_stats: [{key, hits, affected_fps}]`。
+- `RiskFunnel.vue`：四段漏斗——活跃指纹 → 命中 ≥1 flag → review 队列 pending → 近 7 天封禁；数据：summary 扩展 `funnel: {active, flagged, reviewing, banned}`。
+- 三层概览卡补充：MIDAS 当前时间片告警数（依赖 P6-4）、review 队列计数角标（链接到 §10.2）。
+
+### 10.2 Review 队列页（新路由 `/admin/review`，依赖 P5-2 / P6-2 / P6-4）
+
+- 新页面 `AdminReview.vue` + `ReviewQueueTable.vue`。
+- 数据：`GET /api/v1/admin/review/queue?status=pending` → `{items: [{id, fp, reason_tags[], triggered_at, scores: {anomaly, midas, risk, ml, gnn}, ip_sample, ua}]}`。
+- `reason_tags` 徽标：`anomaly_p999` / `cluster_risk` / `midas_5sigma` / `ml_shadow_high`（中文文案映射表常量化）。
+- 行操作：标注（弹 `LabelDialog.vue`）/ 封禁（复用现有 ban 通道）/ 忽略（状态 → ignored）。
+- 批量操作：全选 + 批量标注；处理结果 `POST /api/v1/admin/review/resolve {ids: [], action: "label|ban|ignore", label?, notes?}`。
+- 计数每 60s 轮询；`LabelDialog.vue` 与 §10.3 指纹下钻共用（标注写 `fp_labels`，source=admin）。
+
+### 10.3 IP/指纹下钻升级（现有 detail 面板扩展）
+
+- 指纹行抽出为 `FpCard.vue`（含现有设备识别逻辑 `clientInfo` 迁移）。
+- `ScoreBars.vue`：五个分数的水平条 + 数值——`entropy_bits`（÷40 归一）/ `stability` / `anomaly_score` / `behavior_ml_score` / `gnn_score`；未启用阶段显示灰条 + "未启用"徽标。
+- 新字段行：`ja4`（等宽字体）、`canvas_phash`、`clock_skew_ppm`、`cluster_id`（链接跳 §10.4 集群）、`attestation` 摘要（PLAY_RECOGNIZED / signature_fallback / 未验证）。
+- 六路检测 flags **三态**展示（命中红 / 未命中灰 / 不支持虚灰 `*_unsupported`），按 §4 检测族分组排列。
+- `LinkedFps.vue` 关联指纹区：pHash 汉明 ≤ 10 与 MinHash Jaccard > 0.8 命中列表（fp、相似度、首见时间），点击切换到该指纹下钻。
+- `LabelDialog.vue`：human / bot / uncertain 单选 + notes 文本域 → `POST /api/v1/admin/fp/label`；提交后本页与队列页状态同步刷新。
+- 下钻 API：`GET /api/v1/admin/ipguard/ip` 响应扩展（追加字段向后兼容）；新增 `?fp=` 参数支持单指纹直接下钻。
+
+### 10.4 集群视图（依赖 P4-4 / P6-2 / P6-5）
+
+- `AdminIPGuard.vue` Tab 化："访客 / 封禁 / 事件"（现状合并为首 Tab）| "集群"。
+- `ClusterTable.vue`：簇列表（大小、`risk_score`、ban 成员占比、模块度、首见），行内展开成员指纹（复用 `FpCard.vue`）。
+- `ClusterGraph.vue` 力导向图（~200 行）：
+  - 节点：fp = 圆（色 = gnn_score 绿→红渐变，大小 = 度数）；ip = 小方点（灰）；ua 节点默认隐藏可开关。
+  - 边按类型着色：共享 IP 实线 / 相似（pHash/MinHash）虚线 / 物理特征点线 / 时间共现细线；图例可逐类开关。
+  - 交互：拖拽、滚轮缩放、点击节点 → §10.3 下钻；**500 节点按风险截断**并显示"仅展示 Top 500"提示。
+  - 性能：`d3-force` 迭代上限 300（alpha 衰减后停算），节点数大时关闭 `forceManyBody` 改 `forceCollide`。
+- 数据：`GET /api/v1/admin/ipguard/graph?cluster=&limit=500`（已列入 §11.2 端点汇总）。
+
+### 10.5 ML 诊断页（新路由 `/admin/mldiag`，依赖 P5-3 / P5-6 / P6-3b）
+
+- 新页面 `AdminMLDiag.vue`：
+  - 模型卡区：behavior LR 与 GNN 两张卡（版本、active、AUC / FPR、训练日期、样本量、来源 online/offline）。
+  - `ConfusionMatrix.vue`：2×2 热度格 + 精确率 / 召回率 / F1 行。
+  - `PsiTable.vue`：每特征 PSI 数值 + 红黄绿（> 0.2 红 / 0.1–0.2 黄 / 其余绿）。
+  - `Histogram.vue`：shadow 期 `behavior_ml_score` 分布（20 桶）。
+  - `SidecarStatus.vue`：连接状态（探针最近一次结果）、model_version、RSS、scored_24h、P99 延迟。
+  - 训练管道状态：上次 export / train 时间、下次计划（读模型卡字段）。
+- 数据：`GET /api/v1/admin/ml/diagnostics` → `{models: [...], psi: [...], shadow_hist: [...], sidecar: {...}, pipeline: {...}}`。
+
+### 10.6 组件与路由清单
+
+| 文件（web/src/） | 类型 | 依赖阶段 |
+|---|---|---|
+| `admin/AdminReview.vue`、`admin/AdminMLDiag.vue` | 新页面 + main.js 注册路由 | P5 / P6 |
+| `admin/components/FlagStatsCard.vue`、`RiskFunnel.vue` | 新组件 | P0-4 |
+| `admin/components/ReviewQueueTable.vue`、`LabelDialog.vue` | 新组件 | P5-1 |
+| `admin/components/FpCard.vue`、`ScoreBars.vue`、`LinkedFps.vue` | 新组件（从 AdminIPGuard.vue 抽出） | P1-P6 |
+| `admin/components/ClusterTable.vue`、`ClusterGraph.vue` | 新组件 | P4-4 / P6 |
+| `admin/components/ConfusionMatrix.vue`、`PsiTable.vue`、`Histogram.vue`、`SidecarStatus.vue` | 新组件 | P5 / P6-3b |
+| `admin/AdminIPGuard.vue` | 修改：Tab 化 + 编排 | — |
+
+### 10.7 前端消费的 API 契约（全部向后兼容追加字段）
+
+| 端点 | 方法 | 关键响应字段 |
+|---|---|---|
+| `/api/v1/admin/ipguard/summary` | GET | 追加 `flag_stats[]`、`funnel{}`、`midas{}` |
+| `/api/v1/admin/review/queue` | GET | `items[]`（reason_tags / scores / status） |
+| `/api/v1/admin/review/resolve` | POST | `{ids[], action, label?, notes?}` |
+| `/api/v1/admin/fp/label` | POST | `{fp, label, notes}`（§11.2 已列） |
+| `/api/v1/admin/ipguard/graph` | GET | `nodes[] / edges[] / truncated` |
+| `/api/v1/admin/ipguard/ip?fp=` | GET | 追加单指纹下钻支持与新字段 |
+| `/api/v1/admin/ml/diagnostics` | GET | `models[] / psi[] / shadow_hist[] / sidecar{} / pipeline{}` |
+
+### 10.8 状态与降级
+
+- 未启用判定与文案：GEOIP 文件缺失 → "GEOIP 未配置（githubhot geo download）"；模型卡缺失 → "模型未训练（等待标注数据积累）"；sidecar 探测失败 → "sidecar 未连接（离线分数仍生效）"。
+- 加载态沿用现有 error / loading 模式；列表区 skeleton。
+- 力导向图 500 节点截断；`truncated: true` 时显示提示条。
+
+### 10.9 验收
+
+1. 每个新页 / 新组件亮暗主题截图各一组；
+2. 375px 视口布局不塌陷（浏览器设备模拟走查）；
+3. **空库全新部署**（无 GEOIP、无模型、无 sidecar）：全部新区块灰态、零 JS 报错；
+4. 标注 → review 队列状态流转（pending → done/ignored），忽略项不再出现；
+5. 力导向图 500 节点拖拽 / 缩放目测流畅（force tick 300 内收敛）；
+6. `go test` 契约用例：§10.7 每个端点的响应字段与前端消费一一对应。
+
+---
+
+## 11. 数据模型与 API 变更汇总
+
+### 11.1 DDL 汇总（迁移脚本一次执行，幂等写法参照现有迁移）
 
 ```sql
 ALTER TABLE ip_fingerprints ADD COLUMN ja4 TEXT;
@@ -520,9 +645,20 @@ CREATE TABLE IF NOT EXISTS fp_labels (
   notes TEXT,
   PRIMARY KEY (fp, source)
 );
+
+CREATE TABLE IF NOT EXISTS review_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  fp TEXT NOT NULL,
+  reasons TEXT NOT NULL,      -- JSON 数组：anomaly_p999 / cluster_risk / midas_5sigma / ml_shadow_high
+  scores TEXT NOT NULL,       -- JSON：触发时刻各分数快照
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','done','ignored')),
+  created_at TEXT NOT NULL,
+  resolved_at TEXT, resolved_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_review_status ON review_items(status, created_at);
 ```
 
-### 10.2 端点汇总
+### 11.2 端点汇总
 
 | 端点 | 方法 | 阶段 | 鉴权 |
 |---|---|---|---|
@@ -534,9 +670,12 @@ CREATE TABLE IF NOT EXISTS fp_labels (
 | `githubhot admin seed` / `geo download` / `ja4 update` | CLI | P0/P2/P3 | — |
 | `POST /api/v1/admin/fp/label` | POST | P5 | 管理会话（人工标注 human/bot/uncertain，金标签） |
 | `GET /api/v1/admin/ipguard/graph` | GET | P6 | 管理会话（集群图数据：节点/边/分数，力导向可视化） |
+| `GET /api/v1/admin/review/queue` / `POST /api/v1/admin/review/resolve` | GET/POST | P5/P6 | 管理会话（review 队列查询与批量处理，见 §10.2） |
+| `GET /api/v1/admin/ml/diagnostics` | GET | P5/P6 | 管理会话（模型卡/PSI/shadow 分布/sidecar 状态，见 §10.5） |
 | `githubhot ml export` / `ml export-graph` / `ml import-gnn` / `ml load-model` | CLI | P5/P6 | 训练数据导出、GNN 分数回写、模型热加载 |
+| sidecar：`GET /healthz` / `POST /v1/score`（mlserve 独立项目，127.0.0.1:8790） | — | P6-3b | 主服务经 `GNN_SIDECAR_URL` 调用，见 §9 P6-3b |
 
-### 10.3 env 汇总（同步更新 .env.example 与 README 配置表）
+### 11.3 env 汇总（同步更新 .env.example 与 README 配置表）
 
 ```
 APP_SIGN_SEED=            # P0 必填，32B base64；等于默认值时 serve 拒启
@@ -551,11 +690,13 @@ PLAY_INTEGRITY_PACKAGE= / PLAY_INTEGRITY_SA_JSON= / APP_EXPECTED_CERT_SHA256= / 
 ALTCHA_SECRET= / ALTCHA_DIFFICULTY=   # P4
 ML_MODEL_DIR=            # P5 默认 data/models，模型 JSON 热加载目录
 ML_TRAIN_VENV=           # P5 默认 scripts/ml/.venv，Python 训练环境（项目内）
+GNN_SIDECAR_URL=         # P6-3b 默认空=纯离线模式；如 http://127.0.0.1:8790
+GNN_SIDECAR_TOKEN=       # P6-3b sidecar 共享密钥（X-Sidecar-Token）
 ```
 
 ---
 
-## 11. 依赖清单（落地时逐项核对 LICENSE 并回填本表）
+## 12. 依赖清单（落地时逐项核对 LICENSE 并回填本表）
 
 | 依赖 | 用途 | 引入阶段 | 备注 |
 |---|---|---|---|
@@ -569,21 +710,22 @@ ML_TRAIN_VENV=           # P5 默认 scripts/ml/.venv，Python 训练环境（�
 | `d3-force`（web/） | 集群力导向可视化 | P6 | 前端，npm 装项目内 |
 | Python：scikit-learn / lightgbm / torch+PyG | 离线训练（scripts/ml/.venv，项目内 venv，不入运行时） | P5/P6 | CPU 版即可；requirements 锁版本 |
 | 自研（ML 推理） | LR 前向 / GBDT 树遍历 / iForest / MIDAS sketch | P5/P6 | 全部纯 Go，保持 CGO=0 单二进制 |
+| Python：fastapi / uvicorn / onnxruntime（mlserve/.venv） | GNN 在线推理 sidecar（独立项目、独立端口 8790、内存受控） | P6-3b | 不进 web/、不进 go.mod；ONNX 优先，torch 仅回退模式 |
 
 情报参考（**不引入**）：camoufox（12.3k★，内核级反检测）、patchright（4.8k★）、fingerprint-suite（2.6k★）、untidetect-tools（2k★，敌方装备目录）、CreepJS（2.5k★，思路参考禁抄码）、curl_cffi（6.7k★，攻击侧 TLS 模拟）。
 
 ---
 
-## 12. 测试计划与总验收
+## 13. 测试计划与总验收
 
-### 12.1 单测（go test ./... 必须全绿）
+### 13.1 单测（go test ./... 必须全绿）
 
 - `internal/domain/fpmath`：pHash 汉明距离、MinHash 签名与 Jaccard 估计、LSH 分桶、熵计算、EWMA、线性回归斜率；P5 起新增——LR 前向（与 Python `predict_proba` 固定权重对拍，误差 < 1e-9）、GBDT JSON 树遍历（与 LightGBM predict 对拍）、MIDAS sketch 计数与告警阈值；P6 起新增——Louvain 桥接团伙切分用例（gonum）。
-- `internal/interfaces/httpapi`：UA↔TLS 矛盾规则、flags 计分映射、altcha challenge/verify 往返、attestation mock 三态解析、管理会话 IP 校验、标注端点权限。
+- `internal/interfaces/httpapi`：UA↔TLS 矛盾规则、flags 计分映射、altcha challenge/verify 往返、attestation mock 三态解析、管理会话 IP 校验、标注端点权限；P6-3b 起新增——sidecar 客户端三态（成功写回 / 超时回落 Louvain 均值 / 未配置纯离线，用 httptest mock）。
 - 前端：`web/src/lib/phash.js`、`altcha.js` 用 `node --test` 跑纯函数用例。
 - Python（不进 CI 门槛，训练前自检）：`scripts/ml/selftest.py`——数据切分无泄漏、特征清单与 Go 侧对齐。
 
-### 12.2 对抗性手动验收（每阶段末执行，结果记入交付说明）
+### 13.2 对抗性手动验收（每阶段末执行，结果记入交付说明）
 
 | 对手 | 工具 | 期望 |
 |---|---|---|
@@ -595,26 +737,31 @@ ML_TRAIN_VENV=           # P5 默认 scripts/ml/.venv，Python 训练环境（�
 | 协同攻击模拟 | 20 IP × 20 fp 短时互联 | P6：MIDAS 1-2 个时间片内告警 |
 | 正常用户 | Chrome/Edge/Safari/安卓 Chrome | 全程零命中（假阳性红线 0.5%） |
 | ML 模型质量 | 验证集 + shadow 期 | AUC ≥ 0.85、FPR ≤ 0.5% 才出 shadow；行为分与 GNN 分相关性 < 0.6 |
+| sidecar 故障 | kill mlserve 进程 / 拔网线 | 主服务 500ms 内回落 Louvain 均值，fp/report 不报错不阻塞；sidecar 恢复后自动续用 |
+| sidecar 内存 | 24h 老化运行 | RSS 稳定在目标值内（ONNX ≤200MB / torch ≤512MB），无缓慢增长 |
+| 管理端 UI | §10.9 走查清单 | 空库灰态、亮暗主题、375px、标注流转全部通过 |
 
-### 12.3 交付物清单
+### 13.3 交付物清单
 
 1. 代码 + 全部测试绿；
 2. `.env.example`、README 配置表、`docs/architecture.md` 增补"指纹与防护"章节；
 3. 每阶段一条 commit（中文 scope 前缀）；
 4. 交付说明文档：各对抗验收的实际结果、灰度面板截图路径、已知假阳性清单；
-5. P5/P6 追加：`scripts/ml/` 训练管道（requirements 锁版本 + run_train.ps1）与模型卡（每个模型 JSON 附特征清单、指标、训练集规模、训练日期）。
+5. P5/P6 追加：`scripts/ml/` 训练管道（requirements 锁版本 + run_train.ps1）与模型卡（每个模型 JSON 附特征清单、指标、训练集规模、训练日期）；
+6. P6-3b 追加：`mlserve/` 子项目（README 含部署说明、systemd 单元、内存实测数据：冷启动 RSS / 老化 24h RSS / P99 延迟）。
 
 ---
 
-## 13. 明确不做（边界）
+## 14. 明确不做（边界）
 
 1. 不做 mTLS 客户端证书（WebAuthn 已覆盖管理端场景，APP 场景由 Play Integrity 覆盖）；
 2. 不做 VDF（ALTCHA PoW 对当前威胁面足够，VDF 留待 PoW 被绕过再评估）；
-3. 不做在线/实时 GNN 推理，也禁止 Python 与 CGO 依赖进入运行时（GNN 仅离线周训练导出分数，Go 侧只读——保持纯 Go 单二进制）；
+3. 主二进制内不做在线推理、禁止 Python/CGO 进入 Go 进程；在线 GNN 推理放独立子项目 `mlserve/`（独立端口 127.0.0.1:8790、systemd 内存上限、可拆独立仓库），主服务经 HTTP 松耦合调用，sidecar 未部署/掉线一律回落离线分数（P6-3 冷启动路径），主服务功能永不依赖 sidecar 存活；
 4. 不做深度序列模型（LSTM/Transformer 级行为建模，当前数据量不支持；监督侧止步 GBDT，序列特征以滑动窗口统计量近似）；
 5. 不动业务层（榜单/日报/信源/LLM 流水线）；
 6. 不重构现有三层 IP 防护与积分通道（新检测全部挂现有通道）；
-7. Android 侧改动在独立仓库 GithubHot-App 执行，本文档只约束其行为契约（attest 端点、ALTCHA 算法、seed 构建期注入）。
+7. 不引重量级图表库进管理端（echarts 等），可视化按 §10.0 原则手写 SVG + d3-force；
+8. Android 侧改动在独立仓库 GithubHot-App 执行，本文档只约束其行为契约（attest 端点、ALTCHA 算法、seed 构建期注入）。
 
 ---
 
@@ -629,7 +776,7 @@ ML_TRAIN_VENV=           # P5 默认 scripts/ml/.venv，Python 训练环境（�
 - **马氏距离**（持续认证）：`d²=(x-μ)ᵀΣ⁻¹(x-μ)`，模板 = 历史特征均值，协方差取对角近似。
 - **PSI**（漂移监控）：`Σ(Aᵢ-Eᵢ)·ln(Aᵢ/Eᵢ)`，> 0.2 触发再训练。
 - **MIDAS**（流式边异常）：双 count-min sketch（当前时间片 / 历史累计），卡方统计量 `Σ(aᵢ-sᵢ)²/(2·sᵢ)`，σ 超限告警（WSDM 2020 论文，参考 Stream-AD/MIDAS 777★）。
-- **GNN 部署形态**：训练（PyG GraphSAGE 优先，周级）产出 `gnn_score` + 64 维嵌入写库；Go 零推理；冷启动用 Louvain 社区均值。
+- **GNN 部署形态**：离线训练（PyG GraphSAGE 优先，周级）产出 `gnn_score` + 64 维嵌入写库；在线补打分走 `mlserve/` sidecar（独立端口 8790，RSS ≤ 200MB/回退 512MB，掉线自动回落）；冷启动一律用 Louvain 社区均值。
 - **社区风险分**：`risk = ban成员占比 × min(1, size/10)`，> 0.5 入 review。
 - **归一化再哈希原则**（贯穿所有自研指纹）：凡对攻击者可控输入做指纹，先排序归一化、剔除 GREASE/噪音值，再哈希——JA4 对 JA3 的核心改进，同样适用于 fingerprint.js:188 的分量融合顺序。
 
