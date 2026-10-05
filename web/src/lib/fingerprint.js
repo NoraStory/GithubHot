@@ -2,10 +2,19 @@
 // + WebRTC 真实 IP + 屏幕/环境参数，分量哈希后融合成设备指纹，每会话上报一次。
 // 第三层环境核验：UA/platform/时区/语言一致性 + 无头浏览器与自动化框架痕迹检测，
 // 命中项随上报传给服务端存档并计违规分。
+// P1 检测族（fp/ 目录，结果全部走同一份 flags 上报，表结构零改动）：
+//   - 干净环境对照 fpb_canvas_diverge / fpb_iframe_diverge / fpb_audio_diverge
+//   - 能力—声明核验（P1-2）、JS 拦截取证（P1-3）、BotD（P1-4）
 // 采集全程异步静默，失败任何一项都不影响站点功能。
+
+import { cleanEnvDetect } from './fp/cleanEnv'
+import { claimsDetect } from './fp/claims'
+import { forensicsDetect } from './fp/forensics'
+import { botdDetect } from './fp/botd'
 
 const FP_KEY = 'gh_fp'
 const REPORTED_KEY = 'gh_fp_reported'
+const DETECT_TIMEOUT_MS = 5000
 let reportRetry = 0
 
 export function deviceFp() {
@@ -183,6 +192,26 @@ function envSignals() {
   ].join('|')
 }
 
+// detectFlags 汇总 P1 检测族命中项（单项失败/超时都降级为空，绝不阻塞上报）。
+// 灰度纪律：这些 flag 服务端默认只记录不计分（FP_SCORE_SHADOW），先看假阳性率再决定计分。
+async function detectFlags() {
+  const jobs = [
+    cleanEnvDetect().then(r => r.flags).catch(() => []),
+    claimsDetect().then(r => r.flags).catch(() => []),
+    forensicsDetect().then(r => r.flags).catch(() => []),
+    botdDetect().then(r => r.flags).catch(() => [])
+  ]
+  try {
+    const results = await Promise.race([
+      Promise.all(jobs),
+      new Promise(resolve => setTimeout(() => resolve([]), DETECT_TIMEOUT_MS))
+    ])
+    return (Array.isArray(results) ? results : []).flat().filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 // 采集 + 上报（每会话一次，成功后打标；失败 8 秒后重试一次）。
 // 旧版本先打标再请求，遇到服务重启等瞬时失败会整会话不再上报——这里修正。
 export async function reportFingerprint() {
@@ -192,7 +221,7 @@ export async function reportFingerprint() {
       [canvasFp(), webglFp(), webrtcIPs(), audioFp(), fontsFp()])
     const fp = await sha256([canvas, webgl.hash, audio, fonts, envSignals()].join('~'))
     try { localStorage.setItem(FP_KEY, fp) } catch {}
-    const flags = envAudit()
+    const flags = [...envAudit(), ...await detectFlags()]
     const res = await fetch('/api/v1/fp/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -62,6 +63,43 @@ var flagScore = map[string]struct {
 	"lang-tz-mismatch":     {15, false},
 	"no-plugins":           {10, false},
 	"env-incoherent":       {30, false},
+}
+
+// p1ScoredFlags P1 检测族的计分表（灰度上线：FP_SCORE_SHADOW 默认开着时全部只记录）。
+// 这些项的共同点是"两条独立证据不一致"或"实测能力与声明矛盾"，比单一路径的自报更硬。
+// 其余 P1 检测项（getter 时序 / 栈版本 / 核数基准 / 字体矛盾 / 软件光栅 / *_unsupported /
+// BotD 各 signal）按规格一律只记录不计分：噪声大，先靠 P0-4 面板看假阳性率。
+var p1ScoredFlags = map[string]int{
+	"fpb_canvas_diverge":     15,
+	"fpb_iframe_diverge":     15,
+	"fpb_audio_diverge":      15,
+	"fpb_gpu_claim_mismatch": 15,
+	"fpb_native_fn_tamper":   15,
+}
+
+// shadowScoring 灰度开关：FP_SCORE_SHADOW 默认开（新增检测只记录不计分）。
+// 规格 §0.7：累计 7 天且假阳性率 < 0.5% 后才允许置 0 接入违规积分。
+func shadowScoring() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("FP_SCORE_SHADOW")))
+	return v != "0" && v != "false"
+}
+
+// detectFlagScore 单条 flag 的违规计分（score, severe）。
+//   - 既有环境核验项：走 flagScore 表；
+//   - P1 检测项：走 p1ScoredFlags，灰度期一律 0 分只记录；
+//   - 未登记的 flag（*_unsupported / botd_* / 未来新增键）：0 分只记录。
+//
+// 注意：旧实现对未知 flag 兜底 env-incoherent 的 30 分——这会让"客户端自报的任意新键"
+// 直接变成积分，故收掉（客户端可控的键名不该有计分兜底）。
+func detectFlagScore(f string) (int, bool) {
+	if fs, ok := flagScore[f]; ok {
+		return fs.score, fs.severe
+	}
+	score, ok := p1ScoredFlags[f]
+	if !ok || shadowScoring() {
+		return 0, false
+	}
+	return score, false
 }
 
 // fpReportAPI POST /api/v1/fp/report：浏览器上报设备指纹，服务端登记并做连坐判定。
@@ -123,11 +161,8 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 	// kind 按 flag 细分（env-flag:<flag>）：使不同命中项成为**独立证据**参与互证，
 	// 同时让 5 分钟去重按 flag 粒度生效——否则多条 flag 会被压成同一条事件。
 	for _, f := range flags {
-		fs, ok := flagScore[f]
-		if !ok {
-			fs = flagScore["env-incoherent"]
-		}
-		s.Guard.Event(ctx, ip, "env-flag:"+f, "环境核验命中 "+f, fs.score, fs.severe)
+		score, severe := detectFlagScore(f)
+		s.Guard.Event(ctx, ip, "env-flag:"+f, "环境核验命中 "+f, score, severe)
 	}
 	writeJSON(w, 200, out)
 }

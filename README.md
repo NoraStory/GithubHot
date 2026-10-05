@@ -88,6 +88,7 @@ go build -o githubhot ./cmd/githubhot
 | `IP_GUARD_SECRET` | | 防护身份令牌 HMAC 密钥；不设置则每次启动随机生成（重启后旧令牌失效） |
 | `HANDSHAKE_RATE_PER_MIN` | | 握手通道 `/api/v1/site/config` 单 IP 每分钟上限（默认 30）：该端点免签且会触发指纹归档写库，超限 429 并记分 |
 | `ADMIN_SESSION_IP_STRICT` | | `1` = 管理会话必须来源 IP 完全一致；默认 `0` 放宽到 IPv4 `/24`、IPv6 `/64`（会话被跨网段使用即注销 + 记 80 分） |
+| `FP_SCORE_SHADOW` | | 新增检测 flag 灰度开关，默认 `1` = 只记录不计分（`fpb_*` / `botd_*` 先在管理端「检测命中统计」观察假阳性率，达标后置 `0` 才计分） |
 | `APP_SIGN_SEED` | APP/签名 | APP 请求签名种子（`githubhot admin seed` 生成，32B base64）。**serve 模式必填**：未配置或仍为出厂默认 `gh-dev-seed-v1` 时拒绝启动。APP 侧构建期注入同值，不再经 `/api/v1/site/config` 下发 |
 | `APP_SIGN_SEED_GRACE` | 过渡期 | 旧种子列表（逗号分隔）：存量 APP 未发版时兜底验签；过渡期内验签不通过只观察不计分，建议 ≤14 天后清空 |
 | `DATA_DIR` | | 数据目录，默认 `./data` |

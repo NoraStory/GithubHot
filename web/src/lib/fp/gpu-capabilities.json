@@ -1,0 +1,11 @@
+{
+  "_note": "GPU 能力集基线（P1-2 能力—声明核验）。minMaxTextureSize = 该档 GPU 的 MAX_TEXTURE_SIZE 合理下限，实测低于它说明 UNMASKED_RENDERER 声明的型号与真实能力不符（伪造/改机工具典型特征）。数值来源：Khronos WebGL 数据库与各厂商公开规格（桌面档普遍 ≥16384，Intel 核显 ≥8192，移动 GPU ≥4096）。只做'声明档位高于实际能力'的单向判定，避免新驱动/新架构造成假阳性。",
+  "classes": [
+    { "vendor": "nvidia", "match": ["nvidia", "geforce", "quadro", "rtx", "gtx"], "minMaxTextureSize": 16384 },
+    { "vendor": "amd", "match": ["amd", "radeon", "ati "], "minMaxTextureSize": 16384 },
+    { "vendor": "apple", "match": ["apple"], "minMaxTextureSize": 16384 },
+    { "vendor": "intel", "match": ["intel", "iris", "uhd graphics", "hd graphics", "arc "], "minMaxTextureSize": 8192 },
+    { "vendor": "mobile", "match": ["adreno", "mali", "powervr", "videocore"], "minMaxTextureSize": 4096 },
+    { "vendor": "software", "match": ["swiftshader", "llvmpipe", "software", "mesa offscreen", "basic render", "microsoft basic"], "minMaxTextureSize": 0 }
+  ]
+}

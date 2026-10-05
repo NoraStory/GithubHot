@@ -12,7 +12,7 @@
 | P0-2 | 管理会话绑定来源网段 | ✅ 完成 | `7fc06da` |
 | P0-3 | 握手通道独立滑动窗口限流 | ✅ 完成 | 见 git log `P0-3` |
 | P0-4 | 检测 flag 命中统计（后端聚合 + 面板区块） | ✅ 完成 | 见 git log `P0-4` |
-| P1 | 指纹浏览器识别（六路采集 + BotD + 计分接入） | ⏳ 待办 | — |
+| P1 | 指纹浏览器识别（六路采集 + BotD + 计分接入） | ✅ 完成（2 处按实测调整，见下） | 见 git log `P1` |
 | P2 | 算法升级（pHash / MinHash+LSH / 熵权 / 稳定性 / GeoIP） | ⏳ 待办 | — |
 | P3 | TLS + JA4 协议指纹 | ⏳ 待办 | — |
 | P4 | 平台证明与高级项（Play Integrity / passkey / ALTCHA / 图聚类 / 行为采集 / 时钟偏移） | ⏳ 待办 | — |
@@ -128,8 +128,114 @@
 
 ---
 
-## 已知边界 / 后续项
+---
 
+## P1 — 指纹浏览器识别
+
+前端采集模块落在 `web/src/lib/fp/`，全部走既有 `/api/v1/fp/report` 的 flags 通道（**表结构零改动**），
+探测（DOM/浏览器相关）与判定（纯函数）分离，纯函数部分用 `node --test` 覆盖（`cd web; npm test`）。
+
+### P1-1 干净环境对照
+
+- **Worker-Canvas**：主线程渲染像素 vs Worker 内 `OffscreenCanvas` 渲染像素；绘图指令用
+  `drawInstr.toString()` 注入 Worker 源码，两侧**同一份源码**（避免指令漂移导致对照失真）。
+- **iframe 参照**：运行时插入 `about:blank` iframe（独立 realm 与原型链），逐项比对
+  `navigator.webdriver/plugins/mimeTypes/hardwareConcurrency/deviceMemory/languages/userAgent/platform`
+  与 `screen.colorDepth`。
+- **音频对照**：同一 chirp 两次独立渲染必须逐样本一致；`getChannelData` 与 `copyFromChannel`
+  两条读取路径的样本和必须一致（读取层 patch 会露馅）。
+- flag：`fpb_canvas_diverge` / `fpb_iframe_diverge` / `fpb_audio_diverge`（各 15 分，灰度期 0 分）；
+  不可用时记 `*_check_unsupported`（不计分）。
+
+### P1-2 能力—声明核验
+
+- **GPU 能力集**：`web/src/lib/fp/gpu-capabilities.json` 收 6 档（NVIDIA/AMD/Apple/Intel/移动/软件），
+  每档给 `MAX_TEXTURE_SIZE` 合理下限；只做**单向**判定（声明档位高于实测能力 → `fpb_gpu_claim_mismatch`），
+  避免新驱动/新架构造成假阳性。软件光栅化单独记 `fpb_gpu_software`（只记录）。
+- **字体实测**：见下方"规格调整 ①"。
+- **核数基准**：1e7 次整数微基准耗时分档 vs `hardwareConcurrency` 声明档位，只抓极端矛盾
+  （高档声明+极慢 / 低档声明+极快）→ `fpb_cores_claim_mismatch`（只记录）。
+
+### P1-3 JS 拦截取证
+
+- **accessor 原生性取证（核心，确定性）**：目标 accessor（`navigator.webdriver/plugins/languages/
+  hardwareConcurrency/userAgent/platform/permissions`、`screen.colorDepth/width`）在原型上的 getter
+  必须是原生实现（`Function.prototype.toString` 含 `[native code]`、name/length 与原生签名一致），
+  否则记 `fpb_getter_patched:<属性>`。
+- **native function 取证**：6 个热点函数（`toDataURL` / `getImageData` / `fillText` / `getParameter` /
+  `RTCPeerConnection` / `Function.prototype.toString`）同判据 → `fpb_native_fn_tamper`。
+- **错误栈版本指纹**：`Error.stack` 格式家族（V8 `at fn (...)` vs SpiderMonkey/JSC `fn@...`）与 UA
+  声称内核交叉 → `fpb_stack_version_mismatch`（只记录）。
+- **读取耗时侧信道**：见下方"规格调整 ②"。
+
+### P1-4 BotD
+
+- `web/package.json` 增 `@fingerprintjs/botd`（MIT，2.0.0，项目内安装）；动态 `import()` 加载，
+  独立 chunk（12.3KB / gzip 4.1KB），不进主包解析路径。
+- 结果展开为 `botd_<botKind>`（如 `botd_headless_chrome`）与 `botd_<detector>_1`（如
+  `botd_web_driver_1`）两类 flag，逐项去重。
+
+### P1-5 服务端计分接入（+ 一条既有缺陷修复）
+
+- `detectFlagScore`：既有环境核验走原表；P1 计分项（canvas/iframe/audio 对照分歧、GPU 能力矛盾、
+  原生函数篡改）各 +15，但**灰度期（`FP_SCORE_SHADOW` 默认开）一律 0 分只记录**；规格列为
+  "仅记录"的项（getter 取证/时序、栈版本、核数、字体矛盾、软件光栅、`*_unsupported`、`botd_*`）
+  即使关闭灰度也不计分。
+- **顺带修掉一个既有点分缺陷**：旧实现对**未登记的 flag 兜底 `env-incoherent` 的 30 分**——
+  客户端自报任意新键即可直接拿分。现在未知键一律 0 分只记录（有回归测试锁死）。
+- getter 取证/时序 flag 按属性细分 kind（`env-flag:fpb_getter_patched:navigator.webdriver`），
+  不同属性是独立证据，不被 5 分钟去重压成一条。
+
+### 规格调整（都有实测数据支撑，非偷懒省略）
+
+**① 字体核验：规格的 `document.fonts.check` 与 `measureText` 交叉不可用 → 改为 Canvas × DOM 双路径。**
+
+实测（headless Chromium）：`document.fonts.check('16px "Consolas"')` 对**未安装**字体同样返回 `true`
+（Chrome 的 check() 只回答"有没有待加载的 webfont"，不做字体族匹配），而 `measureText` 正确判定为未安装
+→ 两者天然不一致，在无头/精简字体环境产生 **100% 假阳性**（实测干净环境命中 `fpb_font_claim_mismatch`，
+conflicts=3）。改为 **Canvas measureText** 与 **DOM 布局 offsetWidth** 两条真实度量路径各自给出
+"与回退字体宽度差"，差值落在 0.5–2px 模糊带的样本直接跳过（避免亚像素舍入噪声），两条路径结论相反才算
+conflict，≥3 个 conflict 才置位。
+
+实测结果：干净浏览器 `conflicts=0`（各字体两条路径差值几乎相同，如 Arial −9.7/−9.7）；
+把 `measureText` patch 成"所有字体返回回退宽度"（典型字体伪装）后 `conflicts=4` 且 flag 命中。
+
+**② getter 时序侧信道：实测在 Chrome 无分离能力 → 保留通道但改为确定性 accessor 取证。**
+
+规格假设"被 patch 的属性比原生 getter 慢一个量级"。实测（headless Chromium，1e5 次循环 × 3 轮取中位数）：
+
+| 目标 | 中位耗时 |
+|---|---|
+| `Object.getOwnPropertyDescriptor(Object.prototype,'toString')`（原规格基线） | 20 ns |
+| `navigator.userAgent.length`（原生） | 166 ns |
+| `screen.colorDepth`（原生） | 119 ns |
+| `navigator.webdriver`（JS getter patch） | 79 ns |
+| `navigator.webdriver`（JS getter + slice 工作） | 79 ns |
+| `navigator.webdriver`（JS getter + 循环工作） | 78 ns |
+
+结论：**JS getter 反而比原生跨对象 getter 更快**（原生 `navigator.*` 走跨对象/代理路径），且计时器被
+Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 原阈值（max(1µs, 20×基线)）永远无法命中，
+若降到 3× 基线又会把全部 `navigator.*` 判为嫌疑（假阳性）。故：时序通道保留为"同类原生属性中的
+相对离群"（>5× 同类中位且 >100ns）仅记录，**判定改用确定性的 accessor 原生性取证**（见 P1-3），
+它与规格意图一致（杀 JS 层 patch）且零误报。
+
+### 验证（真实浏览器实测，Chromium headless + Vite dev server 代理到沙箱实例 8792）
+
+| 场景 | 结果 |
+|---|---|
+| 干净浏览器（无任何 patch） | `fpb_*` 零命中；canvas 主/Worker 像素哈希一致（`ccc4e21c`）、iframe 参照一致、音频确定性与读取一致、字体 conflicts=0、accessor 全原生、栈 v8/v8 |
+| patch `Navigator.prototype.webdriver` | `fpb_iframe_diverge`（diff=[webdriver]）+ `fpb_getter_patched:navigator.webdriver` |
+| 包装 `HTMLCanvasElement.prototype.toDataURL` | `fpb_native_fn_tamper` |
+| patch `measureText`（字体伪装） | `fpb_font_claim_mismatch`（conflicts=4） |
+| headless Chromium 端到端上报 | 服务端记录 `botd_headless_chrome` / `botd_detect_user_agent_1` / `botd_detect_app_version_1` + `headless-ua`，**全部 0 分**（灰度期） |
+| 关掉灰度（`FP_SCORE_SHADOW=0`） | 5 个计分项各 +15；两条 15 分新检测不足以封禁（弱证据按类封顶 40） |
+
+单测：前端 `npm test` 31 例全绿（cleanEnv 7 / claims 12 / forensics 8 + botd 5，含模糊带跳过、
+未知键不计分等边界）；Go 侧 `go test ./...` 全绿（P1 计分 7 例）。
+
+---
+
+## 已知边界 / 后续项
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，
   属预期（§10.3 的 `?fp=` 单指纹下钻会补齐这条链路）。
 - `/healthz` 目前随封禁一起 404（外部监控可能误报站点不可用）；`spa.go` 内 `/app/` 的
