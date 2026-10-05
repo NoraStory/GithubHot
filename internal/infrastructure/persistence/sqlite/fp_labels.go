@@ -6,6 +6,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -97,4 +98,35 @@ func (db *DB) UpdateAnomalyScore(ctx context.Context, fp string, score float64) 
 		return fmt.Errorf("写异常分: %w", err)
 	}
 	return nil
+}
+
+// UpdateGNN 写回 GNN 推理结果（P6-3 离线导入 / P6-3b sidecar 在线共用）。
+func (db *DB) UpdateGNN(ctx context.Context, fp string, score float64, embeddingJSON string) error {
+	_, err := db.ExecContext(ctx,
+		"UPDATE ip_fingerprints SET gnn_score = ?, gnn_embedding = ? WHERE fp = ?",
+		score, embeddingJSON, fp)
+	if err != nil {
+		return fmt.Errorf("写 GNN 结果: %w", err)
+	}
+	return nil
+}
+
+// GNNResultRow GNN 推理结果行（import-gnn 的 JSON 契约输入）。
+type GNNResultRow struct {
+	FP         string     `json:"fp"`
+	Score      float64    `json:"score"`
+	Embedding  []float64  `json:"embedding"`
+}
+
+// ImportGNNResults 批量写回 GNN 推理结果（ml import-gnn 调用）。
+func (db *DB) ImportGNNResults(ctx context.Context, results []GNNResultRow) (int, error) {
+	n := 0
+	for _, r := range results {
+		emb, _ := json.Marshal(r.Embedding)
+		if err := db.UpdateGNN(ctx, r.FP, r.Score, string(emb)); err != nil {
+			continue
+		}
+		n++
+	}
+	return n, nil
 }

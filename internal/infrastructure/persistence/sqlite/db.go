@@ -173,6 +173,9 @@ func migrate(db *sql.DB) error {
 	}
 	// P5-1 标注体系（规格书 §11.1）：弱标签（rule）+ 金标签（admin）双轨；P5-2 异常分
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN anomaly_score REAL")
+	// P6-3 GNN 离线/在线推理写回（gnn_score bot 概率、gnn_embedding 64 维 JSON）
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN gnn_score REAL")
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN gnn_embedding TEXT")
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS fp_labels (
 		fp TEXT NOT NULL,
 		label TEXT NOT NULL CHECK(label IN ('human','bot','uncertain')),

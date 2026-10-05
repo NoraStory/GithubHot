@@ -523,6 +523,46 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
 - 弱标签"近 30 天 IP 数/会话时长"特征由导出端动态计算（session_minutes 用
   first_seen−last_seen 近似），行为特征需 fp/report 已携带 behavior（P4-5 前置）。
 
+---
+
+## P6 — 图算法升级（批一：Louvain + MIDAS + 图快照/GNN 写回管道 ✅）
+
+### P6-2 Louvain 社区发现 ✅
+
+- \`internal/domain/fpgraph\`：gonum v0.17 \`community.Modularize\`（Louvain，纯 Go），
+  \`simple.NewWeightedUndirectedGraph\` 加权无向图。输入：fp 节点全量 + 加权边（weight=关联强度）。
+- **验收单测（规格原文）**：双团伙 + 单桥接节点 → Louvain 切成两团而连通分量只有一团 ✓。
+  另含：稠密三角 1 社区 ✓、无边图各自成社区 ✓。
+- 引擎集成：\`RefreshClusters\` 改用 Louvain（分辨率 1.0），社团划分覆盖 cluster_id。
+  保留连通分量域包（fpcluster）作为无权对照。risk_score = ban 占比 × min(1, size/10)
+  引擎侧尚未接入（待 P6-6 融合批次）。
+
+### P6-4 MIDAS 流式边异常 ✅
+
+- \`internal/domain/midas\`（纯 Go，~100 行零依赖）：双 count-min sketch（当前片/历史累计），
+  卡方型统计量 (a−s)²/max(1,s)，只计正偏差（负偏差 = 正常回访）。时间片 60s，深度 3，
+  宽度 256 桶（宽度决定灵敏度：越大越不敏感）。冷启动：第一片跳过评分（无基线不假阳性）。
+- **实现坑实录**：初版把冷启动检查放在 sketch 递增之前——第一片数据完全丢失、total 恒 0，
+  第二片全报高分。修正为先递增再判冷启动。另修 sliceStart 需从首条观测校准（New 里
+  time.Now() 会被测试注入的过去时间戳绕过，导致 rollSlice 永不触发）。
+- 单测：协同攻击（20 IP × 20 fp 基线片 + 爆发片 → score 64 ≫ 3）✓；平稳流量 → 0 ✓；
+  同边重访 → 0 ✓；时间片滚动 ✓。
+- 引擎接入：\`midasScore\` 字段 + \`midasCheck\` 在 IPGuard Middleware 的第一层速率记录旁
+  调用（每次请求更新 ip→fp 边）；>3σ 记 midas-alert 0 分（shadow），>5σ 加计 10 分。
+  纯内存（重启丢失，规格允许）。
+
+### P6-1 图快照管道 ✅ + P6-3 GNN 写回管道 ✅
+
+- \`githubhot ml export-graph --out data/ml/graph.jsonl\`：单快照 JSON 行——
+  fp 节点（挂 16 维特征 + 标签）/ ip 节点（零特征连接子）/ ua 节点（预留）+ 
+  member_of_ip / ua_of / similar（pHash/MinHash）/ physical 边。活体：27 节点 / 14 边 ✓。
+- \`githubhot ml import-gnn <graph_gnn_v1.json>\`：GNN 推理结果写回——每 fp 写
+  gnn_score（bot 概率）+ gnn_embedding（64 维 JSON）。活体验证通路 ✓。
+- \`ip_fingerprints\` 新列 gnn_score / gnn_embedding。
+- **GNN 训练管道**（沙盒 scripts/ml/）已交付（GraphSAGE → ONNX，mlserve 真模型 RSS 82.2MB）。
+  主管道消费流：ml export-graph → 沙盒训练 → ml import-gnn 写回。冷启动 Louvain 均值
+  域包方法已就绪（fpgraph.Communities 均值可计算）。
+
 ## 已知边界 / 后续项
 
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，
