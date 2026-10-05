@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NoraStory/GithubHot/internal/domain/fpmath"
 	"github.com/NoraStory/GithubHot/internal/domain/iprisk"
 )
 
@@ -69,6 +70,10 @@ const (
 	// 封禁累犯衰减期：超过该时长无违规，strike 回初犯档
 	banStrikeDecay = 30 * 24 * time.Hour
 
+	// P2-1 感知哈希关联扫描：30 天窗口、单次最多取 2000 条候选
+	phashLinkWindow    = 30 * 24 * time.Hour
+	phashCandidateLimit = 2000
+
 	// 握手通道专用限流：/api/v1/site/config 免签（APP 冷启动要从这里拿远程封禁 /
 	// 强制更新策略）且会触发指纹归档写库，必须自己限流，否则可被无限重放。
 	handshakePath        = "/api/v1/site/config"
@@ -84,6 +89,10 @@ type GuardStore interface {
 	UpsertFingerprint(ctx context.Context, fp, ip, ua string, meta FingerprintMeta) ([]string, error)
 	ListFingerprints(ctx context.Context, limit int) ([]FingerprintDTO, error)
 	ListFingerprintsSince(ctx context.Context, since time.Time, limit int) ([]FingerprintDTO, error)
+	// P2-1/P2-2 关联：感知哈希候选扫描与关联边读写（P4-4 聚类、P6 图快照共用）
+	ListPHashCandidates(ctx context.Context, since time.Time, limit int) ([]PHashRowDTO, error)
+	UpsertFPLink(ctx context.Context, src, dst, kind string, weight float64) error
+	ListFPLinks(ctx context.Context, fp string, limit int) ([]FPLinkDTO, error)
 	FindBan(ctx context.Context, ip string) (*BanDTO, error)
 	BannedAmong(ctx context.Context, ips []string) ([]string, error)
 	UpsertBan(ctx context.Context, ip string, strikes, level int, reason string, duration time.Duration) error
@@ -114,13 +123,31 @@ type FingerprintDTO struct {
 	FirstSeen   time.Time
 	LastSeen    time.Time
 	Hits        int
+	CanvasPHash string // P2-1 感知哈希（hex16）
+	MinHashSig  string // P2-2 组件集合 MinHash 签名（hex）
 }
 
-// FingerprintMeta 指纹上报的附带信息（WebRTC IP、分量明细、环境核验命中）。
+// PHashRowDTO 感知哈希候选行（同源关联扫描）。
+type PHashRowDTO struct {
+	Fingerprint string
+	PHash       string
+	LastSeen    time.Time
+}
+
+// FPLinkDTO 指纹关联边。
+type FPLinkDTO struct {
+	Src, Dst, Kind      string
+	Weight              float64
+	FirstSeen, LastSeen time.Time
+}
+
+// FingerprintMeta 指纹上报的附带信息（WebRTC IP、分量明细、环境核验命中、P2 数学指纹）。
 type FingerprintMeta struct {
 	Webrtc     []string
 	Components map[string]string
 	Flags      []string
+	CanvasPHash string // P2-1 64bit 感知哈希（hex16），可选
+	MinHashSig  string // P2-2 组件集合 MinHash 签名（hex），可选
 }
 type BanDTO struct {
 	IP        string
@@ -780,6 +807,10 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 		g.event(ctx, ip, "fp-collision-watch", "同一指纹 10 分钟内多 IP 并发（疑指纹碰撞，已豁免连坐）", 0, false)
 		return out, false
 	}
+	// P2-1 感知哈希同源关联：Canvas 精确哈希会因驱动更新/抗指纹噪声漂移，
+	// pHash 汉明距离近的指纹其实是同一台设备 → 记关联边（P4-4 聚类、P2-4 轮换检测的依据）。
+	// 只记关联不计分（相似本身不是违规，且同型号设备有一定重合概率，交由图聚类判断）。
+	g.linkByPHash(ctx, ip, fp, meta.CanvasPHash)
 	// 连坐双因子：干净设备连到被封的共享出口（酒店/机场/运营商 NAT 被前任搞封）
 	// 不算违规，只记低分观察；只有"该指纹名下其他 IP 近期也有劣迹"（代理池轮换
 	// 特征）才升级封禁。防误封核心：身份信号必须与设备劣迹叠加。
@@ -807,8 +838,42 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	return out, false
 }
 
-// fpHasRecentViolations 抽查指纹名下其他 IP 近期（7 天）是否有违规记录：
-// 区分"出差换网络的干净设备"与"代理池轮换的指纹"。
+// linkByPHash 感知哈希同源关联（P2-1）：扫描时间窗内带 pHash 的指纹，汉明距离 ≤ 10 视为同源，
+// 双向边写入 fp_links（kind=phash，weight=1-distance/64）。只关联不计分：相似本身不是违规，
+// 且同型号设备天然有重合概率——是否算"换脸轮换"由 P2-4 稳定性 + 图聚类判断。
+func (g *IPGuard) linkByPHash(ctx context.Context, ip, fp, phash string) {
+	if phash == "" || g.store == nil {
+		return
+	}
+	if _, err := fpmath.ParsePHash(phash); err != nil {
+		return // 客户端上报的哈希非法：既不关联也不计分
+	}
+	rows, err := g.store.ListPHashCandidates(ctx, time.Now().Add(-phashLinkWindow), phashCandidateLimit)
+	if err != nil {
+		log.Printf("[ipguard] pHash 候选查询失败: %v", err)
+		return
+	}
+	cands := make([]fpmath.PHashCandidate, 0, len(rows))
+	for _, r := range rows {
+		if r.Fingerprint == fp {
+			continue // 自身不算关联
+		}
+		cands = append(cands, fpmath.PHashCandidate{FP: r.Fingerprint, PHash: r.PHash})
+	}
+	matches := fpmath.SimilarPHashCandidates(phash, cands, fpmath.PHashDefaultMaxDistance)
+	for _, m := range matches {
+		weight := 1 - float64(m.Distance)/64
+		if err := g.store.UpsertFPLink(ctx, fp, m.FP, "phash", weight); err != nil {
+			log.Printf("[ipguard] pHash 关联写入失败: %v", err)
+		}
+	}
+	if len(matches) > 0 {
+		g.event(ctx, ip, "fp-phash-link", sprintf("感知哈希关联 %d 个旧指纹（最近距离 %d）",
+			len(matches), matches[0].Distance), 0, false)
+	}
+}
+
+// fpHasRecentViolations 抽查指纹名下其他 IP 近期（7 天）是否有违规记录：// 区分"出差换网络的干净设备"与"代理池轮换的指纹"。
 func (g *IPGuard) fpHasRecentViolations(ctx context.Context, knownIPs []string, exceptIP string) bool {
 	probed := 0
 	for i := len(knownIPs) - 2; i >= 0 && probed < fpViolationProbe; i-- {

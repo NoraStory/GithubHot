@@ -94,8 +94,9 @@ type FingerprintRow struct {
 }
 
 // UpsertFingerprint 登记一次指纹上报；返回该指纹历史上出现过的所有 IP。
-// meta：WebRTC IP、分量明细（components）、环境核验命中（flags，做并集累计）。
-func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string, components map[string]string, flags []string) ([]string, error) {
+// meta：WebRTC IP、分量明细（components）、环境核验命中（flags，做并集累计）、
+// canvasPhash（P2-1 感知哈希）、minhashSig（P2-2 组件集合 MinHash 签名）。
+func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string, components map[string]string, flags []string, canvasPhash, minhashSig string) ([]string, error) {
 	row := db.QueryRowContext(ctx,
 		"SELECT ips, ua, hits, webrtc, flags FROM ip_fingerprints WHERE fp = ?", fp)
 	var ipsJSON, oldUA, rtcJSON, flagsJSON string
@@ -151,8 +152,8 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 		ips = []string{ip}
 		b, _ := json.Marshal(ips)
 		_, err = db.ExecContext(ctx,
-			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits, webrtc, components, flags) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
-			fp, string(b), ua, now, now, string(rb), string(cb), string(fb))
+			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits, webrtc, components, flags, canvas_phash, minhash_sig) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+			fp, string(b), ua, now, now, string(rb), string(cb), string(fb), canvasPhash, minhashSig)
 		if err != nil {
 			return nil, fmt.Errorf("写入指纹: %w", err)
 		}
@@ -177,8 +178,8 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 		ua = oldUA
 	}
 	_, err = db.ExecContext(ctx,
-		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1, webrtc = ?, components = ?, flags = ? WHERE fp = ?",
-		string(b), ua, now, string(rb), string(cb), string(fb), fp)
+		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1, webrtc = ?, components = ?, flags = ?, canvas_phash = CASE WHEN ? != '' THEN ? ELSE canvas_phash END, minhash_sig = CASE WHEN ? != '' THEN ? ELSE minhash_sig END WHERE fp = ?",
+		string(b), ua, now, string(rb), string(cb), string(fb), canvasPhash, canvasPhash, minhashSig, minhashSig, fp)
 	if err != nil {
 		return nil, fmt.Errorf("更新指纹: %w", err)
 	}
@@ -223,8 +224,85 @@ func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow
 	return scanFingerprintRows(rows)
 }
 
-// ListFingerprintsSince 时间窗内的活跃指纹（flag 命中统计用）。
-// last_seen 按 RFC3339 文本存储，同格式比较即字典序比较。
+// PHashRow 感知哈希候选（P2-1 同源关联扫描用）。
+type PHashRow struct {
+	Fingerprint string
+	PHash       string
+	LastSeen    time.Time
+}
+
+// ListPHashCandidates 时间窗内带感知哈希的指纹（新指纹入库时扫描同源）。
+func (db *DB) ListPHashCandidates(ctx context.Context, since time.Time, limit int) ([]PHashRow, error) {
+	if limit <= 0 {
+		limit = 2000
+	}
+	rows, err := db.QueryContext(ctx,
+		"SELECT fp, canvas_phash, last_seen FROM ip_fingerprints WHERE canvas_phash != '' AND last_seen >= ? ORDER BY last_seen DESC LIMIT ?",
+		since.Format(time.RFC3339), limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询 pHash 候选: %w", err)
+	}
+	defer rows.Close()
+	out := []PHashRow{}
+	for rows.Next() {
+		var r PHashRow
+		var last string
+		if err := rows.Scan(&r.Fingerprint, &r.PHash, &last); err != nil {
+			return nil, err
+		}
+		r.LastSeen, _ = time.Parse(time.RFC3339, last)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// FPLinkRow 指纹关联边（pHash 同源 / MinHash 相似 / 物理特征 / 时间共现）。
+type FPLinkRow struct {
+	Src, Dst, Kind      string
+	Weight              float64
+	FirstSeen, LastSeen time.Time
+}
+
+// UpsertFPLink 记录一条指纹关联边（幂等：重复命中刷新权重与 last_seen）。
+func (db *DB) UpsertFPLink(ctx context.Context, src, dst, kind string, weight float64) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO fp_links (src, dst, kind, weight, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(src, dst, kind) DO UPDATE SET weight = excluded.weight, last_seen = excluded.last_seen`,
+		src, dst, kind, weight, now, now)
+	if err != nil {
+		return fmt.Errorf("写指纹关联: %w", err)
+	}
+	return nil
+}
+
+// ListFPLinks 某指纹的关联边（source 或 target 任一侧命中）。
+func (db *DB) ListFPLinks(ctx context.Context, fp string, limit int) ([]FPLinkRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := db.QueryContext(ctx,
+		"SELECT src, dst, kind, weight, first_seen, last_seen FROM fp_links WHERE src = ? OR dst = ? ORDER BY last_seen DESC LIMIT ?",
+		fp, fp, limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询指纹关联: %w", err)
+	}
+	defer rows.Close()
+	out := []FPLinkRow{}
+	for rows.Next() {
+		var r FPLinkRow
+		var first, last string
+		if err := rows.Scan(&r.Src, &r.Dst, &r.Kind, &r.Weight, &first, &last); err != nil {
+			return nil, err
+		}
+		r.FirstSeen, _ = time.Parse(time.RFC3339, first)
+		r.LastSeen, _ = time.Parse(time.RFC3339, last)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListFingerprintsSince 时间窗内的活跃指纹（flag 命中统计用）。// last_seen 按 RFC3339 文本存储，同格式比较即字典序比较。
 func (db *DB) ListFingerprintsSince(ctx context.Context, since time.Time, limit int) ([]FingerprintRow, error) {
 	if limit <= 0 {
 		limit = 5000

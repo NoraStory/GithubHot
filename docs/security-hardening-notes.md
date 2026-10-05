@@ -13,7 +13,7 @@
 | P0-3 | 握手通道独立滑动窗口限流 | ✅ 完成 | 见 git log `P0-3` |
 | P0-4 | 检测 flag 命中统计（后端聚合 + 面板区块） | ✅ 完成 | 见 git log `P0-4` |
 | P1 | 指纹浏览器识别（六路采集 + BotD + 计分接入） | ✅ 完成（2 处按实测调整，见下） | 见 git log `P1` |
-| P2 | 算法升级（pHash / MinHash+LSH / 熵权 / 稳定性 / GeoIP） | ⏳ 待办 | — |
+| P2 | 算法升级（pHash / MinHash+LSH / 熵权 / 稳定性 / GeoIP） | 🔶 进行中：P2-1 完成、P2-2 域包完成待接线，P2-3/P2-4/P2-5 未开工 | 见 git log `P2-1` |
 | P3 | TLS + JA4 协议指纹 | ⏳ 待办 | — |
 | P4 | 平台证明与高级项（Play Integrity / passkey / ALTCHA / 图聚类 / 行为采集 / 时钟偏移） | ⏳ 待办 | — |
 | P5 | 行为机器学习（标注 / iForest / LR / GBDT / PSI） | ⏳ 待办 | — |
@@ -235,7 +235,44 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
 
 ---
 
+## P2 — 算法升级（进行中）
+
+### P2-1 pHash 感知哈希同源关联 ✅
+
+- 前端 `web/src/lib/phash.js`（纯函数）：32×32 灰度（双线性降采样）→ DCT-II（32 点基预计算，
+  行/列可分离）→ 左上 8×8 低频块（跳过 DC）→ 中位数二值化 → 64bit（有效位 63 + 末位保留）→ hex16；
+  另导出 `hammingDistance` / `similarPHash`。在既有 `canvasFp()` 上顺带算出，随 `canvas_phash` 字段上报
+  （可选字段，旧服务端忽略）。
+- 域包 `internal/domain/fpmath/phash.go`：`ParsePHash` / `PHashDistance` / `SimilarPHash` /
+  `SimilarPHashCandidates`（纯函数，非法输入一律不关联）。
+- 存储：`ip_fingerprints.canvas_phash` 列；新表 `fp_links(src,dst,kind,weight,first_seen,last_seen)`
+  （pHash 同源 / 后续 MinHash 相似 / 物理特征 / 时间共现共用，P4-4 聚类与 P6 图快照的边表）；
+  端口新增 `ListPHashCandidates` / `UpsertFPLink` / `ListFPLinks`。
+- 引擎：`ReportFingerprint` 内 `linkByPHash` —— 30 天窗口扫候选、汉明距离 ≤ 10 视为同源、
+  双向写边（weight=1−distance/64）、记 0 分观察事件 `fp-phash-link`。**只关联不计分**：
+  相似本身不是违规，且同型号设备天然重合，是否"换脸轮换"留给 P2-4 与图聚类。
+- 验证：`web/src/lib/phash.test.js` 6 例（确定性、1% 噪声距离 <10、不同图形 >30、亮度整体平移 <10、
+  非法输入、hexToBits）；`ipguard_p2link_test.go` 6 例（同源写边/不同设备不关联/自环与非法哈希、
+  30 天窗口、重复上报幂等、字段清洗）；`npm test` 37 例、`go test ./...` 全绿、`npm run build` 成功。
+
+### P2-2 MinHash + LSH 域包 ✅（域包已就绪，尚未接线）
+
+- `internal/domain/fpmath/minhash.go` + `minhash_test.go`（6 测试函数 / 33 子测试）：
+  `NewMinHash(k=128)`、`Signature([]string) []uint64`、`JaccardEstimate`、
+  `Bands(sig, 16, 8)`；`bits.Mul64/Div64` 安全取模 p=2^61−1，系数由 splitmix64 固定常量派生
+  （跨进程一致、不依赖 math/rand 版本）。实测 20 组件改 1 个 → 估计 0.88 且共享带 5 个。
+- 待接线：`ip_fingerprints.minhash_sig` 列与 `fp_lsh_buckets` 表已建（DDL 就绪），
+  还差"上报时算签名 → 写桶 → 同带召回 → 精确 Jaccard > 0.8 关联"的引擎接线与端口方法。
+
+### 待办
+
+- P2-3 熵值加权（`internal/domain/fpmath/entropy.go` + 每日 cron 刷新 `entropy_bits` + 封禁系数
+  `min(1, bits/40)` 接入 `iprisk`）；P2-4 时间稳定性 EWMA（`comp_stability`/`stability` 列已建，
+  "稳定分量突变 + pHash/MinHash 关联旧指纹" → `fpb_rotation_detected` +25）；
+  P2-5 GeoIP（ip-location-db mmdb + geoip2-golang + `githubhot geo download` + 时区/ASN 核验，
+  `ip_profiles` 的 asn/geo_* 列已建）。
 ## 已知边界 / 后续项
+
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，
   属预期（§10.3 的 `?fp=` 单指纹下钻会补齐这条链路）。
 - `/healthz` 目前随封禁一起 404（外部监控可能误报站点不可用）；`spa.go` 内 `/app/` 的

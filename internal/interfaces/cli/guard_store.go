@@ -56,7 +56,38 @@ func (g guardStore) ListIPEventsSince(ctx context.Context, limit int, since time
 }
 
 func (g guardStore) UpsertFingerprint(ctx context.Context, fp, ip, ua string, meta httpapi.FingerprintMeta) ([]string, error) {
-	return g.db.UpsertFingerprint(ctx, fp, ip, ua, meta.Webrtc, meta.Components, meta.Flags)
+	return g.db.UpsertFingerprint(ctx, fp, ip, ua, meta.Webrtc, meta.Components, meta.Flags, meta.CanvasPHash, meta.MinHashSig)
+}
+
+func (g guardStore) ListPHashCandidates(ctx context.Context, since time.Time, limit int) ([]httpapi.PHashRowDTO, error) {
+	rows, err := g.db.ListPHashCandidates(ctx, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]httpapi.PHashRowDTO, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, httpapi.PHashRowDTO{Fingerprint: r.Fingerprint, PHash: r.PHash, LastSeen: r.LastSeen})
+	}
+	return out, nil
+}
+
+func (g guardStore) UpsertFPLink(ctx context.Context, src, dst, kind string, weight float64) error {
+	return g.db.UpsertFPLink(ctx, src, dst, kind, weight)
+}
+
+func (g guardStore) ListFPLinks(ctx context.Context, fp string, limit int) ([]httpapi.FPLinkDTO, error) {
+	rows, err := g.db.ListFPLinks(ctx, fp, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]httpapi.FPLinkDTO, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, httpapi.FPLinkDTO{
+			Src: r.Src, Dst: r.Dst, Kind: r.Kind, Weight: r.Weight,
+			FirstSeen: r.FirstSeen, LastSeen: r.LastSeen,
+		})
+	}
+	return out, nil
 }
 
 func (g guardStore) ListFingerprintsByIP(ctx context.Context, ip string, limit int) ([]httpapi.FingerprintDTO, error) {

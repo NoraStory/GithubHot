@@ -139,6 +139,35 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE stories ADD COLUMN manual INTEGER NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE items ADD COLUMN content_zh TEXT NOT NULL DEFAULT ''")
 	_, _ = db.Exec("ALTER TABLE items ADD COLUMN meta TEXT NOT NULL DEFAULT '{}'")
+	// P2 指纹数学列（感知哈希 / MinHash 签名 / 熵权 / 稳定度 / 分量稳定度）
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN canvas_phash TEXT NOT NULL DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN minhash_sig TEXT NOT NULL DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN entropy_bits REAL NOT NULL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN stability REAL NOT NULL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN comp_stability TEXT NOT NULL DEFAULT '{}'")
+	// P2-5 地理与 ASN（ip-location-db mmdb，缺失时全部降级跳过）
+	_, _ = db.Exec("ALTER TABLE ip_profiles ADD COLUMN asn INTEGER NOT NULL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE ip_profiles ADD COLUMN asn_type TEXT NOT NULL DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE ip_profiles ADD COLUMN geo_country TEXT NOT NULL DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE ip_profiles ADD COLUMN geo_tz TEXT NOT NULL DEFAULT ''")
+	// 指纹关联边（pHash 同源 / MinHash 相似 / 物理特征 / 时间共现）：P2 关联、P4-4 聚类、P6 图快照共用
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS fp_links (
+		src TEXT NOT NULL, dst TEXT NOT NULL, kind TEXT NOT NULL,
+		weight REAL NOT NULL DEFAULT 0, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+		PRIMARY KEY (src, dst, kind))`); err != nil {
+		return fmt.Errorf("建表 fp_links: %w", err)
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_fp_links_src ON fp_links(src)"); err != nil {
+		return fmt.Errorf("建索引 fp_links: %w", err)
+	}
+	// MinHash LSH 分桶（b=16 带 × r=8 行）
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS fp_lsh_buckets (
+		band INTEGER NOT NULL, bucket_hash TEXT NOT NULL, fp TEXT NOT NULL, created_at TEXT NOT NULL)`); err != nil {
+		return fmt.Errorf("建表 fp_lsh_buckets: %w", err)
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_lsh_bucket ON fp_lsh_buckets(band, bucket_hash)"); err != nil {
+		return fmt.Errorf("建索引 fp_lsh_buckets: %w", err)
+	}
 	return nil
 }
 

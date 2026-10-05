@@ -16,6 +16,8 @@ type fakeGuardStore struct {
 	events []IPEventDTO
 	bans   map[string]*BanDTO
 	fps    []FingerprintDTO
+	phashes []PHashRowDTO
+	links   []FPLinkDTO
 }
 
 func newFakeStore() *fakeGuardStore { return &fakeGuardStore{bans: map[string]*BanDTO{}} }

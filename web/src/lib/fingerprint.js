@@ -11,6 +11,7 @@ import { cleanEnvDetect } from './fp/cleanEnv'
 import { claimsDetect } from './fp/claims'
 import { forensicsDetect } from './fp/forensics'
 import { botdDetect } from './fp/botd'
+import { phashFromImageData } from './phash'
 
 const FP_KEY = 'gh_fp'
 const REPORTED_KEY = 'gh_fp_reported'
@@ -26,7 +27,9 @@ async function sha256(text) {
   return btoa(String.fromCharCode(...new Uint8Array(buf).slice(0, 18)))
 }
 
-// Canvas 指纹：emoji + 渐变文本渲染的 GPU 驱动级差异
+// Canvas 指纹：emoji + 渐变文本渲染的 GPU 驱动级差异。
+// 同时算出 P2-1 感知哈希（pHash）：精确哈希会因驱动更新/抗指纹噪声漂移，
+// pHash 对同一台设备的像素微改仍然稳定，服务端据此把"换了手指纹"关联回同一设备。
 async function canvasFp() {
   try {
     const c = document.createElement('canvas')
@@ -42,8 +45,13 @@ async function canvasFp() {
     x.fillText('GithubHot 🚀 指纹 測試 0123', 12, 12)
     x.fillStyle = 'rgba(0,0,0,0.35)'
     x.fillText('GithubHot 🚀 指纹 測試 0123', 13.5, 14.5)
-    return await sha256(c.toDataURL())
-  } catch { return '' }
+    const hash = await sha256(c.toDataURL())
+    let phash = ''
+    try {
+      phash = phashFromImageData(x.getImageData(0, 0, c.width, c.height))
+    } catch { phash = '' } // 像素读取失败（画布污染）不影响精确哈希
+    return { hash, phash }
+  } catch { return { hash: '', phash: '' } }
 }
 
 // WebGL 指纹：厂商/显卡（UNMASKED）、扩展列表、着色精度、最大纹理。
@@ -219,17 +227,18 @@ export async function reportFingerprint() {
     if (sessionStorage.getItem(REPORTED_KEY)) return
     const [canvas, webgl, rtc, audio, fonts] = await Promise.all(
       [canvasFp(), webglFp(), webrtcIPs(), audioFp(), fontsFp()])
-    const fp = await sha256([canvas, webgl.hash, audio, fonts, envSignals()].join('~'))
+    const fp = await sha256([canvas.hash, webgl.hash, audio, fonts, envSignals()].join('~'))
     try { localStorage.setItem(FP_KEY, fp) } catch {}
     const flags = [...envAudit(), ...await detectFlags()]
     const res = await fetch('/api/v1/fp/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        fp, canvas, webgl: webgl.hash, audio, fonts, webrtc: rtc,
+        fp, canvas: canvas.hash, webgl: webgl.hash, audio, fonts, webrtc: rtc,
         renderer: webgl.renderer, screen: screen.width + 'x' + screen.height,
+        canvas_phash: canvas.phash,   // P2-1 感知哈希（可选字段，旧服务端忽略）
         components: {
-          canvas, webgl: webgl.hash, audio, fonts,
+          canvas: canvas.hash, webgl: webgl.hash, audio, fonts,
           screen: screen.width + 'x' + screen.height,
           renderer: webgl.renderer,
           dpr: String(window.devicePixelRatio)   // 软信号：不参与身份哈希

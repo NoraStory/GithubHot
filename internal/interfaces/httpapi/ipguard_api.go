@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/NoraStory/GithubHot/internal/domain/fpmath"
 	"github.com/NoraStory/GithubHot/internal/domain/fpstats"
 )
 
@@ -27,6 +28,34 @@ type fpPayload struct {
 	Renderer    string            `json:"renderer"`
 	Screen      string            `json:"screen"`
 	Coherent    bool              `json:"coherent"` // 旧客户端兼容：UA 与 platform 一致性
+	CanvasPHash string            `json:"canvas_phash"` // P2-1 64bit 感知哈希（hex16，可选）
+	MinHashSig  string            `json:"minhash_sig"`  // P2-2 组件集合 MinHash 签名（hex，可选）
+}
+
+// sanitizePHash 校验客户端上报的感知哈希（P2-1）：必须 hex16，否则丢弃（不关联）。
+func sanitizePHash(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if len(s) != fpmath.PHashHexLen {
+		return ""
+	}
+	if _, err := fpmath.ParsePHash(s); err != nil {
+		return ""
+	}
+	return s
+}
+
+// sanitizeMinHash 校验客户端上报的 MinHash 签名（P2-2）：hex 长度受限，否则丢弃。
+func sanitizeMinHash(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if len(s) == 0 || len(s) > 256 {
+		return ""
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return ""
+		}
+	}
+	return s
 }
 
 // sanitizeComponents 清洗上报的分量明细：键值长度上限 + 键数上限，
@@ -155,7 +184,13 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 		flags = append(flags, "headless-ua")
 	}
 
-	meta := FingerprintMeta{Webrtc: p.WebRTC, Components: sanitizeComponents(p.Components), Flags: flags}
+	meta := FingerprintMeta{
+		Webrtc:      p.WebRTC,
+		Components:  sanitizeComponents(p.Components),
+		Flags:       flags,
+		CanvasPHash: sanitizePHash(p.CanvasPHash),
+		MinHashSig:  sanitizeMinHash(p.MinHashSig),
+	}
 	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, meta)
 	// 每个命中项记违规事件（积分见 flagScore）。
 	// kind 按 flag 细分（env-flag:<flag>）：使不同命中项成为**独立证据**参与互证，
