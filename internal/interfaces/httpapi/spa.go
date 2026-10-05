@@ -300,19 +300,11 @@ func (s *Server) siteConfig(w http.ResponseWriter, _ *http.Request) {
 		"homeVideos":         homeVideos,
 		"homePortraitVideos": homePortraitVideos,
 		// ---- APP 风控下发（启动握手通道）----
-		"session_seed":        appSessionSeed(),
-		"banned":              os.Getenv("APP_BANNED") == "1" || strings.EqualFold(os.Getenv("APP_BANNED"), "true"),
-		"force_upgrade_url":   os.Getenv("APP_FORCE_UPGRADE_URL"),
+		// 注意：签名种子**绝不**在此下发（历史版本曾下发 gh-dev-seed-v1，等于公开
+		// 派生密钥）。种子只经环境变量提供，APP 侧构建期注入。
+		"banned":            os.Getenv("APP_BANNED") == "1" || strings.EqualFold(os.Getenv("APP_BANNED"), "true"),
+		"force_upgrade_url": os.Getenv("APP_FORCE_UPGRADE_URL"),
 	})
-}
-
-// appSessionSeed APP 会话种子：HMAC 派生根密钥，服务端签名校验与客户端派生
-// 必须一致（生产经 KMS/CI 注入，绝不进仓库；本地缺省用开发默认值）。
-func appSessionSeed() string {
-	if v := strings.TrimSpace(os.Getenv("APP_SESSION_SEED")); v != "" {
-		return v
-	}
-	return "gh-dev-seed-v1"
 }
 
 // digestsAPI 期刊分页列表（用户端期刊页 + 管理端期刊页）。

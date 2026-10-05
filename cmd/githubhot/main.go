@@ -16,16 +16,25 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "admin":
-		// 管理端密码工具：githubhot admin hash [密码]（不带参数则交互式输入）。
+		// 管理端工具：admin hash [密码]（Argon2id 密码哈希）、admin seed（APP 签名种子）。
 		// 不依赖完整配置（config.Load 会校验 LLM 配置），先于配置加载处理。
-		if len(os.Args) >= 3 && os.Args[2] == "hash" {
-			if err := cli.HashAdminPassword(os.Args[3:]); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
+		if len(os.Args) >= 3 {
+			switch os.Args[2] {
+			case "hash":
+				if err := cli.HashAdminPassword(os.Args[3:]); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				return
+			case "seed":
+				if err := cli.SeedAppSign(os.Args[3:]); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				return
 			}
-			return
 		}
-		fmt.Fprintln(os.Stderr, "用法: githubhot admin hash [密码]")
+		fmt.Fprintln(os.Stderr, "用法: githubhot admin hash [密码] | githubhot admin seed")
 		os.Exit(2)
 	}
 	cfg, err := config.Load()
@@ -95,7 +104,7 @@ func usage() {
   githubhot mcp      以 stdio MCP 服务器运行（Claude 等 Agent 客户端接入）
   githubhot bench    SelectBench 精选校准：--file data/gold.jsonl
   githubhot push     脚本推送资料：--source script-push --url ... --title ...
-  githubhot admin    管理端密码工具：admin hash [密码] 生成 Argon2id 哈希
+  githubhot admin    管理端工具：admin hash [密码] 生成 Argon2id 哈希；admin seed 生成 APP 签名种子
   githubhot version  版本号
 
 配置: 见 .env.example（LLM_API_KEY 必选；GITHUB_TOKEN 建议配置）`)

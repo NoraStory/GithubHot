@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/NoraStory/GithubHot/internal/config"
 )
 
 // ---------- APP 侧风控（Android 客户端） ----------
@@ -49,7 +51,9 @@ const (
 type AppGuard struct {
 	store  GuardStore
 	guard  *IPGuard // 违规事件/封禁复用三层 IP 防护体系
-	seed   string
+	seeds  []string // [0] 主种子；其后为 APP_SIGN_SEED_GRACE 过渡期旧种子
+	seed   string   // = seeds[0]（签名向量与令牌派生用主种子）
+	grace  bool     // 过渡期：无常用种子验签通过时只观察不计分（存量 APP 尚在改构建期注入）
 	banned bool
 	force  string
 
@@ -58,12 +62,17 @@ type AppGuard struct {
 	fpLast    map[string]time.Time
 }
 
-// NewAppGuard 构建；seed 缺省与 siteConfig 下发保持一致（gh-dev-seed-v1）。
+// NewAppGuard 构建。种子只从环境读取（APP_SIGN_SEED / 旧名 APP_SESSION_SEED），
+// 不再由 /api/v1/site/config 公开下发；未配置时沿用出厂默认（serve 模式会被
+// config.CheckAppSignSeed 拒绝启动）。
 func NewAppGuard(store GuardStore, guard *IPGuard) *AppGuard {
+	seeds := appSignSeeds()
 	return &AppGuard{
 		store:  store,
 		guard:  guard,
-		seed:   appSessionSeed(),
+		seeds:  seeds,
+		seed:   seeds[0],
+		grace:  len(seeds) > 1,
 		banned: osBanned(),
 		force:  strings.TrimSpace(os.Getenv("APP_FORCE_UPGRADE_URL")),
 		nonces: map[string]time.Time{},
@@ -71,34 +80,88 @@ func NewAppGuard(store GuardStore, guard *IPGuard) *AppGuard {
 	}
 }
 
+// appSignSeeds 验签种子列表：主种子在前，过渡期旧种子在后（去重、保序、非空）。
+func appSignSeeds() []string {
+	primary := config.AppSignSeedFromEnv()
+	if primary == "" {
+		primary = config.DevAppSignSeed // run/mcp/测试模式：保持与历史行为一致
+	}
+	out := []string{primary}
+	seen := map[string]bool{primary: true}
+	for _, s := range config.AppSignSeedGraceFromEnv() {
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
 func osBanned() bool {
 	return os.Getenv("APP_BANNED") == "1" || strings.EqualFold(os.Getenv("APP_BANNED"), "true")
 }
 
-// deriveSessionKey 与客户端 SessionManager 完全一致的密钥派生。
-func (a *AppGuard) deriveSessionKey(fp string) []byte {
-	secret := []byte(a.seed + ":" + fp)
+// deriveSessionKey 与客户端 SessionManager 完全一致的密钥派生（指定种子）。
+func deriveSessionKeyWith(seed, fp string) []byte {
+	secret := []byte(seed + ":" + fp)
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte("gh-session-v1"))
 	return mac.Sum(nil)
 }
 
-// expectedToken 与客户端 SessionManager 一致的会话令牌。
-func (a *AppGuard) expectedToken(fp string) string {
-	key := a.deriveSessionKey(fp)
+// deriveSessionKey 主种子的密钥派生。
+func (a *AppGuard) deriveSessionKey(fp string) []byte {
+	return deriveSessionKeyWith(a.seed, fp)
+}
+
+// expectedToken 与客户端 SessionManager 一致的会话令牌（指定种子）。
+func expectedTokenWith(seed, fp string) string {
+	key := deriveSessionKeyWith(seed, fp)
 	h := sha256.New()
 	h.Write(key)
 	h.Write([]byte(fp))
 	return hex.EncodeToString(h.Sum(nil))[:40]
 }
 
-// expectedSign 重算请求签名（path 含 query，body 为原始字节）。
-func (a *AppGuard) expectedSign(fp, ts, nonce, method, path string, body []byte) string {
+// expectedToken 主种子的会话令牌。
+func (a *AppGuard) expectedToken(fp string) string {
+	return expectedTokenWith(a.seed, fp)
+}
+
+// expectedSign 重算请求签名（path 含 query，body 为原始字节；指定种子）。
+func expectedSignWith(seed, fp, ts, nonce, method, path string, body []byte) string {
 	bh := sha256.Sum256(body)
 	payload := ts + "\n" + nonce + "\n" + strings.ToUpper(method) + "\n" + path + "\n" + hex.EncodeToString(bh[:])
-	mac := hmac.New(sha256.New, a.deriveSessionKey(fp))
+	mac := hmac.New(sha256.New, deriveSessionKeyWith(seed, fp))
 	mac.Write([]byte(payload))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// expectedSign 主种子的请求签名。
+func (a *AppGuard) expectedSign(fp, ts, nonce, method, path string, body []byte) string {
+	return expectedSignWith(a.seed, fp, ts, nonce, method, path, body)
+}
+
+// signMatches 逐个种子校验签名，返回命中的种子下标（-1 = 无一命中）。
+func (a *AppGuard) signMatches(fp, ts, nonce, method, path string, body []byte, sig string) int {
+	want := strings.ToLower(sig)
+	for i, seed := range a.seeds {
+		if hmac.Equal([]byte(expectedSignWith(seed, fp, ts, nonce, method, path, body)), []byte(want)) {
+			return i
+		}
+	}
+	return -1
+}
+
+// tokenMatches 会话令牌是否与任一种子下的期望值一致（过渡期旧种子同样受理）。
+func (a *AppGuard) tokenMatches(fp, tok string) bool {
+	for _, seed := range a.seeds {
+		if hmac.Equal([]byte(expectedTokenWith(seed, fp)), []byte(tok)) {
+			return true
+		}
+	}
+	return false
 }
 
 // fail 校验失败：记违规事件（与 IP 防护积分/封禁打通）并返回 401。
@@ -171,13 +234,18 @@ func (a *AppGuard) Middleware(next http.Handler) http.Handler {
 		if r.URL.RawQuery != "" {
 			path += "?" + r.URL.RawQuery
 		}
-		want := a.expectedSign(fp, ts, nonce, r.Method, path, body)
-		if !hmac.Equal([]byte(strings.ToLower(want)), []byte(strings.ToLower(sig))) {
-			a.fail(ctx, ip, "app-sign-invalid", "接口签名无效", 60)
+		if a.signMatches(fp, ts, nonce, r.Method, path, body, sig) < 0 {
+			if a.grace {
+				// 过渡期：存量 APP 仍持有握手期种子的缓存，无常用种子验签通过时
+				// 只观察不计分（否则新购机/清数据的正常用户会被连续 401 攒到封禁）
+				a.fail(ctx, ip, "app-sign-unverified", "接口签名无法用任何已知种子校验（过渡期观察）", 0)
+			} else {
+				a.fail(ctx, ip, "app-sign-invalid", "接口签名无效", 60)
+			}
 			writeJSON(w, 401, map[string]any{"error": "bad sign"})
 			return
 		}
-		if tok := r.Header.Get(appTokenHeader); tok != "" && tok != a.expectedToken(fp) {
+		if tok := r.Header.Get(appTokenHeader); tok != "" && !a.tokenMatches(fp, tok) {
 			a.fail(ctx, ip, "app-token-mismatch", "会话令牌与指纹绑定不符", 40)
 			writeJSON(w, 401, map[string]any{"error": "bad token"})
 			return

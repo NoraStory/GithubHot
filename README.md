@@ -86,6 +86,8 @@ go build -o githubhot ./cmd/githubhot
 | `TRUSTED_PROXY` | 反代部署 | 受信代理 CIDR（逗号分隔）。为空 = 不信任任何代理头（用 TCP 对端地址）；配了才采信 `X-Forwarded-For`/`X-Real-IP` 并取最右非受信地址。直连部署留空 |
 | `IP_GUARD_LOCAL` | | 回环/内网白名单（默认开启便于本机调试；公网部署务必设为 `0`） |
 | `IP_GUARD_SECRET` | | 防护身份令牌 HMAC 密钥；不设置则每次启动随机生成（重启后旧令牌失效） |
+| `APP_SIGN_SEED` | APP/签名 | APP 请求签名种子（`githubhot admin seed` 生成，32B base64）。**serve 模式必填**：未配置或仍为出厂默认 `gh-dev-seed-v1` 时拒绝启动。APP 侧构建期注入同值，不再经 `/api/v1/site/config` 下发 |
+| `APP_SIGN_SEED_GRACE` | 过渡期 | 旧种子列表（逗号分隔）：存量 APP 未发版时兜底验签；过渡期内验签不通过只观察不计分，建议 ≤14 天后清空 |
 | `DATA_DIR` | | 数据目录，默认 `./data` |
 | `PORT` | | serve 端口，默认 `8787` |
 | `HOT_CRON` | | serve 内置调度（cron 表达式，本地时区），默认 `30 7 * * *` |

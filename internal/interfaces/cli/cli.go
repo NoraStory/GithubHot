@@ -86,6 +86,7 @@ func build(cfg *config.Config) (application.Deps, *sqlite.DB, error) {
 
 // Run 执行一次完整流水线并落盘日报与站点。
 func Run(cfg *config.Config) error {
+	warnAppSignSeed(cfg)
 	deps, db, err := build(cfg)
 	if err != nil {
 		return err
@@ -124,6 +125,14 @@ func Run(cfg *config.Config) error {
 
 // Serve 启动 API + 双榜页 + 内置定时调度。
 func Serve(cfg *config.Config) error {
+	// APP 签名种子红线：serve 模式拒绝以出厂默认/空种子启动
+	// （该值历史版本随 /api/v1/site/config 公开下发，等于签名机制形同虚设）。
+	if err := cfg.CheckAppSignSeed(); err != nil {
+		return err
+	}
+	if w := cfg.AppSignSeedGraceWarning(); w != "" {
+		fmt.Printf("[warn] %s\n", w)
+	}
 	deps, db, err := build(cfg)
 	if err != nil {
 		return err
@@ -185,6 +194,7 @@ func Serve(cfg *config.Config) error {
 
 // MCP 启动 stdio MCP 服务器（供 Claude 等 Agent 客户端接入）。
 func MCP(cfg *config.Config) error {
+	warnAppSignSeed(cfg)
 	deps, db, err := build(cfg)
 	if err != nil {
 		return err
@@ -256,6 +266,14 @@ func Push(cfg *config.Config, sourceID, rawURL, title, summary string) error {
 	}
 	fmt.Printf("已推送：%s\n  id=%s\n", it.Title, it.ID)
 	return nil
+}
+
+// warnAppSignSeed run/mcp 模式的降级提示：不阻断（这两个模式不提供 APP 接口），
+// 但提前暴露种子未轮换的问题。
+func warnAppSignSeed(cfg *config.Config) {
+	if w := cfg.AppSignSeedWarning(); w != "" {
+		fmt.Printf("[warn] %s（serve 模式将拒绝启动）\n", w)
+	}
 }
 
 func signalCtx() (context.Context, context.CancelFunc) {
