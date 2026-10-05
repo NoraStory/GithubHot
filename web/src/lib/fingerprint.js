@@ -12,6 +12,7 @@ import { claimsDetect } from './fp/claims'
 import { forensicsDetect } from './fp/forensics'
 import { botdDetect } from './fp/botd'
 import { phashFromImageData } from './phash'
+import { solveAltcha } from './altcha'
 
 const FP_KEY = 'gh_fp'
 const REPORTED_KEY = 'gh_fp_reported'
@@ -246,6 +247,9 @@ export async function reportFingerprint() {
     // P2-5 时区：IANA 名 + 偏移分钟（服务端与 IP 归属国做跨洲核验）
     let tz = ''
     try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '' } catch {}
+    // P4-3 ALTCHA PoW：服务端启用（ALTCHA_SECRET + DIFFICULTY>0）时求解并携带；
+    // 未启用/求解失败 → 字段缺省，服务端按原行为处理。
+    const altcha = await solveAltcha(fp)
     const res = await fetch('/api/v1/fp/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -253,6 +257,7 @@ export async function reportFingerprint() {
         fp, canvas: canvas.hash, webgl: webgl.hash, audio, fonts: fonts.hash, webrtc: rtc,
         renderer: webgl.renderer, screen: screen.width + 'x' + screen.height,
         canvas_phash: canvas.phash,   // P2-1 感知哈希（可选字段，旧服务端忽略）
+        altcha,                       // P4-3 PoW 解（可选字段）
         sets: {                        // P2-2 原始清单：服务端算 MinHash 签名（可选字段）
           fonts: fonts.detected,
           webgl_exts: webgl.exts,

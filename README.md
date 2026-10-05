@@ -92,6 +92,9 @@ go build -o githubhot ./cmd/githubhot
 | `GEOIP_DB_PATH` | GeoIP | 国家库路径（默认 `data/geo.mmdb`，`githubhot geo download` 拉取 ip-location-db，CC BY 4.0，部署说明需保留致谢）。文件缺失时地理核验整体降级：时区↔IP 归属国跨洲矛盾（`fpb_tz_geo_mismatch`）不判定 |
 | `GEOIP_ASN_DB_PATH` | GeoIP | ASN 库路径（默认 `data/geo-asn.mmdb`）：机房出口识别（`ip_profiles.asn_type=hosting`）+ 移动端 UA 组合核验（`fpb_hosting_mobile_ua`）；两项灰度默认 0 分 |
 | `ENTROPY_CRON` | 熵值加权 | 分量熵权每日刷新调度（cron 五段式，默认 `30 4 * * *`）。熵权 = 各分量值出现频率的信息量之和；三层违规分 × `min(1, bits/40)` 作为封禁触发系数——大众配置只计分不硬封，罕见组合足额计分 |
+| `ALTCHA_SECRET` / `ALTCHA_DIFFICULTY` | ALTCHA PoW | `ALTCHA_SECRET` 配置后 `/api/v1/altcha/challenge` 可用；`ALTCHA_DIFFICULTY>0`（推荐 `12`，≈4096 次哈希毫秒级）时 fp/report **强制**携带有效 PoW——裸请求 401 + 弱证据计分；`0`（默认）= 仅挑战端点可用、行为不变。签名由服务端签发时绑定 fp，跨指纹重放无效 |
+| `PLAY_INTEGRITY_PACKAGE` / `PLAY_INTEGRITY_SA_JSON` | Play Integrity | APP 包名 + GCP service account JSON 路径（scope playintegrity）。齐备 → `/api/v1/app/attest/verify` 走 Google 主路径；缺失 → 自动支持降级路径（APP 上报签名证书 SHA-256 + ThreatDetect，银标准） |
+| `APP_EXPECTED_CERT_SHA256` / `ATTEST_REQUIRED` | Play Integrity | 期望的 APK 签名证书指纹（逗号分隔，主/降级路径都校验）；`ATTEST_REQUIRED=1` 时无效设备进入只读降级模式（响应携带标志，APP 侧行为）。判定结果存 `ip_fingerprints.attestation` |
 | `TLS_CERT` / `TLS_KEY` | TLS/JA4 | 证书与私钥路径，同时配置 → TLS 模式：HSTS、`gh_id` Secure cookie、**JA4 TLS 指纹捕获**（握手期 ClientHello）。与 `ACME_DOMAIN` 二选一；两者都无 → 纯 HTTP（JA4 核验自动关闭） |
 | `ACME_DOMAIN` | TLS/JA4 | ACME 自动签发域名（逗号分隔，需公网可达 80/443；证书缓存 `data/acme`）。80 端口自动监听 ACME HTTP-01 挑战 |
 | `REDIRECT_HTTP` | TLS/JA4 | `1` = 监听 80 端口把 HTTP 301 到 HTTPS（目标含非 443 端口；ACME 模式无需此开关） |

@@ -29,6 +29,7 @@ type Server struct {
 	Images  *ImageResolver  // 卡片封面 og:image 懒抓取缓存（nil = 不下发图片）
 	Favicons *FaviconService // 信源 favicon 瓦片代理（nil = 无图卡片不回退图标）
 	Probes  ProbeReader   // 健康探针（nil = 未启用，管理端探针页不可用）
+	AttestNonces AttestNonces // P4-1 平台证明 nonce 存储（nil = 未启用，attest 端点 503）
 	TLSMode bool          // P3-1：serve 以 TLS 运行（证书或 ACME）→ HSTS 中间件启用
 	Version string
 }

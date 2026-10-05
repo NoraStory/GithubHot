@@ -125,9 +125,10 @@ type GuardStore interface {
 	ListLSHCandidates(ctx context.Context, fp string, bands []LSHBand, limit int) ([]string, error)
 	ListMinHashSigs(ctx context.Context, fps []string) ([]MinHashSigRow, error)
 	FindFingerprint(ctx context.Context, fp string) (*FingerprintDTO, error)
-	// P2-3 熵权每日刷新；P2-5 IP 档案地理信息补全
+	// P2-3 熵权每日刷新；P2-5 IP 档案地理信息补全；P4-1 平台证明结果写回
 	UpdateEntropyBits(ctx context.Context, fp string, bits float64) error
 	UpdateIPGeo(ctx context.Context, ip string, asn uint, asnType, country, tz string) error
+	UpdateAttestation(ctx context.Context, fp string, attestationJSON string) error
 	FindBan(ctx context.Context, ip string) (*BanDTO, error)
 	BannedAmong(ctx context.Context, ips []string) ([]string, error)
 	UpsertBan(ctx context.Context, ip string, strikes, level int, reason string, duration time.Duration) error
@@ -164,9 +165,8 @@ type FingerprintDTO struct {
 	Stability   float64            // P2-4 整体时间稳定度（0-1）
 	CompStability map[string]float64 // P2-4 各分量稳定度（键 → EWMA，缺失键 = 无历史）
 	JA4         string             // P3-2 TLS 客户端指纹（TLS 模式下捕获；纯 HTTP 为空）
-}
-
-// PHashRowDTO 感知哈希候选行（同源关联扫描）。
+	Attestation string             // P4-1 平台证明结果（原始 JSON，'{}'=未验证）
+}// PHashRowDTO 感知哈希候选行（同源关联扫描）。
 type PHashRowDTO struct {
 	Fingerprint string
 	PHash       string
@@ -942,6 +942,7 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	g.geoEnrich(ctx, ip, ua, meta)
 	// P3-3 UA↔TLS 交叉核验：浏览器 UA 配上已知非浏览器 TLS 栈（curl/Go/Python 等）
 	// 是伪造 header 的硬证据；指纹未知（新客户端/新版本）只记录不计分。
+	// P4-1 平台证明结果由 appattest.go 的 attest 端点独立写入 attestation 列。
 	g.tlsCheck(ctx, ip, ua, meta)
 	// 连坐双因子：干净设备连到被封的共享出口（酒店/机场/运营商 NAT 被前任搞封）
 	// 不算违规，只记低分观察；只有"该指纹名下其他 IP 近期也有劣迹"（代理池轮换

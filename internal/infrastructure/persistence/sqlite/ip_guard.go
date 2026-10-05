@@ -97,7 +97,8 @@ type FingerprintRow struct {
 	Stability   float64            // P2-4 整体稳定度（0-1）
 	CompStabilityJSON string         // P2-4 各分量稳定度（原始 JSON）
 	CompStability     map[string]float64
-	JA4         string             // P3-2 TLS 客户端指纹（TLS 模式下捕获；纯 HTTP 为空）
+	JA4               string // P3-2 TLS 客户端指纹（TLS 模式下捕获；纯 HTTP 为空）
+	AttestationJSON   string // P4-1 平台证明结果（原始 JSON，'{}'=未验证）
 }
 
 // UpsertFingerprint 登记一次指纹上报；返回该指纹历史上出现过的所有 IP。
@@ -201,7 +202,7 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 		var f FingerprintRow
 		var ipsJSON, rtcJSON, compJSON, flagsJSON, first, last string
 		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &rtcJSON, &compJSON, &flagsJSON, &f.UA, &first, &last, &f.Hits,
-			&f.CanvasPHash, &f.MinHashSig, &f.EntropyBits, &f.Stability, &f.CompStabilityJSON, &f.JA4); err != nil {
+			&f.CanvasPHash, &f.MinHashSig, &f.EntropyBits, &f.Stability, &f.CompStabilityJSON, &f.JA4, &f.AttestationJSON); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(ipsJSON), &f.IPs)
@@ -219,7 +220,7 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 }
 
 // fingerprintCols 指纹查询的统一列清单（P2 起含数学指纹与稳定度/熵权列；P3 起含 ja4）。
-const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits, canvas_phash, minhash_sig, entropy_bits, stability, comp_stability, ja4"
+const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits, canvas_phash, minhash_sig, entropy_bits, stability, comp_stability, ja4, attestation"
 
 // ListFingerprints 最近 limit 个活跃指纹。
 func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow, error) {
@@ -403,6 +404,17 @@ func (db *DB) UpdateIPGeo(ctx context.Context, ip string, asn uint, asnType, cou
 		ip, now, now, int(asn), asnType, country, tz)
 	if err != nil {
 		return fmt.Errorf("写 IP 地理: %w", err)
+	}
+	return nil
+}
+
+// UpdateAttestation 写回平台证明结果（P4-1）。
+func (db *DB) UpdateAttestation(ctx context.Context, fp string, attestationJSON string) error {
+	_, err := db.ExecContext(ctx,
+		"UPDATE ip_fingerprints SET attestation = CASE WHEN ? != '' THEN ? ELSE attestation END WHERE fp = ?",
+		attestationJSON, attestationJSON, fp)
+	if err != nil {
+		return fmt.Errorf("写平台证明: %w", err)
 	}
 	return nil
 }

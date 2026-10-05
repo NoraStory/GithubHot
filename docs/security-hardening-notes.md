@@ -15,7 +15,7 @@
 | P1 | 指纹浏览器识别（六路采集 + BotD + 计分接入） | ✅ 完成（2 处按实测调整，见下） | 见 git log `P1` |
 | P2 | 算法升级（pHash / MinHash+LSH / 熵权 / 稳定性 / GeoIP） | ✅ 完成（2 处按实测调整：GeoIP 数据集换 DBIP 系 + maxminddb 读取层；组件集合改前端上报原始清单，见下） | 见 git log `P2-1` / `P2` |
 | P3 | TLS + JA4 协议指纹 | ✅ 完成（2 处按实测调整：JA4 自实现不引 ja4plus；映射表为 FoxIO 样本数据，curl 走自有观测路径，见下） | 见 git log  |
-| P4 | 平台证明与高级项（Play Integrity / passkey / ALTCHA / 图聚类 / 行为采集 / 时钟偏移） | ⏳ 待办 | — |
+| P4 | 平台证明与高级项 | 🔶 批一完成：ALTCHA PoW 全链路 + Play Integrity 服务端（mock 三用例 + 降级路径活体）；批二待办：WebAuthn passkey / 图聚类 / 行为采集 / 时钟偏移 | 见 git log  |
 | P5 | 行为机器学习（标注 / iForest / LR / GBDT / PSI） | ⏳ 待办 | — |
 | P6 | 图算法升级（快照 / Louvain / GNN / MIDAS / 融合） | ⏳ 待办 | — |
 | §10 | 管理端可视化整合（review 队列 / 集群图 / ML 诊断） | ⏳ 待办 | — |
@@ -375,6 +375,48 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
 
 单测：tlsfp 8 例（含官方向量）、ja4db 4 例、httpapi UA↔TLS 4 例（mismatch 灰度/出灰度、
 浏览器 OK、tls_unknown、双降级）；`go test ./...` 18 包全绿、`go vet` 干净、build 通过。
+
+---
+
+## P4 — 平台证明与高级项（批一：ALTCHA + Play Integrity 服务端 ✅）
+
+### P4-3 ALTCHA 工作量证明 ✅
+
+- 域包 `internal/domain/altcha`（自研 ~120 行，无依赖）：challenge = base64url(`expiry:difficulty:salt:hmac`)，
+  hmac = HMAC(secret, salt+expiry)——**payload 内为绝对过期时间戳**（初版用纯时长没有校验锚点，
+  活体前单测即暴露，已改）；客户端暴力 nonce 使 SHA-256(challenge+nonce) 前导零比特 ≥ difficulty。
+- **实测调整（签名语义）**：规格书 "signature=HMAC(fp+gh_id)" 若由客户端计算则无密钥可言
+  （攻击者可自造 fp+签名，绑定形同虚设）→ 改为**服务端签发时计算**（挑战端点带 ?fp=，
+  HMAC 封入 challenge+fp+gh_id，客户端原样回传）——同样实现"防跨指纹重放"且更强，
+  有单测锁死（伪造签名/跨指纹重放均拒）。
+- 端点：GET /api/v1/altcha/challenge?fp=、POST /api/v1/altcha/verify；fp/report 挂钩：
+  `ALTCHA_SECRET` 在位且 `ALTCHA_DIFFICULTY>0` 时强制——裸上报 401 + `altcha-missing` 10 分
+  弱证据；**DIFFICULTY=0（默认）时行为与 PoW 之前完全一致**（灰度纪律：先发前端 altcha.js
+  自动求解，观察后再置 12 启用，与规格"默认 12"的偏离已记录）。
+- 前端 `web/src/lib/altcha.js`：领挑战 → crypto.subtle 暴力求解（difficulty 12 实测 31 次命中
+  平均量级）→ fp/report 自动携带；服务端未启用返回 null 不带字段。npm test 40 例全绿
+  （含 altcha 3 例：难度满足、确定性、超时保护）。
+- 活体（8792 TLS 实例）：裸上报 **401 + 10 分计分** ✓；带 PoW HTTP 200（rtt **8ms**，≪50ms 预算）✓；
+  同解换指纹重放 → 401「signature 与指纹不匹配」✓；关闭（DIFFICULTY=0）→ 裸上报 200 行为不变 ✓。
+
+### P4-1 Play Integrity 服务端 ✅（Android 侧行为契约见规格 §14.8，独立仓库同步）
+
+- 域包 `internal/domain/attest`：nonce 内存消费型存储（32B hex、TTL 10min、绑 gh_id、
+  SHA-256 键防重放）；Google 判定解析评估（纯函数，**规格三用例 mock 单测**：
+  PLAY_RECOGNIZED / UNRECOGNIZED_VERSION（自分发预期，不是拒绝条件）/ requestHash 不符，
+  另含证书集、包名、设备档位满档/半分、10 分钟新鲜度）；降级路径评估
+  （APP 上报签名证书 + ThreatDetect，威胁标记即拒）。
+- 基础设施 `internal/infrastructure/playintegrity`：GCP service account → **自签 RS256 JWT**
+  （stdlib crypto/rsa，无新依赖）→ oauth2 换 token（带过期缓存）→
+  decodeIntegrityToken；出站全走 safehttp。
+- 端点：GET /api/v1/app/attest/challenge（nonce 绑 gh_id）；POST /api/v1/app/attest/verify
+  （主路径 {token} / 降级 {cert_sha256, threat} → {level, valid, reason, attest_required}）。
+  结果 JSON 写回 `ip_fingerprints.attestation`（新列，绑定 X-Device-Fp 指纹；需先有 fp/report
+  归档行）；无效记 `attest-failed` 10 分弱证据；`ATTEST_REQUIRED=1` 响应携带只读降级标志
+  （APP 侧行为契约）。
+- 活体（降级路径，Google 主路径需真 SA + GMS 真机为手动验收项）：challenge 签发 ✓；
+  证书在期望集 → signature_fallback 通过 ✓；证书不符 → valid=false ✓；**nonce 消费后重放
+  → 拒绝** ✓；attestation 列落库 ✓。
 
 ## 已知边界 / 后续项
 

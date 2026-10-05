@@ -34,6 +34,7 @@ type fpPayload struct {
 	Sets        map[string][]string `json:"sets"`         // P2-2 原始清单（fonts/webgl_exts/plugins，可选）
 	TZ          string              `json:"tz"`           // P2-5 客户端 IANA 时区（可选）
 	TZOffsetMin int                 `json:"tz_offset_min"` // P2-5 时区偏移分钟数（可选）
+	Altcha      *altchaSolution     `json:"altcha"`        // P4-3 PoW 解（强制开启时必需；可选字段，旧服务端忽略）
 }
 
 // sanitizePHash 校验客户端上报的感知哈希（P2-1）：必须 hex16，否则丢弃（不关联）。
@@ -177,6 +178,11 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r.Context())
 	defer cancel()
 	ip := clientIPFromRequest(r)
+	// P4-3 ALTCHA PoW：强制开启（ALTCHA_SECRET 在位且 ALTCHA_DIFFICULTY>0）时，
+	// 无有效解的裸上报 401 + 弱证据计分；未启用时行为与 PoW 之前完全一致。
+	if !s.checkAltchaForReport(w, r, ip, p.Fingerprint, p.Altcha) {
+		return
+	}
 
 	// ---- 第三层：服务端环境核验（不依赖客户端自觉上报）----
 	flags := p.Flags
@@ -403,6 +409,12 @@ func parseHours(s string) int {
 // registerIPGuardRoutes 挂防护端点（仅公开上报口；管理端操作端点在 admin.go 的守卫组内）。
 func (s *Server) registerIPGuardRoutes(r chi.Router) {
 	r.Post("/fp/report", s.fpReportAPI)
+	// P4-3 ALTCHA PoW：挑战签发（前端/APP 刷成本用）与独立校验通道。
+	r.Get("/altcha/challenge", s.altchaChallengeAPI)
+	r.Post("/altcha/verify", s.altchaVerifyAPI)
+	// P4-1 平台证明（Play Integrity / 签名降级）
+	r.Get("/app/attest/challenge", s.appAttestChallengeAPI)
+	r.Post("/app/attest/verify", s.appAttestVerifyAPI)
 }
 
 // Store 暴露存储（管理端 handler 用）。

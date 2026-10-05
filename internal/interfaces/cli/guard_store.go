@@ -179,7 +179,7 @@ func toFingerprintDTOs(rows []sqlite.FingerprintRow) []httpapi.FingerprintDTO {
 			FirstSeen: f.FirstSeen, LastSeen: f.LastSeen, Hits: f.Hits,
 			CanvasPHash: f.CanvasPHash, MinHashSig: f.MinHashSig,
 			EntropyBits: f.EntropyBits, Stability: f.Stability, CompStability: f.CompStability,
-			JA4: f.JA4,
+			JA4: f.JA4, Attestation: f.AttestationJSON,
 		})
 	}
 	return out
@@ -230,4 +230,8 @@ func (g guardStore) FindIPProfile(ctx context.Context, ip string) (*httpapi.IPPr
 		IP: p.IP, FirstSeen: p.FirstSeen, LastSeen: p.LastSeen,
 		Reqs: p.Reqs, UASet: p.UASet, UALast: p.UALast,
 	}, nil
+}
+
+func (g guardStore) UpdateAttestation(ctx context.Context, fp string, attestationJSON string) error {
+	return g.db.UpdateAttestation(ctx, fp, attestationJSON)
 }

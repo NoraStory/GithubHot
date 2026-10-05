@@ -209,6 +209,17 @@ func (f *fakeGuardStore) UpdateIPGeo(context.Context, string, uint, string, stri
 	return nil
 }
 
+func (f *fakeGuardStore) UpdateAttestation(_ context.Context, fp string, json string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.fps {
+		if f.fps[i].Fingerprint == fp {
+			f.fps[i].Attestation = json
+		}
+	}
+	return nil
+}
+
 func (f *fakeGuardStore) ListFingerprints(context.Context, int) ([]FingerprintDTO, error) {
 	return nil, nil
 }
