@@ -31,6 +31,7 @@ import AdminStories from './admin/AdminStories.vue'
 import AdminDigests from './admin/AdminDigests.vue'
 import AdminIPGuard from './admin/AdminIPGuard.vue'
 import AdminProbes from './admin/AdminProbes.vue'
+import AdminSystem from './admin/AdminSystem.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -72,7 +73,8 @@ const router = createRouter({
         { path: 'stories', component: AdminStories },
         { path: 'digests', component: AdminDigests },
         { path: 'ipguard', component: AdminIPGuard },
-        { path: 'probes', component: AdminProbes }
+        { path: 'probes', component: AdminProbes },
+        { path: 'system', component: AdminSystem }
       ]
     },
     { path: '/:pathMatch(.*)*', redirect: '/' }
@@ -108,3 +110,4 @@ import { installDevtoolsGuard } from './lib/devtools-guard'
 installDevtoolsGuard()
 
 createApp(App).use(router).mount('#app')
+

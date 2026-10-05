@@ -53,6 +53,8 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 			// 健康探针（最新结果 / 历史 / 立即探测）
 			r.Get("/probes", s.probesAPI)
 			r.Post("/probes/run", s.probesRunAPI)
+			// 资源监测（进程 RSS / CPU / Go 运行时 / sidecar 状态）
+			r.Get("/system/stats", s.systemStatsAPI)
 		})
 	})
 }
