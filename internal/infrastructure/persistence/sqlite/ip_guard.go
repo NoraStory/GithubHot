@@ -91,12 +91,18 @@ type FingerprintRow struct {
 	FirstSeen   time.Time
 	LastSeen    time.Time
 	Hits        int
+	CanvasPHash string             // P2-1 感知哈希（hex16）
+	MinHashSig  string             // P2-2 MinHash 签名（hex）
+	EntropyBits float64            // P2-3 分量熵权（0=未计算）
+	Stability   float64            // P2-4 整体稳定度（0-1）
+	CompStabilityJSON string         // P2-4 各分量稳定度（原始 JSON）
+	CompStability     map[string]float64
 }
 
 // UpsertFingerprint 登记一次指纹上报；返回该指纹历史上出现过的所有 IP。
-// meta：WebRTC IP、分量明细（components）、环境核验命中（flags，做并集累计）、
-// canvasPhash（P2-1 感知哈希）、minhashSig（P2-2 组件集合 MinHash 签名）。
-func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string, components map[string]string, flags []string, canvasPhash, minhashSig string) ([]string, error) {
+// webrtc/components/flags 同前；canvasPhash/minhashSig 为 P2-1/P2-2 数学指纹；
+// stability >= 0 时落库整体稳定度（P2-4），compStabilityJSON 非空时落库各分量稳定度。
+func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string, components map[string]string, flags []string, canvasPhash, minhashSig string, stability float64, compStabilityJSON string) ([]string, error) {
 	row := db.QueryRowContext(ctx,
 		"SELECT ips, ua, hits, webrtc, flags FROM ip_fingerprints WHERE fp = ?", fp)
 	var ipsJSON, oldUA, rtcJSON, flagsJSON string
@@ -152,8 +158,8 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 		ips = []string{ip}
 		b, _ := json.Marshal(ips)
 		_, err = db.ExecContext(ctx,
-			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits, webrtc, components, flags, canvas_phash, minhash_sig) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
-			fp, string(b), ua, now, now, string(rb), string(cb), string(fb), canvasPhash, minhashSig)
+			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits, webrtc, components, flags, canvas_phash, minhash_sig, stability, comp_stability) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+			fp, string(b), ua, now, now, string(rb), string(cb), string(fb), canvasPhash, minhashSig, stability, compStabilityJSON)
 		if err != nil {
 			return nil, fmt.Errorf("写入指纹: %w", err)
 		}
@@ -178,21 +184,22 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 		ua = oldUA
 	}
 	_, err = db.ExecContext(ctx,
-		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1, webrtc = ?, components = ?, flags = ?, canvas_phash = CASE WHEN ? != '' THEN ? ELSE canvas_phash END, minhash_sig = CASE WHEN ? != '' THEN ? ELSE minhash_sig END WHERE fp = ?",
-		string(b), ua, now, string(rb), string(cb), string(fb), canvasPhash, canvasPhash, minhashSig, minhashSig, fp)
+		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1, webrtc = ?, components = ?, flags = ?, canvas_phash = CASE WHEN ? != '' THEN ? ELSE canvas_phash END, minhash_sig = CASE WHEN ? != '' THEN ? ELSE minhash_sig END, stability = CASE WHEN ? >= 0 THEN ? ELSE stability END, comp_stability = CASE WHEN ? != '' THEN ? ELSE comp_stability END WHERE fp = ?",
+		string(b), ua, now, string(rb), string(cb), string(fb), canvasPhash, canvasPhash, minhashSig, minhashSig, stability, stability, compStabilityJSON, compStabilityJSON, fp)
 	if err != nil {
 		return nil, fmt.Errorf("更新指纹: %w", err)
 	}
 	return ips, nil
 }
 
-// scanFingerprintRows 统一扫描指纹查询结果（含 webrtc/components/flags 列）。
+// scanFingerprintRows 统一扫描指纹查询结果（含 webrtc/components/flags 与 P2 数学指纹列）。
 func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 	out := []FingerprintRow{}
 	for rows.Next() {
 		var f FingerprintRow
 		var ipsJSON, rtcJSON, compJSON, flagsJSON, first, last string
-		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &rtcJSON, &compJSON, &flagsJSON, &f.UA, &first, &last, &f.Hits); err != nil {
+		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &rtcJSON, &compJSON, &flagsJSON, &f.UA, &first, &last, &f.Hits,
+			&f.CanvasPHash, &f.MinHashSig, &f.EntropyBits, &f.Stability, &f.CompStabilityJSON); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(ipsJSON), &f.IPs)
@@ -200,6 +207,8 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 		f.Components = map[string]string{}
 		_ = json.Unmarshal([]byte(compJSON), &f.Components)
 		_ = json.Unmarshal([]byte(flagsJSON), &f.Flags)
+		f.CompStability = map[string]float64{}
+		_ = json.Unmarshal([]byte(f.CompStabilityJSON), &f.CompStability)
 		f.FirstSeen, _ = time.Parse(time.RFC3339, first)
 		f.LastSeen, _ = time.Parse(time.RFC3339, last)
 		out = append(out, f)
@@ -207,8 +216,8 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 	return out, rows.Err()
 }
 
-// fingerprintCols 指纹查询的统一列清单。
-const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits"
+// fingerprintCols 指纹查询的统一列清单（P2 起含数学指纹与稳定度/熵权列）。
+const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits, canvas_phash, minhash_sig, entropy_bits, stability, comp_stability"
 
 // ListFingerprints 最近 limit 个活跃指纹。
 func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow, error) {
@@ -254,6 +263,146 @@ func (db *DB) ListPHashCandidates(ctx context.Context, since time.Time, limit in
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// ---------- P2-2 LSH 桶 / P2-3 熵权 / P2-5 IP 地理 ----------
+
+// LSHBandRow LSH 桶定位行（band 号 + 桶键，见 fpmath.Bands 的输出键）。
+type LSHBandRow struct {
+	Band int
+	Hash string
+}
+
+// UpsertLSHBands 重写某指纹的 LSH 桶记录（先删后插，幂等；签名变化时旧桶自动失效）。
+func (db *DB) UpsertLSHBands(ctx context.Context, fp string, bands []LSHBandRow) error {
+	if fp == "" || len(bands) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.ExecContext(ctx, "DELETE FROM fp_lsh_buckets WHERE fp = ?", fp); err != nil {
+		return fmt.Errorf("清空 LSH 桶: %w", err)
+	}
+	for _, b := range bands {
+		if _, err := db.ExecContext(ctx,
+			"INSERT INTO fp_lsh_buckets (band, bucket_hash, fp, created_at) VALUES (?, ?, ?, ?)",
+			b.Band, b.Hash, fp, now); err != nil {
+			return fmt.Errorf("写 LSH 桶: %w", err)
+		}
+	}
+	return nil
+}
+
+// ListLSHCandidates 同带召回：与目标指纹共享任一 LSH 桶的其他指纹（不含自身）。
+func (db *DB) ListLSHCandidates(ctx context.Context, fp string, bands []LSHBandRow, limit int) ([]string, error) {
+	if fp == "" || len(bands) == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	query := "SELECT DISTINCT fp FROM fp_lsh_buckets WHERE fp != ? AND ("
+	args := []any{fp}
+	for i, b := range bands {
+		if i > 0 {
+			query += " OR "
+		}
+		query += "(band = ? AND bucket_hash = ?)"
+		args = append(args, b.Band, b.Hash)
+	}
+	query += ") LIMIT ?"
+	args = append(args, limit)
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("召回 LSH 候选: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var f string
+		if err := rows.Scan(&f); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// MinHashSigRow 候选指纹的 MinHash 签名（LSH 召回后精确 Jaccard 复核用）。
+type MinHashSigRow struct {
+	FP  string
+	Sig string
+}
+
+// ListMinHashSigs 批量取候选指纹的 MinHash 签名（精确 Jaccard 复核用）。
+func (db *DB) ListMinHashSigs(ctx context.Context, fps []string) ([]MinHashSigRow, error) {
+	out := []MinHashSigRow{}
+	if len(fps) == 0 {
+		return out, nil
+	}
+	query := "SELECT fp, minhash_sig FROM ip_fingerprints WHERE minhash_sig != '' AND fp IN ("
+	args := make([]any, 0, len(fps))
+	for i, f := range fps {
+		if i > 0 {
+			query += ","
+		}
+		query += "?"
+		args = append(args, f)
+	}
+	query += ")"
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查 MinHash 签名: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fp, sig string
+		if err := rows.Scan(&fp, &sig); err != nil {
+			return nil, err
+		}
+		out = append(out, MinHashSigRow{FP: fp, Sig: sig})
+	}
+	return out, rows.Err()
+}
+
+// FindFingerprint 查单条指纹档案（稳定性/轮换检测/熵权读取用）；无记录返回 (nil, nil)。
+func (db *DB) FindFingerprint(ctx context.Context, fp string) (*FingerprintRow, error) {
+	rows, err := db.QueryContext(ctx,
+		"SELECT "+fingerprintCols+" FROM ip_fingerprints WHERE fp = ?", fp)
+	if err != nil {
+		return nil, fmt.Errorf("查指纹: %w", err)
+	}
+	defer rows.Close()
+	list, err := scanFingerprintRows(rows)
+	if err != nil || len(list) == 0 {
+		return nil, err
+	}
+	return &list[0], nil
+}
+
+// UpdateEntropyBits 每日 cron 刷新分量熵权（P2-3）。
+func (db *DB) UpdateEntropyBits(ctx context.Context, fp string, bits float64) error {
+	_, err := db.ExecContext(ctx, "UPDATE ip_fingerprints SET entropy_bits = ? WHERE fp = ?", bits, fp)
+	if err != nil {
+		return fmt.Errorf("写熵权: %w", err)
+	}
+	return nil
+}
+
+// UpdateIPGeo 补全 IP 档案的地理/ASN 信息（P2-5）。upsert 语义：第一层档案行是
+// 延迟刷库的，地理核验时刻档案行可能尚不存在——这里直接建档（reqs=0 占位，
+// 后续 TouchIPProfile 的 SELECT-then-INSERT/UPDATE 路径都能正确接管）。
+func (db *DB) UpdateIPGeo(ctx context.Context, ip string, asn uint, asnType, country, tz string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO ip_profiles (ip, first_seen, last_seen, reqs, ua_set, ua_last, asn, asn_type, geo_country, geo_tz)
+		 VALUES (?, ?, ?, 0, '[]', '', ?, ?, ?, ?)
+		 ON CONFLICT(ip) DO UPDATE SET asn = excluded.asn, asn_type = excluded.asn_type,
+		   geo_country = excluded.geo_country, geo_tz = excluded.geo_tz`,
+		ip, now, now, int(asn), asnType, country, tz)
+	if err != nil {
+		return fmt.Errorf("写 IP 地理: %w", err)
+	}
+	return nil
 }
 
 // FPLinkRow 指纹关联边（pHash 同源 / MinHash 相似 / 物理特征 / 时间共现）。

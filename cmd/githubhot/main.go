@@ -43,6 +43,17 @@ func main() {
 		os.Exit(1)
 	}
 	switch os.Args[1] {
+	case "geo":
+		// GeoIP 数据库下载（P2-5）：不依赖完整配置，先于 config.Load 处理。
+		if len(os.Args) >= 3 && os.Args[2] == "download" {
+			if err := cli.GeoDownload(os.Args[3:]); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		fmt.Fprintln(os.Stderr, "用法: githubhot geo download")
+		os.Exit(2)
 	case "run":
 		if err := cli.Run(cfg); err != nil {
 			fmt.Fprintf(os.Stderr, "流水线失败: %v\n", err)
@@ -105,6 +116,7 @@ func usage() {
   githubhot bench    SelectBench 精选校准：--file data/gold.jsonl
   githubhot push     脚本推送资料：--source script-push --url ... --title ...
   githubhot admin    管理端工具：admin hash [密码] 生成 Argon2id 哈希；admin seed 生成 APP 签名种子
+  githubhot geo      GeoIP 数据：geo download 下载 ip-location-db 国家/ASN 库（P2-5，CC BY 4.0）
   githubhot version  版本号
 
 配置: 见 .env.example（LLM_API_KEY 必选；GITHUB_TOKEN 建议配置）`)

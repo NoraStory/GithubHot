@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -27,9 +28,12 @@ type fpPayload struct {
 	Flags       []string          `json:"flags"`      // 第三层环境核验命中项
 	Renderer    string            `json:"renderer"`
 	Screen      string            `json:"screen"`
-	Coherent    bool              `json:"coherent"` // 旧客户端兼容：UA 与 platform 一致性
+	Coherent    bool              `json:"coherent"`     // 旧客户端兼容：UA 与 platform 一致性
 	CanvasPHash string            `json:"canvas_phash"` // P2-1 64bit 感知哈希（hex16，可选）
-	MinHashSig  string            `json:"minhash_sig"`  // P2-2 组件集合 MinHash 签名（hex，可选）
+	MinHashSig  string            `json:"minhash_sig"`  // 已废弃：签名改由服务端计算（客户端值不采信，防 LSH 桶投毒）
+	Sets        map[string][]string `json:"sets"`         // P2-2 原始清单（fonts/webgl_exts/plugins，可选）
+	TZ          string              `json:"tz"`           // P2-5 客户端 IANA 时区（可选）
+	TZOffsetMin int                 `json:"tz_offset_min"` // P2-5 时区偏移分钟数（可选）
 }
 
 // sanitizePHash 校验客户端上报的感知哈希（P2-1）：必须 hex16，否则丢弃（不关联）。
@@ -44,14 +48,41 @@ func sanitizePHash(s string) string {
 	return s
 }
 
-// sanitizeMinHash 校验客户端上报的 MinHash 签名（P2-2）：hex 长度受限，否则丢弃。
-func sanitizeMinHash(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	if len(s) == 0 || len(s) > 256 {
+// sanitizeSets 清洗原始清单（P2-2）：仅认 fonts/webgl_exts/plugins 三个键，
+// 每键最多 64 项、单项 ≤ 64 字节，防伪造超大清单撑爆签名计算与存储。
+func sanitizeSets(in map[string][]string) map[string][]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := map[string][]string{}
+	for _, key := range []string{"fonts", "webgl_exts", "plugins"} {
+		for _, v := range in[key] {
+			v = strings.TrimSpace(v)
+			if v == "" || len(v) > 64 {
+				continue
+			}
+			if len(out[key]) >= 64 {
+				break
+			}
+			out[key] = append(out[key], v)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// sanitizeTZ 清洗客户端 IANA 时区名（P2-5）：长度受限、仅允许时区名的合法字符。
+func sanitizeTZ(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 64 {
 		return ""
 	}
 	for _, r := range s {
-		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+		ok := r == '/' || r == '_' || r == '-' || r == '+' ||
+			(r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		if !ok {
 			return ""
 		}
 	}
@@ -189,14 +220,22 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 		Components:  sanitizeComponents(p.Components),
 		Flags:       flags,
 		CanvasPHash: sanitizePHash(p.CanvasPHash),
-		MinHashSig:  sanitizeMinHash(p.MinHashSig),
+		Sets:        sanitizeSets(p.Sets),
+		TZ:          sanitizeTZ(p.TZ),
+		TZOffsetMin: p.TZOffsetMin,
 	}
 	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, meta)
 	// 每个命中项记违规事件（积分见 flagScore）。
 	// kind 按 flag 细分（env-flag:<flag>）：使不同命中项成为**独立证据**参与互证，
 	// 同时让 5 分钟去重按 flag 粒度生效——否则多条 flag 会被压成同一条事件。
+	// P2-3 熵值加权：违规分 × min(1, entropy_bits/40)——大众配置（低熵）只计分
+	// 不硬封，罕见组合（高熵）足额计分；熵权未算（0）时系数为 1，行为不变。
+	factor := s.Guard.EntropyFactor(ctx, p.Fingerprint)
 	for _, f := range flags {
 		score, severe := detectFlagScore(f)
+		if factor < 1 && score > 0 {
+			score = int(math.Round(float64(score) * factor))
+		}
 		s.Guard.Event(ctx, ip, "env-flag:"+f, "环境核验命中 "+f, score, severe)
 	}
 	writeJSON(w, 200, out)

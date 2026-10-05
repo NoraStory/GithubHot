@@ -187,15 +187,30 @@ func TestSanitizePHash(t *testing.T) {
 	}
 }
 
-// TestSanitizeMinHash 上报字段清洗：只允许 hex，长度受限。
-func TestSanitizeMinHash(t *testing.T) {
-	if got := sanitizeMinHash("AbCd12"); got != "abcd12" {
-		t.Fatalf("应小写化，实际 %q", got)
+// TestClientMinHashSigIgnored P2-2 收紧后客户端自报签名不采信（防 LSH 桶投毒）：
+// 签名一律由服务端从原始清单计算，payload 里的 minhash_sig 字段即使合法 hex 也被忽略。
+func TestClientMinHashSigIgnored(t *testing.T) {
+	t.Setenv("IP_GUARD_ENABLED", "1")
+	store := newFakeStore()
+	s := &Server{Guard: NewIPGuard(store)}
+	body := `{"fp":"fp-clientsig-0000000001","flags":[],` +
+		`"minhash_sig":"deadbeefdeadbeefdeadbeefdeadbeef",` +
+		`"sets":{"fonts":["Arial","Consolas"]}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/fp/report", strings.NewReader(body))
+	req.RemoteAddr = "198.51.100.31:4444"
+	rec := httptest.NewRecorder()
+	s.fpReportAPI(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("上报应 200，实际 %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := sanitizeMinHash("xyz"); got != "" {
-		t.Fatalf("非 hex 应丢弃，实际 %q", got)
+	row, err := store.FindFingerprint(context.Background(), "fp-clientsig-0000000001")
+	if err != nil || row == nil {
+		t.Fatalf("指纹未入库: %v", err)
 	}
-	if got := sanitizeMinHash(strings.Repeat("a", 300)); got != "" {
-		t.Fatalf("超长应丢弃，实际长度 %d", len(got))
+	if row.MinHashSig == "" || row.MinHashSig == "deadbeefdeadbeefdeadbeefdeadbeef" {
+		t.Fatalf("落库签名应为服务端计算值，实际 %q", row.MinHashSig)
+	}
+	if len(row.MinHashSig) != 128*16 {
+		t.Fatalf("签名长度 %d，应为 %d", len(row.MinHashSig), 128*16)
 	}
 }

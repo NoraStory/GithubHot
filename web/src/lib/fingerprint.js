@@ -55,12 +55,13 @@ async function canvasFp() {
 }
 
 // WebGL 指纹：厂商/显卡（UNMASKED）、扩展列表、着色精度、最大纹理。
-// 返回 {hash, renderer}：renderer 原文入档案，便于管理端直接辨认显卡型号。
+// 返回 {hash, renderer, exts}：renderer 原文入档案便于管理端辨认显卡型号；
+// exts（P2-2）随 sets 上报，服务端算 MinHash 签名做组件集合关联。
 function webglInfo() {
   try {
     const c = document.createElement('canvas')
     const gl = c.getContext('webgl') || c.getContext('experimental-webgl')
-    if (!gl) return { hash: '', renderer: '' }
+    if (!gl) return { hash: '', renderer: '', exts: [] }
     const dbg = gl.getExtension('WEBGL_debug_renderer_info')
     const vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR)
     const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)
@@ -68,8 +69,8 @@ function webglInfo() {
     const prec = gl.getShaderPrecisionFormat(gl.VERTEX_SHADER, gl.HIGH_FLOAT)
     const raw = [vendor, renderer, exts.join(','), gl.getParameter(gl.MAX_TEXTURE_SIZE),
       gl.getParameter(gl.MAX_VERTEX_ATTRIBS), prec ? `${prec.precision}/${prec.rangeMin}/${prec.rangeMax}` : ''].join('|')
-    return { hash: raw, renderer: String(renderer || '') }
-  } catch { return { hash: '', renderer: '' } }
+    return { hash: raw, renderer: String(renderer || ''), exts: exts.map(String) }
+  } catch { return { hash: '', renderer: '', exts: [] } }
 }
 
 async function webglFp() {
@@ -97,7 +98,8 @@ async function audioFp() {
   } catch { return '' }
 }
 
-// 字体枚举指纹：探测常见中英文字体的实际渲染宽度差异（像素级）
+// 字体枚举指纹：探测常见中英文字体的实际渲染宽度差异（像素级）。
+// 返回 {hash, detected}：detected（P2-2）是实测存在的字体清单，随 sets 上报。
 async function fontsFp() {
   try {
     const base = ['monospace', 'sans-serif', 'serif']
@@ -116,8 +118,8 @@ async function fontsFp() {
       const w = x.measureText(text).width
       if (Math.abs(w - baseW[0]) > 0.5) detected.push(f)
     }
-    return await sha256('fonts:' + detected.join(','))
-  } catch { return '' }
+    return { hash: await sha256('fonts:' + detected.join(',')), detected }
+  } catch { return { hash: '', detected: [] } }
 }
 
 // 环境核验（第三层）：返回命中项列表；空数组 = 环境自洽。
@@ -200,6 +202,17 @@ function envSignals() {
   ].join('|')
 }
 
+// 已安装插件清单（P2-2 sets 输入；无插件接口/被禁用时为空数组）。
+function pluginsList() {
+  try {
+    const ps = navigator.plugins
+    if (!ps || !ps.length) return []
+    const out = []
+    for (let i = 0; i < ps.length && i < 32; i++) out.push(String(ps[i].name || ''))
+    return out.filter(Boolean)
+  } catch { return [] }
+}
+
 // detectFlags 汇总 P1 检测族命中项（单项失败/超时都降级为空，绝不阻塞上报）。
 // 灰度纪律：这些 flag 服务端默认只记录不计分（FP_SCORE_SHADOW），先看假阳性率再决定计分。
 async function detectFlags() {
@@ -227,18 +240,28 @@ export async function reportFingerprint() {
     if (sessionStorage.getItem(REPORTED_KEY)) return
     const [canvas, webgl, rtc, audio, fonts] = await Promise.all(
       [canvasFp(), webglFp(), webrtcIPs(), audioFp(), fontsFp()])
-    const fp = await sha256([canvas.hash, webgl.hash, audio, fonts, envSignals()].join('~'))
+    const fp = await sha256([canvas.hash, webgl.hash, audio, fonts.hash, envSignals()].join('~'))
     try { localStorage.setItem(FP_KEY, fp) } catch {}
     const flags = [...envAudit(), ...await detectFlags()]
+    // P2-5 时区：IANA 名 + 偏移分钟（服务端与 IP 归属国做跨洲核验）
+    let tz = ''
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '' } catch {}
     const res = await fetch('/api/v1/fp/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        fp, canvas: canvas.hash, webgl: webgl.hash, audio, fonts, webrtc: rtc,
+        fp, canvas: canvas.hash, webgl: webgl.hash, audio, fonts: fonts.hash, webrtc: rtc,
         renderer: webgl.renderer, screen: screen.width + 'x' + screen.height,
         canvas_phash: canvas.phash,   // P2-1 感知哈希（可选字段，旧服务端忽略）
+        sets: {                        // P2-2 原始清单：服务端算 MinHash 签名（可选字段）
+          fonts: fonts.detected,
+          webgl_exts: webgl.exts,
+          plugins: pluginsList()
+        },
+        tz,                            // P2-5（可选字段，旧服务端忽略）
+        tz_offset_min: -new Date().getTimezoneOffset(),
         components: {
-          canvas: canvas.hash, webgl: webgl.hash, audio, fonts,
+          canvas: canvas.hash, webgl: webgl.hash, audio, fonts: fonts.hash,
           screen: screen.width + 'x' + screen.height,
           renderer: webgl.renderer,
           dpr: String(window.devicePixelRatio)   // 软信号：不参与身份哈希

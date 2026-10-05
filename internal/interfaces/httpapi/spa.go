@@ -36,15 +36,12 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 		}
 		// 磁盘没有该文件 → 继续走 embed（兼容旧部署）
 	}
-	// APP 安装包直出 + IP 防护：已封禁 IP 一律 403；每 IP 限频（10 分钟 5 次），
-	// 超限 429 并按违规事件计入 IP 守护积分体系（累计到线自动封禁）。
+	// APP 安装包直出 + IP 防护：每 IP 限频（10 分钟 5 次），超限 429 并按违规事件
+	// 计入 IP 守护积分体系（累计到线自动封禁）。封禁 IP 到不了这里——IPGuard
+	// 中间件对封禁 IP 已全站 404（含 /app/），无需重复判封。
 	if strings.HasPrefix(p, "app/") {
 		if s.Guard != nil {
 			ip := clientIPFromRequest(r)
-			if s.Guard.isBanned(r.Context(), ip) {
-				writeJSON(w, 403, map[string]any{"error": "banned"})
-				return
-			}
 			if r.Method != http.MethodHead && !appDlAllow(ip, time.Now()) {
 				s.Guard.event(r.Context(), ip, "app-download-flood", "APP 安装包下载过于频繁", 2, false)
 				writeJSON(w, 429, map[string]any{"error": "rate limited"})

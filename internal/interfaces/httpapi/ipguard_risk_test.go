@@ -12,12 +12,20 @@ import (
 
 // fakeGuardStore 内存版 GuardStore（集成测试用，无 SQLite 依赖）。
 type fakeGuardStore struct {
-	mu     sync.Mutex
-	events []IPEventDTO
-	bans   map[string]*BanDTO
-	fps    []FingerprintDTO
+	mu      sync.Mutex
+	events  []IPEventDTO
+	bans    map[string]*BanDTO
+	fps     []FingerprintDTO
 	phashes []PHashRowDTO
 	links   []FPLinkDTO
+	lsh     []lshRow // P2-2 LSH 桶（fp × band × hash）
+}
+
+// lshRow 一条 LSH 桶记录。
+type lshRow struct {
+	fp   string
+	band int
+	hash string
 }
 
 func newFakeStore() *fakeGuardStore { return &fakeGuardStore{bans: map[string]*BanDTO{}} }
@@ -74,9 +82,129 @@ func (f *fakeGuardStore) ListIPEventsByIP(_ context.Context, ip string, limit in
 	return tail(out, limit), nil
 }
 
-func (f *fakeGuardStore) UpsertFingerprint(context.Context, string, string, string, FingerprintMeta) ([]string, error) {
-	return []string{}, nil
+// UpsertFingerprint 内存版指纹登记：合并 ips、按 meta 落 components/phash/签名/稳定度。
+func (f *fakeGuardStore) UpsertFingerprint(_ context.Context, fp, ip, ua string, meta FingerprintMeta) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.fps {
+		if f.fps[i].Fingerprint == fp {
+			known := false
+			for _, x := range f.fps[i].IPs {
+				if x == ip {
+					known = true
+					break
+				}
+			}
+			if !known {
+				f.fps[i].IPs = append(f.fps[i].IPs, ip)
+			}
+			if ua != "" {
+				f.fps[i].UA = ua
+			}
+			if meta.Components != nil {
+				f.fps[i].Components = meta.Components
+			}
+			if meta.CanvasPHash != "" {
+				f.fps[i].CanvasPHash = meta.CanvasPHash
+			}
+			if meta.MinHashSig != "" {
+				f.fps[i].MinHashSig = meta.MinHashSig
+			}
+			f.fps[i].Stability = meta.Stability
+			f.fps[i].CompStability = meta.CompStability
+			f.fps[i].LastSeen = time.Now()
+			return f.fps[i].IPs, nil
+		}
+	}
+	f.fps = append(f.fps, FingerprintDTO{
+		Fingerprint: fp, IPs: []string{ip}, UA: ua,
+		Components: meta.Components, CanvasPHash: meta.CanvasPHash, MinHashSig: meta.MinHashSig,
+		Stability: meta.Stability, CompStability: meta.CompStability,
+		FirstSeen: time.Now(), LastSeen: time.Now(),
+	})
+	return []string{ip}, nil
 }
+
+func (f *fakeGuardStore) FindFingerprint(_ context.Context, fp string) (*FingerprintDTO, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.fps {
+		if f.fps[i].Fingerprint == fp {
+			cp := f.fps[i]
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeGuardStore) UpsertLSHBands(_ context.Context, fp string, bands []LSHBand) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	keep := f.lsh[:0]
+	for _, r := range f.lsh {
+		if r.fp != fp {
+			keep = append(keep, r)
+		}
+	}
+	f.lsh = keep
+	for _, b := range bands {
+		f.lsh = append(f.lsh, lshRow{fp: fp, band: b.Band, hash: b.Hash})
+	}
+	return nil
+}
+
+func (f *fakeGuardStore) ListLSHCandidates(_ context.Context, fp string, bands []LSHBand, limit int) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	seen := map[string]bool{}
+	out := []string{}
+	for _, r := range f.lsh {
+		if r.fp == fp || seen[r.fp] {
+			continue
+		}
+		for _, b := range bands {
+			if r.band == b.Band && r.hash == b.Hash {
+				seen[r.fp] = true
+				out = append(out, r.fp)
+				break
+			}
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (f *fakeGuardStore) ListMinHashSigs(_ context.Context, fps []string) ([]MinHashSigRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []MinHashSigRow{}
+	for _, fp := range fps {
+		for i := range f.fps {
+			if f.fps[i].Fingerprint == fp && f.fps[i].MinHashSig != "" {
+				out = append(out, MinHashSigRow{FP: fp, Sig: f.fps[i].MinHashSig})
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeGuardStore) UpdateEntropyBits(_ context.Context, fp string, bits float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.fps {
+		if f.fps[i].Fingerprint == fp {
+			f.fps[i].EntropyBits = bits
+		}
+	}
+	return nil
+}
+
+func (f *fakeGuardStore) UpdateIPGeo(context.Context, string, uint, string, string, string) error {
+	return nil
+}
+
 func (f *fakeGuardStore) ListFingerprints(context.Context, int) ([]FingerprintDTO, error) {
 	return nil, nil
 }

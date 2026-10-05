@@ -6,7 +6,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/NoraStory/GithubHot/internal/domain/fpmath"
 	"github.com/NoraStory/GithubHot/internal/domain/iprisk"
+	"github.com/NoraStory/GithubHot/internal/infrastructure/geoip"
 )
 
 // ---------- 三层 IP 身份识别体系 ----------
@@ -74,11 +77,32 @@ const (
 	phashLinkWindow    = 30 * 24 * time.Hour
 	phashCandidateLimit = 2000
 
+	// P2-2 MinHash+LSH：签名 128 位 = 16 带 × 8 行；召回上限与精确 Jaccard 关联阈值
+	minhashCandidateLimit = 200
+	minhashJaccardMin     = 0.8
+	// P2-3 熵值加权：封禁触发系数 = min(1, entropy_bits/40)；每日刷新窗口与行数上限
+	entropyFactorBits = 40.0
+	entropyWindow     = 30 * 24 * time.Hour
+	entropyMaxRows    = 20000
+	// P2-4 稳定性 EWMA（α=0.3）与"历史稳定"判定线
+	stabilityAlpha     = 0.3
+	stabilityStableMin = 0.7
+	rotationOldMinAge  = time.Hour
+	// P2-5 GeoIP 计分项（灰度期 FP_SCORE_SHADOW 下全部 0 分只记录）
+	geoTZMismatchScore      = 10
+	geoHostingMobileUAScore = 15
+	// P2-4 轮换检测计分（换脸实锤：稳定分量突变 + 数学指纹关联旧指纹）
+	rotationDetectedScore = 25
+
 	// 握手通道专用限流：/api/v1/site/config 免签（APP 冷启动要从这里拿远程封禁 /
 	// 强制更新策略）且会触发指纹归档写库，必须自己限流，否则可被无限重放。
 	handshakePath        = "/api/v1/site/config"
 	handshakeRateDefault = 30 // req/min/ip
 )
+
+// rotationWatchKeys P2-4 轮换检测的设备级稳定分量（字体清单/显卡标识——
+// 正常驱动漂移不会动它们；切片不能进 const 块）。
+var rotationWatchKeys = []string{"fonts", "webgl", "renderer"}
 
 // GuardStore 防护存储端口（sqlite.DB 实现，cli 层适配）。
 type GuardStore interface {
@@ -93,6 +117,14 @@ type GuardStore interface {
 	ListPHashCandidates(ctx context.Context, since time.Time, limit int) ([]PHashRowDTO, error)
 	UpsertFPLink(ctx context.Context, src, dst, kind string, weight float64) error
 	ListFPLinks(ctx context.Context, fp string, limit int) ([]FPLinkDTO, error)
+	// P2-2 LSH 桶读写与候选召回；FindFingerprint 供稳定性/轮换/熵权读取单条档案
+	UpsertLSHBands(ctx context.Context, fp string, bands []LSHBand) error
+	ListLSHCandidates(ctx context.Context, fp string, bands []LSHBand, limit int) ([]string, error)
+	ListMinHashSigs(ctx context.Context, fps []string) ([]MinHashSigRow, error)
+	FindFingerprint(ctx context.Context, fp string) (*FingerprintDTO, error)
+	// P2-3 熵权每日刷新；P2-5 IP 档案地理信息补全
+	UpdateEntropyBits(ctx context.Context, fp string, bits float64) error
+	UpdateIPGeo(ctx context.Context, ip string, asn uint, asnType, country, tz string) error
 	FindBan(ctx context.Context, ip string) (*BanDTO, error)
 	BannedAmong(ctx context.Context, ips []string) ([]string, error)
 	UpsertBan(ctx context.Context, ip string, strikes, level int, reason string, duration time.Duration) error
@@ -123,8 +155,11 @@ type FingerprintDTO struct {
 	FirstSeen   time.Time
 	LastSeen    time.Time
 	Hits        int
-	CanvasPHash string // P2-1 感知哈希（hex16）
-	MinHashSig  string // P2-2 组件集合 MinHash 签名（hex）
+	CanvasPHash string             // P2-1 感知哈希（hex16）
+	MinHashSig  string             // P2-2 组件集合 MinHash 签名（hex）
+	EntropyBits float64            // P2-3 分量熵权（信息量 bit，每日 cron 刷新；0=未计算）
+	Stability   float64            // P2-4 整体时间稳定度（0-1）
+	CompStability map[string]float64 // P2-4 各分量稳定度（键 → EWMA，缺失键 = 无历史）
 }
 
 // PHashRowDTO 感知哈希候选行（同源关联扫描）。
@@ -132,6 +167,18 @@ type PHashRowDTO struct {
 	Fingerprint string
 	PHash       string
 	LastSeen    time.Time
+}
+
+// MinHashSigRow 候选指纹的 MinHash 签名（LSH 召回后精确 Jaccard 用）。
+type MinHashSigRow struct {
+	FP  string
+	Sig string
+}
+
+// LSHBand 一条 LSH 桶定位（band 号 + 桶键，见 fpmath.Bands）。
+type LSHBand struct {
+	Band int
+	Hash string
 }
 
 // FPLinkDTO 指纹关联边。
@@ -143,11 +190,16 @@ type FPLinkDTO struct {
 
 // FingerprintMeta 指纹上报的附带信息（WebRTC IP、分量明细、环境核验命中、P2 数学指纹）。
 type FingerprintMeta struct {
-	Webrtc     []string
-	Components map[string]string
-	Flags      []string
-	CanvasPHash string // P2-1 64bit 感知哈希（hex16），可选
-	MinHashSig  string // P2-2 组件集合 MinHash 签名（hex），可选
+	Webrtc      []string
+	Components  map[string]string
+	Flags       []string
+	CanvasPHash string             // P2-1 64bit 感知哈希（hex16），可选
+	MinHashSig  string             // P2-2 组件集合 MinHash 签名（hex），可选（服务端计算）
+	Sets        map[string][]string // P2-2 原始清单（fonts/webgl_exts/plugins，仅用于算签名，不入库）
+	TZ          string              // P2-5 客户端 IANA 时区（Asia/Shanghai），可选
+	TZOffsetMin int                 // P2-5 客户端时区偏移（分钟，东八区=480），可选
+	Stability   float64             // P2-4 整体稳定度（引擎计算后随 upsert 落库）
+	CompStability map[string]float64 // P2-4 各分量稳定度（引擎计算后随 upsert 落库）
 }
 type BanDTO struct {
 	IP        string
@@ -191,10 +243,18 @@ type ipWindow struct {
 	hsTimes   []time.Time // 握手通道请求时间（独立 60s 窗口，见 handshakeAllow）
 }
 
+// GeoProvider P2-5 地理数据源（geoip.Service 实现；测试可注入 stub）。
+type GeoProvider interface {
+	Enabled() bool
+	Country(ip net.IP) string
+	ASN(ip net.IP) (uint, string)
+}
+
 // IPGuard 防护引擎。
 type IPGuard struct {
 	store GuardStore
 	key   []byte // HMAC 密钥
+	geo   GeoProvider
 
 	enabled    bool
 	localOK    bool // 回环/内网放行
@@ -219,6 +279,7 @@ type banCacheEntry struct {
 }
 
 // NewIPGuard 构建引擎；secret 为空时进程内随机生成（重启后旧令牌失效）。
+// GeoIP 数据库文件缺失时地理核验整体降级（规格书 P2-5：不报错不阻塞）。
 func NewIPGuard(store GuardStore) *IPGuard {
 	secret := os.Getenv("IP_GUARD_SECRET")
 	key := []byte(secret)
@@ -226,9 +287,11 @@ func NewIPGuard(store GuardStore) *IPGuard {
 		key = make([]byte, 32)
 		_, _ = rand.Read(key)
 	}
-	return &IPGuard{
+	countryPath, asnPath := geoip.DefaultPaths()
+	g := &IPGuard{
 		store:        store,
 		key:          key,
+		geo:          geoip.Open(countryPath, asnPath),
 		enabled:      os.Getenv("IP_GUARD_ENABLED") != "0",
 		localOK:      os.Getenv("IP_GUARD_LOCAL") != "0",
 		windows:      map[string]*ipWindow{},
@@ -240,6 +303,10 @@ func NewIPGuard(store GuardStore) *IPGuard {
 		whitelist:    map[string]time.Time{},
 		fpColl:       newFPCollision(),
 	}
+	if g.geo.Enabled() {
+		log.Printf("[ipguard] GeoIP 已启用（%s）", countryPath)
+	}
+	return g
 }
 
 // isLocalIP 回环/内网判定。
@@ -483,11 +550,13 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 		local := g.localOK && isLocalIP(ip)
 
 		// ① 封禁检查：全站 404。
-		// 例外：回环/内网、管理端白名单会话、管理端 ipguard 端点（放行给
-		// 后面的 adminAuth，保证被封管理员有自救解封通道，又不给攻击者任何
-		// 未授权入口）。
+		// 例外：/healthz（存活探针必须始终如实应答，否则外部监控把"已封禁"
+		// 误报成"站点宕机"）、回环/内网、管理端白名单会话、管理端 ipguard
+		// 端点（放行给后面的 adminAuth，保证被封管理员有自救解封通道，又不给
+		// 攻击者任何未授权入口）。
 		if g.isBanned(ctx, ip) {
-			if local || g.isWhitelisted(ip) || strings.HasPrefix(r.URL.Path, "/api/v1/admin/ipguard/") ||
+			if local || g.isWhitelisted(ip) || r.URL.Path == "/healthz" ||
+				strings.HasPrefix(r.URL.Path, "/api/v1/admin/ipguard/") ||
 				strings.HasPrefix(r.URL.Path, "/api/v1/admin/probes") ||
 				strings.HasPrefix(r.URL.Path, "/api/v1/admin/system/") {
 				next.ServeHTTP(w, r)
@@ -774,6 +843,17 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	}
 	local := g.localOK && isLocalIP(ip)
 
+	// P2-2 服务端计算 MinHash 签名：原始清单（字体/扩展/插件）进签名，客户端自报的
+	// 签名一律不采信——否则可伪造签名投毒 LSH 桶，把任意指纹关联到一起。
+	meta.MinHashSig = g.computeMinHashSig(meta.Sets)
+	meta.Sets = nil // 清单仅用于算签名，不入库
+
+	// P2-4 时间稳定性 EWMA：需要旧档案的分量与各键稳定度，先取后写。
+	old, _ := g.store.FindFingerprint(ctx, fp)
+	if old != nil && len(meta.Components) > 0 {
+		meta.Stability, meta.CompStability = computeStability(old.Components, old.CompStability, meta.Components)
+	}
+
 	// 上报限频：12 次/分钟
 	g.mu.Lock()
 	now := time.Now()
@@ -811,6 +891,15 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	// pHash 汉明距离近的指纹其实是同一台设备 → 记关联边（P4-4 聚类、P2-4 轮换检测的依据）。
 	// 只记关联不计分（相似本身不是违规，且同型号设备有一定重合概率，交由图聚类判断）。
 	g.linkByPHash(ctx, ip, fp, meta.CanvasPHash)
+	// P2-2 MinHash+LSH 组件集合关联：抗"组件轮换"——字体/扩展/插件清单高度重合的
+	// 指纹经 LSH 桶召回 + 精确 Jaccard > 0.8 复核后视为同源。只关联不计分，同上。
+	g.linkByMinHash(ctx, ip, fp, meta.MinHashSig)
+	// P2-4 换脸轮换检测：稳定分量（字体/显卡）历史稳定却在本指纹上突变，且数学指纹
+	// 关联到旧指纹 → "刻意换身份"实锤。受 FP_SCORE_SHADOW 灰度控制。
+	g.checkRotation(ctx, ip, fp, meta)
+	// P2-5 GeoIP 交叉核验：时区↔IP 归属国跨洲矛盾、机房 ASN + 移动端 UA 组合。
+	// 数据库缺失时整体降级（NewIPGuard 已处理），命中项受灰度控制。
+	g.geoEnrich(ctx, ip, ua, meta)
 	// 连坐双因子：干净设备连到被封的共享出口（酒店/机场/运营商 NAT 被前任搞封）
 	// 不算违规，只记低分观察；只有"该指纹名下其他 IP 近期也有劣迹"（代理池轮换
 	// 特征）才升级封禁。防误封核心：身份信号必须与设备劣迹叠加。
@@ -873,6 +962,297 @@ func (g *IPGuard) linkByPHash(ctx context.Context, ip, fp, phash string) {
 	}
 }
 
+// computeMinHashSig 由原始清单构建元素集合并计算 MinHash 签名（hex，128×16 字符）。
+// 清单为空/非法 → 返回空串（该指纹不参与 MinHash 关联）。
+func (g *IPGuard) computeMinHashSig(sets map[string][]string) string {
+	if len(sets) == 0 {
+		return ""
+	}
+	items := make([]string, 0, 64)
+	for _, key := range []string{"fonts", "webgl_exts", "plugins"} {
+		for _, v := range sets[key] {
+			v = strings.TrimSpace(v)
+			if v == "" || len(v) > 64 {
+				continue
+			}
+			items = append(items, key+":"+v) // 键名进元素，避免跨清单同名值互撞
+			if len(items) >= 192 {
+				break
+			}
+		}
+	}
+	if len(items) == 0 {
+		return ""
+	}
+	sig := fpmath.NewMinHash(fpmath.MinHashK).Signature(items)
+	var b strings.Builder
+	b.Grow(len(sig) * 16)
+	buf := make([]byte, 8)
+	for _, v := range sig {
+		for i := 0; i < 8; i++ {
+			buf[i] = byte(v >> (8 * (7 - i)))
+		}
+		b.WriteString(hex.EncodeToString(buf[:]))
+	}
+	return b.String()
+}
+
+// decodeMinHashSig hex 签名 → []uint64；长度非法返回 nil。
+func decodeMinHashSig(s string) []uint64 {
+	b, err := hex.DecodeString(s)
+	if err != nil || len(b) == 0 || len(b)%8 != 0 {
+		return nil
+	}
+	out := make([]uint64, len(b)/8)
+	for i := range out {
+		var v uint64
+		for j := 0; j < 8; j++ {
+			v = v<<8 | uint64(b[i*8+j])
+		}
+		out[i] = v
+	}
+	return out
+}
+
+// linkByMinHash MinHash+LSH 组件集合关联（P2-2）：
+// 1) 当前签名写 16 个 LSH 桶（先删后插，签名变化自动失效旧桶）；
+// 2) 同带召回候选；3) 候选逐个取旧签名精确算 Jaccard，> 0.8 写关联边（kind=minhash）。
+// 只关联不计分，理由同 pHash（P2-1）。
+func (g *IPGuard) linkByMinHash(ctx context.Context, ip, fp, sigHex string) {
+	if sigHex == "" || g.store == nil {
+		return
+	}
+	sig := decodeMinHashSig(sigHex)
+	if len(sig) != fpmath.MinHashK {
+		return
+	}
+	keys := fpmath.Bands(sig, fpmath.LSHBands, fpmath.LSHRows)
+	bands := make([]LSHBand, 0, len(keys))
+	for i, k := range keys {
+		bands = append(bands, LSHBand{Band: i, Hash: k})
+	}
+	if err := g.store.UpsertLSHBands(ctx, fp, bands); err != nil {
+		log.Printf("[ipguard] LSH 桶写入失败: %v", err)
+		return
+	}
+	cands, err := g.store.ListLSHCandidates(ctx, fp, bands, minhashCandidateLimit)
+	if err != nil {
+		log.Printf("[ipguard] LSH 候选召回失败: %v", err)
+		return
+	}
+	if len(cands) == 0 {
+		return
+	}
+	rows, err := g.store.ListMinHashSigs(ctx, cands)
+	if err != nil {
+		log.Printf("[ipguard] 候选签名读取失败: %v", err)
+		return
+	}
+	linked := 0
+	best := 0.0
+	for _, r := range rows {
+		if r.FP == fp {
+			continue
+		}
+		other := decodeMinHashSig(r.Sig)
+		if other == nil {
+			continue
+		}
+		j := fpmath.JaccardEstimate(sig, other)
+		if j <= minhashJaccardMin {
+			continue
+		}
+		if err := g.store.UpsertFPLink(ctx, fp, r.FP, "minhash", math.Round(j*1000)/1000); err != nil {
+			log.Printf("[ipguard] MinHash 关联写入失败: %v", err)
+			continue
+		}
+		linked++
+		if j > best {
+			best = j
+		}
+	}
+	if linked > 0 {
+		g.event(ctx, ip, "fp-minhash-link", sprintf("组件集合关联 %d 个旧指纹（Jaccard %.2f）", linked, best), 0, false)
+	}
+}
+
+// computeStability 分量稳定度 EWMA（P2-4）：X=1 分量未变 / 0 变了，
+// S = α·X + (1-α)·S_prev（α=0.3）。首次出现的分量无历史可比，跳过不写入；
+// 本次未上报的旧分量保留原值。整体稳定度 = 各分量稳定度均值（0-1，四舍五入两位）。
+func computeStability(oldComponents map[string]string, oldStability map[string]float64, components map[string]string) (float64, map[string]float64) {
+	out := map[string]float64{}
+	for k, v := range components {
+		if v == "" {
+			continue
+		}
+		if prev, existed := oldStability[k]; existed {
+			out[k] = prev // 本次未上报（或新键无历史）时先继承
+		}
+		if oldV, ok := oldComponents[k]; !ok || oldV == "" {
+			continue // 无历史值可比：不产生新观测
+		}
+		x := 0.0
+		if oldComponents[k] == v {
+			x = 1.0
+		}
+		out[k] = math.Round((stabilityAlpha*x+(1-stabilityAlpha)*oldStability[k])*100) / 100
+	}
+	sum := 0.0
+	for _, v := range out {
+		sum += v
+	}
+	overall := 0.0
+	if len(out) > 0 {
+		overall = math.Round(sum/float64(len(out))*100) / 100
+	}
+	return overall, out
+}
+
+// checkRotation 换脸轮换检测（P2-4）：pHash/MinHash 关联到的旧指纹上，某个
+// 设备级稳定分量（字体清单/显卡标识）在自身生命周期里一直稳定（稳定度 ≥ 0.7），
+// 却与当前指纹的取值不同 → 刻意轮换身份的实锤（正常驱动漂移只动 canvas，
+// 不会连字体清单、显卡型号一起换）。命中记 env-flag:fpb_rotation_detected，
+// 计分受 FP_SCORE_SHADOW 灰度控制（规格 §0.7）。
+func (g *IPGuard) checkRotation(ctx context.Context, ip, fp string, meta FingerprintMeta) {
+	if g.store == nil || len(meta.Components) == 0 {
+		return
+	}
+	links, err := g.store.ListFPLinks(ctx, fp, 10)
+	if err != nil || len(links) == 0 {
+		return
+	}
+	now := time.Now()
+	flips := []string{}
+	var linkedOld []string
+	for _, l := range links {
+		other := l.Dst
+		if other == fp {
+			other = l.Src
+		}
+		if other == fp || other == "" {
+			continue
+		}
+		tgt, err := g.store.FindFingerprint(ctx, other)
+		if err != nil || tgt == nil {
+			continue
+		}
+		if now.Sub(tgt.LastSeen) < rotationOldMinAge {
+			continue // 目标不够"旧"（可能是同报文内的回环），不构成换脸
+		}
+		linkedOld = append(linkedOld, other[:min(8, len(other))])
+		for _, k := range rotationWatchKeys {
+			cur := meta.Components[k]
+			old := tgt.Components[k]
+			if cur == "" || old == "" || old == cur {
+				continue
+			}
+			if tgt.CompStability[k] >= stabilityStableMin {
+				flips = append(flips, k)
+			}
+		}
+	}
+	if len(flips) == 0 {
+		return
+	}
+	score := 0
+	if !shadowScoring() {
+		score = rotationDetectedScore
+	}
+	g.event(ctx, ip, "env-flag:fpb_rotation_detected",
+		sprintf("换脸轮换：稳定分量 %s 突变且关联旧指纹 %s", strings.Join(uniq(flips), ","), strings.Join(uniq(linkedOld), ",")), score, false)
+}
+
+// EntropyFactor 封禁触发系数（P2-3）：min(1, entropy_bits/40)。
+// 熵权未计算（0）或档案缺失 → 1（不放大也不衰减，行为与 P2 之前一致）。
+func (g *IPGuard) EntropyFactor(ctx context.Context, fp string) float64 {
+	if g.store == nil || fp == "" {
+		return 1
+	}
+	row, err := g.store.FindFingerprint(ctx, fp)
+	if err != nil || row == nil || row.EntropyBits <= 0 {
+		return 1
+	}
+	return math.Min(1, row.EntropyBits/entropyFactorBits)
+}
+
+// geoEnrich GeoIP 交叉核验（P2-5）：补全 ip_profiles 的 ASN/国家，并做两项检测——
+//   - 时区大洲 ↔ IP 归属国跨洲不符 → env-flag:fpb_tz_geo_mismatch（+10，灰度 0 分）
+//   - 机房 ASN + 移动端 UA 组合 → env-flag:fpb_hosting_mobile_ua（+15，灰度 0 分）
+//
+// 数据库缺失/解析失败一律静默跳过（离线部署纪律）。
+func (g *IPGuard) geoEnrich(ctx context.Context, ip, ua string, meta FingerprintMeta) {
+	if g.store == nil || g.geo == nil || !g.geo.Enabled() {
+		return
+	}
+	pip := net.ParseIP(ip)
+	if pip == nil || pip.IsPrivate() || pip.IsLoopback() {
+		return
+	}
+	country := g.geo.Country(pip)
+	asn, org := g.geo.ASN(pip)
+	asnType := ""
+	if geoip.HostingOrg(org) {
+		asnType = "hosting"
+	} else if org != "" {
+		asnType = "isp"
+	}
+	_ = g.store.UpdateIPGeo(ctx, ip, asn, asnType, country, meta.TZ)
+	if asnType == "hosting" && isMobileUA(ua) {
+		score := 0
+		if !shadowScoring() {
+			score = geoHostingMobileUAScore
+		}
+		g.event(ctx, ip, "env-flag:fpb_hosting_mobile_ua",
+			sprintf("机房出口（AS%d %s）+ 移动端 UA", asn, org), score, false)
+	}
+	if meta.TZ != "" && geoip.ContinentMismatch(country, meta.TZ) {
+		score := 0
+		if !shadowScoring() {
+			score = geoTZMismatchScore
+		}
+		g.event(ctx, ip, "env-flag:fpb_tz_geo_mismatch",
+			sprintf("客户端时区 %s 与 IP 归属国 %s 跨洲不符", meta.TZ, country), score, false)
+	}
+}
+
+// isMobileUA UA 是否声称移动端（Android/iOS 设备）。
+func isMobileUA(ua string) bool {
+	l := strings.ToLower(ua)
+	return strings.Contains(l, "android") || strings.Contains(l, "iphone") ||
+		strings.Contains(l, "ipad") || strings.Contains(l, "mobile")
+}
+
+// RefreshEntropyBits 每日 cron 任务（P2-3）：对近 30 天指纹按分量值出现频率重算
+// 熵权并写回 entropy_bits。大众配置 bits 低、罕见组合 bits 高，封禁触发系数
+// min(1, bits/40) 由 EntropyFactor 在三层积分时套用。
+func (g *IPGuard) RefreshEntropyBits(ctx context.Context) error {
+	if g.store == nil {
+		return nil
+	}
+	rows, err := g.store.ListFingerprintsSince(ctx, time.Now().Add(-entropyWindow), entropyMaxRows)
+	if err != nil {
+		return err
+	}
+	if len(rows) < 2 {
+		return nil // 样本不足：单条指纹任何值都是"唯一"，熵权无意义
+	}
+	sets := make([]map[string]string, 0, len(rows))
+	for _, r := range rows {
+		sets = append(sets, r.Components)
+	}
+	bits := fpmath.EntropyWeights(sets)
+	sum := 0.0
+	for i := range rows {
+		if err := g.store.UpdateEntropyBits(ctx, rows[i].Fingerprint, bits[i]); err != nil {
+			log.Printf("[ipguard] 熵权写入失败 %s: %v", rows[i].Fingerprint, err)
+			continue
+		}
+		sum += bits[i]
+	}
+	log.Printf("[ipguard] 熵权刷新完成：%d 条指纹，均值 %.1f bit", len(rows), sum/float64(len(rows)))
+	return nil
+}
+
 // fpHasRecentViolations 抽查指纹名下其他 IP 近期（7 天）是否有违规记录：// 区分"出差换网络的干净设备"与"代理池轮换的指纹"。
 func (g *IPGuard) fpHasRecentViolations(ctx context.Context, knownIPs []string, exceptIP string) bool {
 	probed := 0
@@ -896,6 +1276,19 @@ func contains(xs []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// uniq 去重保序（轮换检测的分量名/关联指纹展示用）。
+func uniq(xs []string) []string {
+	seen := map[string]bool{}
+	out := xs[:0]
+	for _, x := range xs {
+		if !seen[x] {
+			seen[x] = true
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 // Talkers Top 访客（内存近 1 小时计数）。

@@ -13,7 +13,7 @@
 | P0-3 | 握手通道独立滑动窗口限流 | ✅ 完成 | 见 git log `P0-3` |
 | P0-4 | 检测 flag 命中统计（后端聚合 + 面板区块） | ✅ 完成 | 见 git log `P0-4` |
 | P1 | 指纹浏览器识别（六路采集 + BotD + 计分接入） | ✅ 完成（2 处按实测调整，见下） | 见 git log `P1` |
-| P2 | 算法升级（pHash / MinHash+LSH / 熵权 / 稳定性 / GeoIP） | 🔶 进行中：P2-1 完成、P2-2 域包完成待接线，P2-3/P2-4/P2-5 未开工 | 见 git log `P2-1` |
+| P2 | 算法升级（pHash / MinHash+LSH / 熵权 / 稳定性 / GeoIP） | ✅ 完成（2 处按实测调整：GeoIP 数据集换 DBIP 系 + maxminddb 读取层；组件集合改前端上报原始清单，见下） | 见 git log `P2-1` / `P2` |
 | P3 | TLS + JA4 协议指纹 | ⏳ 待办 | — |
 | P4 | 平台证明与高级项（Play Integrity / passkey / ALTCHA / 图聚类 / 行为采集 / 时钟偏移） | ⏳ 待办 | — |
 | P5 | 行为机器学习（标注 / iForest / LR / GBDT / PSI） | ⏳ 待办 | — |
@@ -235,7 +235,7 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
 
 ---
 
-## P2 — 算法升级（进行中）
+## P2 — 算法升级 ✅
 
 ### P2-1 pHash 感知哈希同源关联 ✅
 
@@ -255,25 +255,73 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
   非法输入、hexToBits）；`ipguard_p2link_test.go` 6 例（同源写边/不同设备不关联/自环与非法哈希、
   30 天窗口、重复上报幂等、字段清洗）；`npm test` 37 例、`go test ./...` 全绿、`npm run build` 成功。
 
-### P2-2 MinHash + LSH 域包 ✅（域包已就绪，尚未接线）
+### P2-2 MinHash + LSH 组件集合关联 ✅
 
-- `internal/domain/fpmath/minhash.go` + `minhash_test.go`（6 测试函数 / 33 子测试）：
-  `NewMinHash(k=128)`、`Signature([]string) []uint64`、`JaccardEstimate`、
-  `Bands(sig, 16, 8)`；`bits.Mul64/Div64` 安全取模 p=2^61−1，系数由 splitmix64 固定常量派生
-  （跨进程一致、不依赖 math/rand 版本）。实测 20 组件改 1 个 → 估计 0.88 且共享带 5 个。
-- 待接线：`ip_fingerprints.minhash_sig` 列与 `fp_lsh_buckets` 表已建（DDL 就绪），
-  还差"上报时算签名 → 写桶 → 同带召回 → 精确 Jaccard > 0.8 关联"的引擎接线与端口方法。
+- 域包（P2-1 已交付）：k=128 = 16 带 × 8 行，模 p=2^61−1，splitmix64 固定系数跨进程一致。
+- **接线（本轮）**：前端 `fingerprint.js` 新增可选 `sets` 字段（fonts 实测清单 / webgl_exts /
+  plugins，各 ≤64 项、单项 ≤64 字节，服务端 `sanitizeSets` 清洗）——组件分量的哈希值撑不起
+  集合相似度（全变），规格书"来自现有 components"的前提不成立，改为上报原始清单。
+- **签名改服务端计算**：`computeMinHashSig`（元素 = 键名前缀+值，防跨清单同名互撞；hex2048）。
+  payload 的 `minhash_sig` 客户端字段**弃用不采信**（防伪造签名投毒 LSH 桶），有单测锁死。
+- 引擎 `linkByMinHash`：签名写 16 桶（先删后插，签名变化旧桶自动失效）→ 同带召回（≤200）→
+  候选取旧签名精确 `JaccardEstimate` > 0.8 → 写 `fp_links(kind=minhash, weight=Jaccard)` +
+  0 分事件 `fp-minhash-link`。端口新增 `UpsertLSHBands` / `ListLSHCandidates` / `ListMinHashSigs`。
+- 活体（8792）：同清单双指纹 → `minhash` 边 weight=1.0、事件「组件集合关联 1 个旧指纹
+  （Jaccard 1.00）」、每指纹 16 桶；不同清单 → 零关联（单测）。
 
-### 待办
+### P2-3 熵值加权 ✅
 
-- P2-3 熵值加权（`internal/domain/fpmath/entropy.go` + 每日 cron 刷新 `entropy_bits` + 封禁系数
-  `min(1, bits/40)` 接入 `iprisk`）；P2-4 时间稳定性 EWMA（`comp_stability`/`stability` 列已建，
-  "稳定分量突变 + pHash/MinHash 关联旧指纹" → `fpb_rotation_detected` +25）；
-  P2-5 GeoIP（ip-location-db mmdb + geoip2-golang + `githubhot geo download` + 时区/ASN 核验，
-  `ip_profiles` 的 asn/geo_* 列已建）。
+- 域包 `fpmath/entropy.go`：`EntropyWeights([]map[string]string) []float64`——每键按"有该键的
+  行数"为分母，w=−log2(c(v)/N_key)，bits=Σw；全同值 0、缺失键不参与、空表 0。
+- 每日 cron：`IPGuard.RefreshEntropyBits`（近 30 天、≤20000 行）写回 `entropy_bits`；
+  `ENTROPY_CRON` 独立调度（默认 `30 4 * * *`），与 HOT_CRON 互不干扰。
+- 接入：**三层积分系数** `min(1, entropy_bits/40)`（`EntropyFactor`，熵权未算=1 行为不变），
+  在 `fpReportAPI` 对 env-flag 事件分四舍五入缩放——大众配置只计分不硬封，罕见组合足额。
+  `fp-linked`/`fp-churn` 等二层事件保持原分值（已有互证护栏，不在本系数范围）。
+- 单测：fpmath 熵权 2 例；httpapi 衰减（bits=20 → headless-ua 50→25 分）、无熵权足额对照、
+  cron 刷新分布。活体：cron 触发后 7 条指纹 entropy_bits 落库（唯一值 4.39 / 共享分量被稀释 3.39）。
+
+### P2-4 时间稳定性 EWMA + 换脸轮换检测 ✅
+
+- 每次上报：与旧档案逐分量比，X=1 未变/0 变了，S=0.3·X+0.7·S_prev（`computeStability`），
+  随 upsert 落 `stability`（均值）与 `comp_stability`（JSON）；首次出现的分量无历史不产生观测。
+- 轮换检测 `checkRotation`：pHash/MinHash 关联到的旧指纹（last_seen ≥ 1h）上，设备级稳定分量
+  `fonts/webgl/renderer` 历史稳定（S ≥ 0.7）却在当前指纹取值不同 → 换脸实锤
+  `env-flag:fpb_rotation_detected`（+25，灰度 0 分）。正常驱动漂移只动 canvas，不会连字体
+  清单与显卡型号一起换——以此区分"同设备漂移"与"刻意轮换"。
+- 单测：稳定历史 + 关联 + 突变 → 命中（灰度 0 分 / 关灰度 25 分、明细含分量名）；稳定度不足
+  不判；活体：二次上报 S=0.3、comp_stability {canvas:0.3,fonts:0.3}。
+
+### P2-5 GeoIP 交叉核验 ✅（数据集按实测调整）
+
+- **数据源调整**：规格书指定的 `geo-whois-asn-country` 数据集已被上游下线（2026-06 起
+  ip-location-db 改 GitHub Releases 分发、WHOIS 数据合规下架）→ 换同许可（CC BY 4.0）的
+  **`dbip-country.mmdb` + `dbip-asn.mmdb`**；DBIP 署名要求记入 README。
+- **读取层实测调整**：DBIP release 库的 databaseType 是 `country ipvAll`/`asn ipvAll`，
+  geoip2-golang 类型化读取器直接拒绝（"reader does not support"）→ 改用底层
+  **maxminddb-golang** 宽容解码（双 schema：顶层 `country_code` 兼容 GeoLite2
+  `country.iso_code`），geoip2 依赖随之移除。
+- `internal/infrastructure/geoip`：缺失即禁用（离线部署不报错）；`HostingOrg` 关键词表
+  （宁可漏判不误判，消费级 ISP 用精确字样区分）；国家→大洲映射表（跨洲国家宽松集合）+
+  IANA 时区大洲判定，**只有跨洲才计分**。
+- CLI `githubhot geo download`：safehttp 通道、原子写、体积下限护栏（拒绝疑似上游变更）。
+- 引擎 `geoEnrich`：上报时补全 `ip_profiles` 的 asn/asn_type/geo_country/geo_tz
+  （**upsert 建档**——第一层档案延迟刷库，只 UPDATE 会丢数据，实测发现后修正）；两项检测
+  灰度 0 分：`fpb_tz_geo_mismatch`（+10 出灰度）、`fpb_hosting_mobile_ua`（+15 出灰度）。
+- 活体：223.5.5.5（AS37963 阿里）+ America/New_York → 双命中、明细含 ASN 与国家；
+  对照（同 ASN + Asia/Shanghai、无移动 UA）→ 零误报；`ip_profiles` 三行 geo 字段齐全。
+
+### 两笔遗留小账（§7bis）✅
+
+- `/healthz` 封禁豁免：存活探针始终如实应答（封禁 IP 也是 200），外部监控不再把"已封禁"
+  误报成"站点宕机"；其余路径维持全站 404。单测 + 活体（登录→手动封禁→404/200→解封恢复）。
+- `spa.go` `/app/` 的 403 分支确认为不可达死代码（IPGuard 中间件先 404）→ 删除，限频逻辑保留。
+
 ## 已知边界 / 后续项
 
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，
   属预期（§10.3 的 `?fp=` 单指纹下钻会补齐这条链路）。
-- `/healthz` 目前随封禁一起 404（外部监控可能误报站点不可用）；`spa.go` 内 `/app/` 的
-  403 分支为不可达死代码 —— 两项待处理，见 `docs/ip-guard-scoring.md` §7bis。
+- P2 新检测（rotation/tz_geo/hosting_mobile）与 P1 同守灰度：`FP_SCORE_SHADOW` 默认 0 分，
+  管理端「检测命中统计」观察 7 天假阳性 < 0.5% 后再出分。
+- 熵值加权现按"指纹全量分量"统计；若后续接入 `webgl_exts`/`plugins` 明细（P2-2 sets），
+  熵权区分度会进一步提升（当前 sets 只进 MinHash 签名不入库）。

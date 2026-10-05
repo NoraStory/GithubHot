@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/NoraStory/GithubHot/internal/infrastructure/persistence/sqlite"
@@ -56,7 +57,60 @@ func (g guardStore) ListIPEventsSince(ctx context.Context, limit int, since time
 }
 
 func (g guardStore) UpsertFingerprint(ctx context.Context, fp, ip, ua string, meta httpapi.FingerprintMeta) ([]string, error) {
-	return g.db.UpsertFingerprint(ctx, fp, ip, ua, meta.Webrtc, meta.Components, meta.Flags, meta.CanvasPHash, meta.MinHashSig)
+	compStabilityJSON := ""
+	if len(meta.CompStability) > 0 {
+		b, err := json.Marshal(meta.CompStability)
+		if err == nil {
+			compStabilityJSON = string(b)
+		}
+	}
+	return g.db.UpsertFingerprint(ctx, fp, ip, ua, meta.Webrtc, meta.Components, meta.Flags,
+		meta.CanvasPHash, meta.MinHashSig, meta.Stability, compStabilityJSON)
+}
+
+func (g guardStore) UpsertLSHBands(ctx context.Context, fp string, bands []httpapi.LSHBand) error {
+	rows := make([]sqlite.LSHBandRow, 0, len(bands))
+	for _, b := range bands {
+		rows = append(rows, sqlite.LSHBandRow{Band: b.Band, Hash: b.Hash})
+	}
+	return g.db.UpsertLSHBands(ctx, fp, rows)
+}
+
+func (g guardStore) ListLSHCandidates(ctx context.Context, fp string, bands []httpapi.LSHBand, limit int) ([]string, error) {
+	rows := make([]sqlite.LSHBandRow, 0, len(bands))
+	for _, b := range bands {
+		rows = append(rows, sqlite.LSHBandRow{Band: b.Band, Hash: b.Hash})
+	}
+	return g.db.ListLSHCandidates(ctx, fp, rows, limit)
+}
+
+func (g guardStore) ListMinHashSigs(ctx context.Context, fps []string) ([]httpapi.MinHashSigRow, error) {
+	rows, err := g.db.ListMinHashSigs(ctx, fps)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]httpapi.MinHashSigRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, httpapi.MinHashSigRow{FP: r.FP, Sig: r.Sig})
+	}
+	return out, nil
+}
+
+func (g guardStore) FindFingerprint(ctx context.Context, fp string) (*httpapi.FingerprintDTO, error) {
+	row, err := g.db.FindFingerprint(ctx, fp)
+	if row == nil || err != nil {
+		return nil, err
+	}
+	dto := toFingerprintDTOs([]sqlite.FingerprintRow{*row})[0]
+	return &dto, nil
+}
+
+func (g guardStore) UpdateEntropyBits(ctx context.Context, fp string, bits float64) error {
+	return g.db.UpdateEntropyBits(ctx, fp, bits)
+}
+
+func (g guardStore) UpdateIPGeo(ctx context.Context, ip string, asn uint, asnType, country, tz string) error {
+	return g.db.UpdateIPGeo(ctx, ip, asn, asnType, country, tz)
 }
 
 func (g guardStore) ListPHashCandidates(ctx context.Context, since time.Time, limit int) ([]httpapi.PHashRowDTO, error) {
@@ -98,14 +152,7 @@ func (g guardStore) ListFingerprintsByIP(ctx context.Context, ip string, limit i
 	if limit > 0 && len(rows) > limit {
 		rows = rows[:limit]
 	}
-	out := make([]httpapi.FingerprintDTO, 0, len(rows))
-	for _, f := range rows {
-		out = append(out, httpapi.FingerprintDTO{
-			Fingerprint: f.Fingerprint, IPs: f.IPs, Webrtc: f.Webrtc, Components: f.Components, Flags: f.Flags, UA: f.UA,
-			FirstSeen: f.FirstSeen, LastSeen: f.LastSeen, Hits: f.Hits,
-		})
-	}
-	return out, nil
+	return toFingerprintDTOs(rows), nil
 }
 
 func (g guardStore) ListFingerprints(ctx context.Context, limit int) ([]httpapi.FingerprintDTO, error) {
@@ -130,6 +177,8 @@ func toFingerprintDTOs(rows []sqlite.FingerprintRow) []httpapi.FingerprintDTO {
 		out = append(out, httpapi.FingerprintDTO{
 			Fingerprint: f.Fingerprint, IPs: f.IPs, Webrtc: f.Webrtc, Components: f.Components, Flags: f.Flags, UA: f.UA,
 			FirstSeen: f.FirstSeen, LastSeen: f.LastSeen, Hits: f.Hits,
+			CanvasPHash: f.CanvasPHash, MinHashSig: f.MinHashSig,
+			EntropyBits: f.EntropyBits, Stability: f.Stability, CompStability: f.CompStability,
 		})
 	}
 	return out

@@ -89,6 +89,9 @@ go build -o githubhot ./cmd/githubhot
 | `HANDSHAKE_RATE_PER_MIN` | | 握手通道 `/api/v1/site/config` 单 IP 每分钟上限（默认 30）：该端点免签且会触发指纹归档写库，超限 429 并记分 |
 | `ADMIN_SESSION_IP_STRICT` | | `1` = 管理会话必须来源 IP 完全一致；默认 `0` 放宽到 IPv4 `/24`、IPv6 `/64`（会话被跨网段使用即注销 + 记 80 分） |
 | `FP_SCORE_SHADOW` | | 新增检测 flag 灰度开关，默认 `1` = 只记录不计分（`fpb_*` / `botd_*` 先在管理端「检测命中统计」观察假阳性率，达标后置 `0` 才计分） |
+| `GEOIP_DB_PATH` | GeoIP | 国家库路径（默认 `data/geo.mmdb`，`githubhot geo download` 拉取 ip-location-db，CC BY 4.0，部署说明需保留致谢）。文件缺失时地理核验整体降级：时区↔IP 归属国跨洲矛盾（`fpb_tz_geo_mismatch`）不判定 |
+| `GEOIP_ASN_DB_PATH` | GeoIP | ASN 库路径（默认 `data/geo-asn.mmdb`）：机房出口识别（`ip_profiles.asn_type=hosting`）+ 移动端 UA 组合核验（`fpb_hosting_mobile_ua`）；两项灰度默认 0 分 |
+| `ENTROPY_CRON` | 熵值加权 | 分量熵权每日刷新调度（cron 五段式，默认 `30 4 * * *`）。熵权 = 各分量值出现频率的信息量之和；三层违规分 × `min(1, bits/40)` 作为封禁触发系数——大众配置只计分不硬封，罕见组合足额计分 |
 | `APP_SIGN_SEED` | APP/签名 | APP 请求签名种子（`githubhot admin seed` 生成，32B base64）。**serve 模式必填**：未配置或仍为出厂默认 `gh-dev-seed-v1` 时拒绝启动。APP 侧构建期注入同值，不再经 `/api/v1/site/config` 下发 |
 | `APP_SIGN_SEED_GRACE` | 过渡期 | 旧种子列表（逗号分隔）：存量 APP 未发版时兜底验签；过渡期内验签不通过只观察不计分，建议 ≤14 天后清空 |
 | `DATA_DIR` | | 数据目录，默认 `./data` |

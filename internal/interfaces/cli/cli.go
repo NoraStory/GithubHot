@@ -184,6 +184,23 @@ func Serve(cfg *config.Config) error {
 	scheduler.start()
 	defer scheduler.stop()
 
+	// P2-3 熵值加权：每日 cron 重算近 30 天指纹的分量熵权（entropy_bits）。
+	// 独立于 HOT_CRON（流水线调度），默认 04:30，env ENTROPY_CRON 可改。
+	entropySpec := strings.TrimSpace(os.Getenv("ENTROPY_CRON"))
+	if entropySpec == "" {
+		entropySpec = "30 4 * * *"
+	}
+	entropySched := newScheduler(entropySpec, func() {
+		fmt.Printf("[cron] 熵权刷新开始（%s）\n", time.Now().Format("15:04:05"))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := srv.Guard.RefreshEntropyBits(ctx); err != nil {
+			fmt.Printf("[cron] 熵权刷新失败: %v\n", err)
+		}
+	})
+	entropySched.start()
+	defer entropySched.stop()
+
 	ctx, stop := signalCtx()
 	defer stop()
 
