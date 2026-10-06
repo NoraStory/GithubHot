@@ -191,6 +191,7 @@ type FingerprintDTO struct {
 	BehaviorJSON string            // P4-5 行为生物特征（滑窗统计量 JSON，'{}'=未采集）
 	ClockSkewPPM *float64          // P4-6 时钟偏移（ppm；NULL=未采集）
 	ClusterID   *int64             // P4-4 图聚类簇归属（NULL=未聚类）
+	GNNScore    *float64           // P6-3 GNN 推理 bot 概率（NULL=未打分）
 }// PHashRowDTO 感知哈希候选行（同源关联扫描）。
 type PHashRowDTO struct {
 	Fingerprint string
@@ -1008,6 +1009,9 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	g.behaviorCheck(ctx, ip, meta)
 	// P5-3 行为 ML 打分（模型达标才生效，shadow 纪律同规格 §0.7）。
 	g.scoreBehaviorML(ctx, ip, fp, meta)
+	// P4-4/P6-2 簇连坐：所在簇内有被封禁成员 → 独立弱证据（cluster-linked）。
+	// 规格原文是 ×1.5，但 fp-linked 70 分已顶强类封顶——改用独立证据让 iprisk 多证互证。
+	g.checkClusterCollusion(ctx, ip, fp)
 	// 连坐双因子：干净设备连到被封的共享出口（酒店/机场/运营商 NAT 被前任搞封）
 	// 不算违规，只记低分观察；只有"该指纹名下其他 IP 近期也有劣迹"（代理池轮换
 	// 特征）才升级封禁。防误封核心：身份信号必须与设备劣迹叠加。
@@ -1461,6 +1465,38 @@ func (g *IPGuard) behaviorCheck(ctx context.Context, ip string, meta Fingerprint
 	}
 	g.event(ctx, ip, "env-flag:behavior_machine",
 		sprintf("行为机器特征 %s（鼠标 %d 事件 / 击键 %d 事件）", strings.Join(signals, ","), f.Mouse.Events, f.Keys.Events), score, false)
+}
+
+// checkClusterCollusion 簇连坐（P4-4/P6-2）：fp 所在簇内有被封禁成员 →
+// 独立弱证据 cluster-linked 15 分（灰度 0 分）。规格原文 ×1.5 会在 fp-linked 70 分
+// 上越强类封顶——改用独立证据让 iprisk 多证互证（安全边界与 P2-1 一致）。
+func (g *IPGuard) checkClusterCollusion(ctx context.Context, ip, fp string) {
+	if g.store == nil {
+		return
+	}
+	row, err := g.store.FindFingerprint(ctx, fp)
+	if err != nil || row == nil || row.ClusterID == nil {
+		return
+	}
+	clusters, err := g.store.ListClusters(ctx, 100)
+	if err != nil {
+		return
+	}
+	for _, c := range clusters {
+		if c.ID != *row.ClusterID {
+			continue
+		}
+		for _, m := range c.Members {
+			if m == fp {
+				continue
+			}
+			if b, _ := g.store.FindBan(ctx, firstIP(g.ipsOf(ctx, m))); b != nil {
+				g.event(ctx, ip, "cluster-linked",
+					sprintf("簇 %d 成员 %s 已被封禁", c.ID, m[:min(8, len(m))]), 15, false)
+				return
+			}
+		}
+	}
 }
 
 // fpHasRecentViolations 抽查指纹名下其他 IP 近期（7 天）是否有违规记录：// 区分"出差换网络的干净设备"与"代理池轮换的指纹"。

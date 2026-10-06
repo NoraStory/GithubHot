@@ -590,6 +590,18 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
 - **待做**（随后续批次）：力导向图（d3-force）、FpCard/ScoreBars 组件抽取、
   LabelDialog 弹窗组件化、P5-6 PSI 全量实现（需训练基准分布文件）。
 
+### P6 批三：冷启动均值接入 + 簇连坐 + 正交性 cron ✅
+
+- **冷启动均值实际接入**：communityMeanScore 改为遍历 Louvain 社区成员，
+  读取各成员已写回的 gnn_score（GNNScore 列），返回均值。sidecar 失败 →
+  clusterScore > 0 时写回 gnn_score（冷启动兜底）。gnn_score 列加入
+  fingerprintCols/DTO/适配器。
+- **簇连坐**：ReportFingerprint 内 checkClusterCollusion——fp 所在簇内有被封禁
+  成员 → cluster-linked 15 分独立弱证据（灰度 0 分）。规格原文 ×1.5 会在 fp-linked
+  70 分上越强类封顶——改用独立证据让 iprisk 多证互证（安全边界与 P2-1 一致）。
+- **正交性 cron**：CheckOrthogonality 每日执行——behavior_ml 与 gnn_score 的
+  皮尔逊相关 ≥ 0.6 → 日志 ⚠ 特征泄漏告警。
+
 ## 已知边界 / 后续项
 
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，

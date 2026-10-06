@@ -101,6 +101,7 @@ type FingerprintRow struct {
 	CompStability     map[string]float64
 	JA4               string // P3-2 TLS 客户端指纹（TLS 模式下捕获；纯 HTTP 为空）
 	AttestationJSON   string // P4-1 平台证明结果（原始 JSON，'{}'=未验证）
+	GNNScore          *float64 // P6-3 GNN 推理 bot 概率（NULL=未打分）
 	BehaviorJSON      string // P4-5 行为生物特征（滑窗统计量 JSON，'{}'=未采集）
 	ClockSkewPPM      *float64 // P4-6 时钟偏移（ppm；NULL=未采集）
 	ClusterID         *int64  // P4-4 图聚类簇归属（NULL=未聚类）
@@ -208,7 +209,7 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 		var f FingerprintRow
 		var ipsJSON, rtcJSON, compJSON, flagsJSON, first, last string
 		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &rtcJSON, &compJSON, &flagsJSON, &f.UA, &first, &last, &f.Hits,
-			&f.CanvasPHash, &f.MinHashSig, &f.EntropyBits, &f.Stability, &f.CompStabilityJSON, &f.JA4, &f.AttestationJSON,
+			&f.CanvasPHash, &f.MinHashSig, &f.EntropyBits, &f.Stability, &f.CompStabilityJSON, &f.JA4, &f.AttestationJSON, &f.GNNScore,
 			&f.BehaviorJSON, &f.ClockSkewPPM, &f.ClusterID); err != nil {
 			return nil, err
 		}
@@ -227,7 +228,7 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 }
 
 // fingerprintCols 指纹查询的统一列清单（P2 起含数学指纹与稳定度/熵权列；P3 起含 ja4）。
-const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits, canvas_phash, minhash_sig, entropy_bits, stability, comp_stability, ja4, attestation, behavior, clock_skew_ppm, cluster_id"
+const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits, canvas_phash, minhash_sig, entropy_bits, stability, comp_stability, ja4, attestation, behavior, clock_skew_ppm, cluster_id, gnn_score"
 
 // ListFingerprints 最近 limit 个活跃指纹。
 func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow, error) {

@@ -14,13 +14,14 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-		"os"
+	"log"
+	"math"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/NoraStory/GithubHot/internal/domain/behavior"
-	"github.com/NoraStory/GithubHot/internal/domain/fpgraph"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/sidecarclient"
 )
 
@@ -173,31 +174,26 @@ func (g *IPGuard) communityMeanScore(ctx context.Context, fp string) float64 {
 		if !hasFP {
 			continue
 		}
-		// 找社区内其他成员的 gnn_score
+		// 找社区内其他成员的 gnn_score 均值
 		sum, n := 0.0, 0
 		for _, m := range c.Members {
 			if m == fp {
 				continue
 			}
 			row, err := g.store.FindFingerprint(ctx, m)
-			if err != nil || row == nil {
+			if err != nil || row == nil || row.GNNScore == nil {
 				continue
 			}
-			// gnn_score 从行为特征推导（简化：有行为即有分）
-			if row.BehaviorJSON != "" {
-				// 用 GNN 写回均值——此处从 fpgraph.Communities 已有数据推导
-				n++
-			}
+			sum += *row.GNNScore
+			n++
 		}
-		_ = sum
-		_ = n
+		if n == 0 {
+			continue
+		}
+		return sum / float64(n)
 	}
-	// 简化实现：冷启动均值需要 fp_clusters 与 gnn_score 联查，
-	// 当前版本返回 0（无 GNN 数据时不写回），待数据积累后接入
 	return 0
 }
-
-var _ = fpgraph.Louvain // 保留引用（fpgraph 包在 P6-2 已交付）
 
 func toFloat32(in []float64) []float32 {
 	out := make([]float32, len(in))
@@ -205,4 +201,62 @@ func toFloat32(in []float64) []float32 {
 		out[i] = float32(v)
 	}
 	return out
+}
+
+// CheckOrthogonality P6-6 皮尔逊正交性检查（每日 cron）：behavior_ml_score 与
+// gnn_score 的皮尔逊相关系数 < 0.6 才通过；≥ 0.6 说明特征泄漏需回炉重做。
+func (g *IPGuard) CheckOrthogonality(ctx context.Context) error {
+	if g.store == nil || g.ml == nil {
+		return nil
+	}
+	m := g.ml.get()
+	if m == nil || !m.Active {
+		return nil
+	}
+	rows, err := g.store.ListFingerprintsSince(ctx, time.Now().Add(-30*24*time.Hour), entropyMaxRows)
+	if err != nil {
+		return err
+	}
+	var mlScores, gnnScores []float64
+	for _, r := range rows {
+		if r.GNNScore == nil {
+			continue
+		}
+		f := behavior.Parse(r.BehaviorJSON)
+		if f == nil {
+			continue
+		}
+		ml := m.Predict(featureVectorFor(r))
+		if ml < 0 {
+			continue
+		}
+		mlScores = append(mlScores, ml)
+		gnnScores = append(gnnScores, *r.GNNScore)
+	}
+	if len(mlScores) < 10 {
+		return nil // 样本不足
+	}
+	// 皮尔逊相关系数
+	var sumXY, sumX2, sumY2, sumX, sumY float64
+	n := float64(len(mlScores))
+	for i := range mlScores {
+		sumXY += mlScores[i] * gnnScores[i]
+		sumX += mlScores[i]
+		sumY += gnnScores[i]
+		sumX2 += mlScores[i] * mlScores[i]
+		sumY2 += gnnScores[i] * gnnScores[i]
+	}
+	denomX := n*sumX2 - sumX*sumX
+	denomY := n*sumY2 - sumY*sumY
+	if denomX <= 0 || denomY <= 0 {
+		return nil
+	}
+	corr := (n*sumXY - sumX*sumY) / math.Sqrt(denomX*denomY)
+	abs := math.Abs(corr)
+	if abs >= 0.6 {
+		log.Printf("[ml] ⚠ 正交性违规：behavior_ml 与 gnn 皮尔逊相关 %.3f ≥ 0.6（特征泄漏，需回炉重做）", corr)
+	} else {
+		log.Printf("[ml] 正交性 OK：皮尔逊相关 %.3f（< 0.6）", corr)
+	}
+	return nil
 }
