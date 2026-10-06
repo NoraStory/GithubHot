@@ -433,7 +433,7 @@ func parseHours(s string) int {
 	return h
 }
 
-// registerIPGuardRoutes 挂防护端点（仅公开上报口；管理端操作端点在 admin.go 的守卫组内）。
+// registerIPGuardRoutes 挂防护端点（仅公开上报口;管理端操作端点在 admin.go 的守卫组内)。
 func (s *Server) registerIPGuardRoutes(r chi.Router) {
 	r.Post("/fp/report", s.fpReportAPI)
 	// P4-3 ALTCHA PoW：挑战签发（前端/APP 刷成本用）与独立校验通道。
@@ -442,6 +442,8 @@ func (s *Server) registerIPGuardRoutes(r chi.Router) {
 	// P4-1 平台证明（Play Integrity / 签名降级）
 	r.Get("/app/attest/challenge", s.appAttestChallengeAPI)
 	r.Post("/app/attest/verify", s.appAttestVerifyAPI)
+	// DevTools 检测上报（用于行为分析，不立即封禁）
+	r.Post("/security/devtools-detected", s.devtoolsDetectedAPI)
 }
 
 // Store 暴露存储（管理端 handler 用）。
@@ -453,4 +455,27 @@ func (g *IPGuard) Event(ctx context.Context, ip, kind, detail string, score int,
 		return
 	}
 	g.event(ctx, ip, kind, detail, score, severe)
+}
+
+// devtoolsDetectedAPI 接收前端上报的 DevTools 检测事件（仅记录，不封禁）。
+func (s *Server) devtoolsDetectedAPI(w http.ResponseWriter, r *http.Request) {
+	if s.Guard == nil {
+		writeJSON(w, 200, map[string]bool{"ok": true})
+		return
+	}
+
+	var req struct {
+		UA        string `json:"ua"`
+		Timestamp int64  `json:"timestamp"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+
+	ip := realIP(r)
+	// 记录事件，积分为 0（仅作为行为特征，不触发封禁）
+	s.Guard.Event(r.Context(), ip, "devtools-detected", "前端检测到开发者工具打开", 0, false)
+
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }

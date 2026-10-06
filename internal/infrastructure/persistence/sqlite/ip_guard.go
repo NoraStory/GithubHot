@@ -40,12 +40,25 @@ func (db *DB) AddIPEvent(ctx context.Context, ip, kind, detail string, score int
 
 // RecentIPEventsScore 该 IP 最近 duration 秒内的事件积分合计。
 func (db *DB) RecentIPEventsScore(ctx context.Context, ip string, seconds int) (int, error) {
+	// 参数验证：防止异常输入
+	if seconds <= 0 || seconds > 86400*7 {
+		return 0, fmt.Errorf("invalid seconds: %d (must be 0 < seconds <= 604800)", seconds)
+	}
+	
 	since := time.Now().Add(-time.Duration(seconds) * time.Second).UTC().Format(time.RFC3339)
 	var total sql.NullInt64
 	err := db.QueryRowContext(ctx,
 		"SELECT SUM(score) FROM ip_events WHERE ip = ? AND created_at >= ?", ip, since).Scan(&total)
 	if err != nil {
 		return 0, fmt.Errorf("统计违规积分: %w", err)
+	}
+	
+	// 防止整数溢出（32位系统）
+	if total.Int64 > 2147483647 {
+		return 2147483647
+	}
+	if total.Int64 < -2147483648 {
+		return 0
 	}
 	return int(total.Int64), nil
 }
@@ -292,8 +305,12 @@ const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, las
 
 // ListFingerprints 最近 limit 个活跃指纹。
 func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow, error) {
+	const maxFingerprintQueryLimit = 5000
 	if limit <= 0 {
 		limit = 20
+	}
+	if limit > maxFingerprintQueryLimit {
+		limit = maxFingerprintQueryLimit
 	}
 	rows, err := db.QueryContext(ctx,
 		"SELECT "+fingerprintCols+" FROM ip_fingerprints ORDER BY last_seen DESC LIMIT ?", limit)

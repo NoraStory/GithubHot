@@ -1806,3 +1806,11 @@ func (g *IPGuard) BanIP(ctx context.Context, ip, reason string, hours int) error
 	log.Printf("[ipguard] 手动封禁 %s（%v）：%s", ip, dur, sanitizeForLog(reason))
 	return nil
 }
+
+// MLModelHealthStatus 暴露ML模型加载器健康状态（用于§10诊断页）。
+func (g *IPGuard) MLModelHealthStatus() map[string]interface{} {
+	if g.ml == nil {
+		return map[string]interface{}{"enabled": false}
+	}
+	return g.ml.HealthStatus()
+}

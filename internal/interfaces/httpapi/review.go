@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/http"
-	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/NoraStory/GithubHot/internal/domain/behavior"
@@ -77,35 +75,28 @@ func (s *Server) mlDiagnosticsAPI(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r.Context())
 	defer cancel()
 
-	// 模型卡
-	var lrCard map[string]any
-	modelDir := os.Getenv("ML_MODEL_DIR")
-	if modelDir == "" {
-		modelDir = "data/models"
-	}
-	if raw, err := os.ReadFile(modelDir + "/behavior_lr_v1.json"); err == nil {
-		_ = json.Unmarshal(raw, &lrCard)
-	}
-	models := []map[string]any{}
-	if lrCard != nil {
-		models = append(models, lrCard)
+	// 模型健康状态（C2修复：从加载器直接获取，包含失败信息）
+	modelHealth := map[string]interface{}{"enabled": false}
+	if s.Guard != nil && s.Guard.ml != nil {
+		modelHealth = s.Guard.MLModelHealthStatus()
 	}
 
 	// PSI 简化：近 7 天行为特征变异系数
-	rows, err := s.Guard.store.ListFingerprintsSince(ctx, time.Now().Add(-7*24*time.Hour), 5000)
 	psi := []map[string]any{}
-	if err == nil && len(rows) >= 10 {
-		psi = computePSI(rows)
+	if s.Guard != nil && s.Guard.store != nil {
+		rows, err := s.Guard.store.ListFingerprintsSince(ctx, time.Now().Add(-7*24*time.Hour), 5000)
+		if err == nil && len(rows) >= 10 {
+			psi = computePSI(rows)
+		}
 	}
 
-	// sidecar 状态
-	sidecar := map[string]any{"enabled": sidecarEnabled()}
-	if url := strings.TrimSpace(os.Getenv("GNN_SIDECAR_URL")); url != "" {
-		sidecar["url"] = url
-	}
+	// sidecar 状态（含健康检查）
+	sidecar := s.SidecarHealthStatus()
 
 	writeJSON(w, 200, map[string]any{
-		"models": models, "psi": psi, "sidecar": sidecar,
+		"model_health": modelHealth,
+		"psi":          psi,
+		"sidecar":      sidecar,
 		"pipeline": map[string]string{
 			"export": "githubhot ml export --out data/ml/behavior.jsonl",
 			"train":  "scripts/ml/run_train.ps1",

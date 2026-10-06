@@ -4,6 +4,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -106,10 +107,13 @@ func featureVectorFor(r FingerprintDTO) []float64 {
 
 // lrLoader 模型目录热加载（mtime 触发，serve 内 goroutine 定时检查）。
 type lrLoader struct {
-	mu       sync.Mutex
-	path     string
-	lastMod  time.Time
-	model    *fpmath.LRModel
+	mu           sync.Mutex
+	path         string
+	lastMod      time.Time
+	model        *fpmath.LRModel
+	lastError    error      // 最后一次加载失败的错误
+	failCount    int        // 连续失败次数
+	lastFailTime time.Time  // 最后一次失败时间
 }
 
 func newLRLoader(dir string) *lrLoader {
@@ -117,27 +121,107 @@ func newLRLoader(dir string) *lrLoader {
 }
 
 // get 惰性/热加载：文件 mtime 变化才重新读取。
+// C2修复：强制JSON校验，连续失败时告警。
 func (l *lrLoader) get() *fpmath.LRModel {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if st, err := os.Stat(l.path); err == nil {
-		if st.ModTime() != l.lastMod || l.model == nil {
-			l.lastMod = st.ModTime()
-			raw, err := os.ReadFile(l.path)
-			if err != nil {
-				return l.model // 读失败保留旧模型
-			}
-			var m fpmath.LRModel
-			if err := json.Unmarshal(raw, &m); err != nil {
-				log.Printf("[ml] 模型文件解析失败: %v", err)
-				return l.model
-			}
-			l.model = &m
-			log.Printf("[ml] 行为模型已加载 %s（AUC %.3f，active %v）",
-				m.Version, m.Metrics.AUC, m.Active)
+	
+	st, err := os.Stat(l.path)
+	if err != nil {
+		// 文件不存在或无法访问
+		if l.model == nil && l.lastError == nil {
+			log.Printf("[ml] 模型文件不存在: %s", l.path)
+			l.lastError = err
 		}
+		return l.model
 	}
+	
+	// 文件未变化，返回缓存
+	if st.ModTime() == l.lastMod && l.model != nil {
+		return l.model
+	}
+	
+	// 尝试加载新模型
+	l.lastMod = st.ModTime()
+	raw, err := os.ReadFile(l.path)
+	if err != nil {
+		l.recordFailure(err, "读取失败")
+		return l.model // 保留旧模型
+	}
+	
+	var m fpmath.LRModel
+	if err := json.Unmarshal(raw, &m); err != nil {
+		// C2修复：JSON解析失败必须告警，不能静默降级
+		l.recordFailure(err, "JSON解析失败")
+		// 强制返回nil而非旧模型，避免使用损坏的配置
+		if l.failCount >= 3 {
+			log.Printf("[ml] CRITICAL: 模型文件连续%d次解析失败，强制降级为nil: %v", l.failCount, err)
+			l.model = nil
+		}
+		return l.model
+	}
+	
+	// 基本合法性检查
+	if len(m.Weights) == 0 {
+		err := fmt.Errorf("模型权重为空")
+		l.recordFailure(err, "校验失败")
+		return l.model
+	}
+	
+	// 加载成功，重置失败计数
+	l.failCount = 0
+	l.lastError = nil
+	l.model = &m
+	log.Printf("[ml] 行为模型已加载 %s（AUC %.3f，active %v）",
+		m.Version, m.Metrics.AUC, m.Active)
 	return l.model
+}
+
+// recordFailure 记录加载失败，连续失败时告警。
+func (l *lrLoader) recordFailure(err error, context string) {
+	l.failCount++
+	l.lastError = err
+	l.lastFailTime = time.Now()
+	
+	// 连续失败告警（3次、10次、每50次）
+	if l.failCount == 3 || l.failCount == 10 || (l.failCount > 10 && l.failCount%50 == 0) {
+		log.Printf("[ml] WARNING: 模型加载%s，连续失败%d次: %v", context, l.failCount, err)
+	}
+}
+
+// HealthStatus 返回模型加载器健康状态（用于§10诊断页）。
+func (l *lrLoader) HealthStatus() map[string]interface{} {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	
+	status := map[string]interface{}{
+		"path":       l.path,
+		"loaded":     l.model != nil,
+		"fail_count": l.failCount,
+	}
+	
+	if l.model != nil {
+		status["version"] = l.model.Version
+		status["auc"] = l.model.Metrics.AUC
+		status["active"] = l.model.Active
+		status["last_modified"] = l.lastMod.Format(time.RFC3339)
+	}
+	
+	if l.lastError != nil {
+		status["last_error"] = l.lastError.Error()
+		status["last_fail_time"] = l.lastFailTime.Format(time.RFC3339)
+	}
+	
+	// 健康度判定
+	healthy := true
+	if l.model == nil {
+		healthy = false
+	} else if l.failCount >= 3 {
+		healthy = false
+	}
+	status["healthy"] = healthy
+	
+	return status
 }
 
 // scoreBehaviorML fp/report 时对行为特征打分（shadow：0 分仅记录）。

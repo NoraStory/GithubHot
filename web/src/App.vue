@@ -4,6 +4,9 @@ import { useRouter, useRoute } from 'vue-router'
 import { api, adminAuthed, adminLogout } from './lib/api'
 import { copyText } from './lib/clipboard'
 import SiteFooter from './components/SiteFooter.vue'
+import PrivacyNotice from './components/PrivacyNotice.vue'
+import FingerprintLoader from './components/FingerprintLoader.vue'
+import BanNotice from './components/BanNotice.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -16,6 +19,17 @@ const searchQ = ref('')
 const searchResults = ref(null)
 const menuOpen = ref(false)
 const consoleOpen = ref(false)
+
+// 指纹采集和封禁状态
+const fingerprintLoading = ref(false)
+const fingerprintStage = ref('initializing')
+const showBanNotice = ref(false)
+const banInfo = ref({
+  reason: '',
+  expiresAt: null,
+  strikes: 0,
+  ip: ''
+})
 
 // 中控台数据
 const stories = ref([])
@@ -280,6 +294,76 @@ const monthLabel = (ym) => {
   return ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二'][parseInt(m, 10) - 1] + '月 ' + y
 }
 
+// 指纹采集初始化
+async function initFingerprintCollection() {
+  // 先检查是否已被封禁
+  try {
+    const banCheck = await api.get('/api/v1/ip/check')
+    if (banCheck && banCheck.banned) {
+      showBanNotice.value = true
+      banInfo.value = {
+        reason: banCheck.reason || '检测到异常访问行为',
+        expiresAt: banCheck.expiresAt,
+        strikes: banCheck.strikes || 1,
+        ip: banCheck.ip || ''
+      }
+      return // 已封禁，不继续采集
+    }
+  } catch (e) {
+    console.warn('封禁检查失败', e)
+  }
+
+  // 开始指纹采集
+  fingerprintLoading.value = true
+  fingerprintStage.value = 'initializing'
+
+  try {
+    // 延迟一点，让用户看到初始化状态
+    await new Promise(resolve => setTimeout(resolve, 300))
+    
+    fingerprintStage.value = 'collecting'
+    
+    // 动态导入指纹库（避免阻塞首屏）
+    const { getFingerprint, initBehaviorReporting } = await import('./lib/fingerprint.js')
+    
+    fingerprintStage.value = 'analyzing'
+    
+    // 获取指纹
+    const fp = await getFingerprint()
+    
+    if (fp) {
+      // 启动行为采集（键盘鼠标）
+      initBehaviorReporting(() => fp)
+      
+      fingerprintStage.value = 'reporting'
+      
+      // 上报指纹
+      await api.post('/api/v1/fp/report', { fp })
+      
+      fingerprintStage.value = 'complete'
+      
+      // 完成后短暂显示，然后隐藏
+      setTimeout(() => {
+        fingerprintLoading.value = false
+      }, 800)
+    } else {
+      throw new Error('指纹采集失败')
+    }
+  } catch (e) {
+    console.error('指纹采集失败', e)
+    fingerprintStage.value = 'error'
+    setTimeout(() => {
+      fingerprintLoading.value = false
+    }, 2000)
+  }
+}
+
+// 处理封禁申诉
+function handleBanAppeal() {
+  // 打开 GitHub Issues 或联系页面
+  window.open('https://github.com/NoraStory/GithubHot/issues/new?title=封禁申诉&body=请说明您的情况', '_blank')
+}
+
 onMounted(async () => {
   applyTheme()
   window.addEventListener('scroll', onScroll, { passive: true })
@@ -288,6 +372,10 @@ onMounted(async () => {
   window.addEventListener('scroll', mediaMaskFade, { passive: true })
   mediaMaskFade()
   updateRightside()
+  
+  // 指纹采集流程（异步，不阻塞主流程）
+  initFingerprintCollection()
+  
   try {
     const [sn, dg] = await Promise.all([api.get('/api/v1/hot/news'), api.get('/api/v1/digests?pageSize=50')])
     stories.value = sn.items || []
@@ -751,6 +839,15 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
   <router-view />
 
   <SiteFooter v-if="!$route.path.startsWith('/admin')" />
+  
+  <!-- 隐私告知弹窗 -->
+  <PrivacyNotice />
+  
+  <!-- 指纹采集加载状态 -->
+  <FingerprintLoader :show="fingerprintLoading" :stage="fingerprintStage" />
+  
+  <!-- 封禁提示 -->
+  <BanNotice :show="showBanNotice" :banInfo="banInfo" @appeal="handleBanAppeal" />
 </template>
 
 <style>

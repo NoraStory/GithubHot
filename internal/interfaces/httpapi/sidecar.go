@@ -42,9 +42,19 @@ func (s *Server) getSidecarClient() *sidecarclient.Client {
 		token := strings.TrimSpace(os.Getenv("GNN_SIDECAR_TOKEN"))
 		if url != "" {
 			s.sidecarClient = sidecarclient.New(url, token, 500*time.Millisecond)
+			log.Printf("[INFO] GNN sidecar已配置: %s", url)
 		}
 	})
 	return s.sidecarClient
+}
+
+// SidecarHealthStatus 暴露sidecar健康状态（用于§10管理端诊断页）。
+func (s *Server) SidecarHealthStatus() map[string]interface{} {
+	client := s.getSidecarClient()
+	if client == nil {
+		return map[string]interface{}{"enabled": false}
+	}
+	return client.HealthStatus()
 }
 
 // gnnSidecarScore 异步调 sidecar 打分（fire-and-forget，不阻塞 fp/report）。

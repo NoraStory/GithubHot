@@ -7,6 +7,9 @@
 //   - 时钟偏移：每 60s 采样 Date.now() - performance.now()（仅页面可见时），
 //     20 点最小二乘斜率 × 1e6 = clock_skew_ppm；
 //   - 上报：每 5 分钟或页面卸载（fetch keepalive）→ fp/report 仅携带 fp + 统计量。
+//   - 自动化检测：集成 behavior-collector 进行实时自动化模式检测。
+
+import { behaviorCollector } from './behavior-collector'
 
 const MOUSE_WINDOW = 500
 const KEY_WINDOW = 100
@@ -109,6 +112,10 @@ function r2(v) { return Math.round(v * 1000) / 1000 }
 export function initBehaviorReporting(getFp) {
   if (started) return
   started = true
+  
+  // 启动高级行为采集器（用于自动化检测）
+  behaviorCollector.start()
+  
   let lastMove = 0
   window.addEventListener('mousemove', e => {
     const now = performance.now()
@@ -153,10 +160,19 @@ function maybeSend(getFp) {
   const hasMouse = mouse.events >= 20
   const hasKeys = keys.events >= 10
   if (!hasMouse && !hasKeys && skew === null) return
+  
+  // 获取自动化检测结果
+  const automationDetection = behaviorCollector.detectAutomation()
+  
   const body = JSON.stringify({
     fp,
     behavior: { mouse, keys },
     clock_skew_ppm: skew === null ? undefined : skew,
+    automation: {
+      detected: automationDetection.isAutomated,
+      flags: automationDetection.flags,
+      confidence: automationDetection.confidence
+    }
   })
   try {
     fetch('/api/v1/fp/report', {
