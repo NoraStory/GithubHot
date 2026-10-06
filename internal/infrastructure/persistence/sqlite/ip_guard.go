@@ -55,10 +55,10 @@ func (db *DB) RecentIPEventsScore(ctx context.Context, ip string, seconds int) (
 	
 	// 防止整数溢出（32位系统）
 	if total.Int64 > 2147483647 {
-		return 2147483647
+		return 2147483647, nil
 	}
 	if total.Int64 < -2147483648 {
-		return 0
+		return 0, nil
 	}
 	return int(total.Int64), nil
 }
@@ -136,6 +136,7 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 		maxComponentKeys     = 100
 		maxComponentValueLen = 1024
 		maxUALen             = 512
+		maxIPsPerFP          = 64
 	)
 	
 	if len(webrtc) > maxWebRTCCandidates {
@@ -164,12 +165,19 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 		clockSkewPPM = nil // 非法值视为未采集
 	}
 	
-	// 合并查询：一次获取所有需要的字段，避免 N+1
-	row := db.QueryRowContext(ctx,
+	// 合并读改写必须在单事务内：MaxOpenConns(1) 下事务独占唯一连接完全串行，
+	// 否则 SELECT 与 UPDATE 之间并发上报会互相覆盖（丢失更新）或双 INSERT 主键冲突。
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("开启指纹事务: %w", err)
+	}
+	defer tx.Rollback() // Commit 后为 ErrTxDone，安全忽略
+
+	row := tx.QueryRowContext(ctx,
 		"SELECT ips, ua, hits, webrtc, flags, components FROM ip_fingerprints WHERE fp = ?", fp)
 	var ipsJSON, oldUA, rtcJSON, flagsJSON, oldCompJSON string
 	var hits int
-	err := row.Scan(&ipsJSON, &oldUA, &hits, &rtcJSON, &flagsJSON, &oldCompJSON)
+	err = row.Scan(&ipsJSON, &oldUA, &hits, &rtcJSON, &flagsJSON, &oldCompJSON)
 	now := time.Now().UTC().Format(time.RFC3339)
 	ips := []string{}
 	rtc := []string{}
@@ -240,11 +248,13 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 	if err == sql.ErrNoRows {
 		ips = []string{ip}
 		b, _ := json.Marshal(ips)
-		_, err = db.ExecContext(ctx,
+		if _, err = tx.ExecContext(ctx,
 			"INSERT INTO ip_fingerprints (fp, ips, ua, first_seen, last_seen, hits, webrtc, components, flags, canvas_phash, minhash_sig, stability, comp_stability, ja4, behavior, clock_skew_ppm) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			fp, string(b), ua, now, now, string(rb), string(cb), string(fb), canvasPhash, minhashSig, stability, compStabilityJSON, ja4, behaviorJSON, clockSkewPPM)
-		if err != nil {
+			fp, string(b), ua, now, now, string(rb), string(cb), string(fb), canvasPhash, minhashSig, stability, compStabilityJSON, ja4, behaviorJSON, clockSkewPPM); err != nil {
 			return nil, fmt.Errorf("写入指纹: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("提交指纹事务: %w", err)
 		}
 		return ips, nil
 	}
@@ -262,15 +272,21 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 	if !known {
 		ips = append(ips, ip)
 	}
+	// ips 累积上限：超出截断保留最近追加的（防单行 JSON 无限膨胀拖慢 json_each 查询）
+	if len(ips) > maxIPsPerFP {
+		ips = ips[len(ips)-maxIPsPerFP:]
+	}
 	b, _ := json.Marshal(ips)
 	if ua == "" {
 		ua = oldUA
 	}
-	_, err = db.ExecContext(ctx,
+	if _, err = tx.ExecContext(ctx,
 		"UPDATE ip_fingerprints SET ips = ?, ua = ?, last_seen = ?, hits = hits + 1, webrtc = ?, components = ?, flags = ?, canvas_phash = CASE WHEN ? != '' THEN ? ELSE canvas_phash END, minhash_sig = CASE WHEN ? != '' THEN ? ELSE minhash_sig END, stability = CASE WHEN ? >= 0 THEN ? ELSE stability END, comp_stability = CASE WHEN ? != '' THEN ? ELSE comp_stability END, ja4 = CASE WHEN ? != '' THEN ? ELSE ja4 END, behavior = CASE WHEN ? != '' THEN ? ELSE behavior END, clock_skew_ppm = COALESCE(?, clock_skew_ppm) WHERE fp = ?",
-		string(b), ua, now, string(rb), string(cb), string(fb), canvasPhash, canvasPhash, minhashSig, minhashSig, stability, stability, compStabilityJSON, compStabilityJSON, ja4, ja4, behaviorJSON, behaviorJSON, clockSkewPPM, fp)
-	if err != nil {
+		string(b), ua, now, string(rb), string(cb), string(fb), canvasPhash, canvasPhash, minhashSig, minhashSig, stability, stability, compStabilityJSON, compStabilityJSON, ja4, ja4, behaviorJSON, behaviorJSON, clockSkewPPM, fp); err != nil {
 		return nil, fmt.Errorf("更新指纹: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("提交指纹事务: %w", err)
 	}
 	return ips, nil
 }
@@ -301,7 +317,7 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 }
 
 // fingerprintCols 指纹查询的统一列清单（P2 起含数学指纹与稳定度/熵权列；P3 起含 ja4）。
-const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits, canvas_phash, minhash_sig, entropy_bits, stability, comp_stability, ja4, attestation, behavior, clock_skew_ppm, cluster_id, gnn_score"
+const fingerprintCols = "fp, ips, webrtc, components, flags, ua, first_seen, last_seen, hits, canvas_phash, minhash_sig, entropy_bits, stability, comp_stability, ja4, attestation, gnn_score, behavior, clock_skew_ppm, cluster_id, anomaly_score"
 
 // ListFingerprints 最近 limit 个活跃指纹。
 func (db *DB) ListFingerprints(ctx context.Context, limit int) ([]FingerprintRow, error) {

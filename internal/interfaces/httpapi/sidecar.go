@@ -64,7 +64,7 @@ func (s *Server) gnnSidecarScore(ctx context.Context, ip, fp string) {
 	if client == nil || !client.Enabled() || s.Guard == nil || s.Guard.store == nil {
 		return
 	}
-	go func() {
+	goSafe("gnn-sidecar-score", func() {
 		gctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 		// 构建子图：目标 fp + 其关联边
@@ -114,7 +114,7 @@ func (s *Server) gnnSidecarScore(ctx context.Context, ip, fp string) {
 			// P6-6 融合：behavior_ml_score 与 gnn_score 双高检查
 			s.fusionCheck(gctx, ip, fp, float64(score))
 		}
-	}()
+	})
 }
 
 // fusionCheck P6-6 融合规则：behavior_ml_score 与 gnn_score 正交性与双高判定。
@@ -137,7 +137,7 @@ func (s *Server) fusionCheck(ctx context.Context, ip, fp string, gnnScore float6
 	if f == nil {
 		return
 	}
-	m := s.Guard.ml.get()
+	m := s.Guard.mlEngine.GetLRModel()
 	if m == nil || !m.Active {
 		return
 	}
@@ -216,10 +216,10 @@ func toFloat32(in []float64) []float32 {
 // CheckOrthogonality P6-6 皮尔逊正交性检查（每日 cron）：behavior_ml_score 与
 // gnn_score 的皮尔逊相关系数 < 0.6 才通过；≥ 0.6 说明特征泄漏需回炉重做。
 func (g *IPGuard) CheckOrthogonality(ctx context.Context) error {
-	if g.store == nil || g.ml == nil {
+	if g.store == nil || g.mlEngine == nil {
 		return nil
 	}
-	m := g.ml.get()
+	m := g.mlEngine.GetLRModel()
 	if m == nil || !m.Active {
 		return nil
 	}

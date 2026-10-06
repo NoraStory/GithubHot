@@ -15,6 +15,28 @@ import (
 	"github.com/NoraStory/GithubHot/internal/domain/fpstats"
 )
 
+// realIP 从请求中提取真实IP地址
+// 注意：无条件信任 X-Real-IP/X-Forwarded-For，与 clientip.go 的 TRUSTED_PROXY
+// 受信代理体系不一致（评审 P2 遗留：公开端点可被栽赃任意 IP），待统一收口。
+func realIP(r *http.Request) string {
+	// 优先使用X-Real-IP
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return ip
+	}
+	// 其次使用X-Forwarded-For的第一个IP
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if idx := strings.Index(xff, ","); idx > 0 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+	// 最后使用RemoteAddr
+	if idx := strings.LastIndex(r.RemoteAddr, ":"); idx > 0 {
+		return r.RemoteAddr[:idx]
+	}
+	return r.RemoteAddr
+}
+
 // ---------- 指纹上报（公开端点，第二层入口） ----------
 
 type fpPayload struct {
@@ -182,7 +204,9 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p fpPayload
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil || len(p.Fingerprint) < 16 || len(p.Fingerprint) > 128 {
+	// 免登录入口必须限 body：否则攻击者可用流式大 JSON 持续占内存（Decode 完成前
+	// 字段长度校验不生效，实测 20MB body 会被全量读入）
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&p); err != nil || len(p.Fingerprint) < 16 || len(p.Fingerprint) > 128 {
 		writeErr(w, 400, errorString("请求体需要 {\"fp\": \"...\"}"))
 		return
 	}
@@ -468,7 +492,7 @@ func (s *Server) devtoolsDetectedAPI(w http.ResponseWriter, r *http.Request) {
 		UA        string `json:"ua"`
 		Timestamp int64  `json:"timestamp"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
 		writeErr(w, 400, err)
 		return
 	}

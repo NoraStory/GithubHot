@@ -77,7 +77,7 @@ func (s *Server) mlDiagnosticsAPI(w http.ResponseWriter, r *http.Request) {
 
 	// 模型健康状态（C2修复：从加载器直接获取，包含失败信息）
 	modelHealth := map[string]interface{}{"enabled": false}
-	if s.Guard != nil && s.Guard.ml != nil {
+	if s.Guard != nil && s.Guard.mlEngine != nil {
 		modelHealth = s.Guard.MLModelHealthStatus()
 	}
 

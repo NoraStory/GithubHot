@@ -324,7 +324,7 @@ func (s *Server) digestsAPI(w http.ResponseWriter, r *http.Request) {
 	var all []digest.Digest
 	if k == "" {
 		for _, kk := range []digest.Kind{digest.KindDaily, digest.KindWeekly, digest.KindMonthly} {
-			list, err := s.Deps.Digests.List(s.ctx(), kk, 200)
+			list, err := s.Deps.Digests.List(r.Context(), kk, 200)
 			if err == nil {
 				all = append(all, list...)
 			}
@@ -338,7 +338,7 @@ func (s *Server) digestsAPI(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		list, err := s.Deps.Digests.List(s.ctx(), k, 200)
+		list, err := s.Deps.Digests.List(r.Context(), k, 200)
 		if err != nil {
 			writeErr(w, 500, err)
 			return
@@ -382,7 +382,7 @@ func (s *Server) storiesArchiveAPI(w http.ResponseWriter, r *http.Request) {
 	if k := q.Get("kind"); k == "all" || k == string(story.KindProject) || k == string(story.KindDomestic) {
 		kind = story.Kind(k)
 	}
-	items, total, err := s.Deps.Stories.ListPage(s.ctx(), kind, (page-1)*size, size)
+	items, total, err := s.Deps.Stories.ListPage(r.Context(), kind, (page-1)*size, size)
 	if err != nil {
 		writeErr(w, 500, err)
 		return

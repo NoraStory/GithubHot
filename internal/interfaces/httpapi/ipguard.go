@@ -384,7 +384,7 @@ type IPGuard struct {
 	key   []byte // HMAC 密钥
 	geo   GeoProvider
 	ja4   JA4Mapper
-	ml    *lrLoader
+	mlEngine *MLEngine // 统一ML调度器（P5-2 iForest + P5-3 LR + P6-3 GNN）
 
 	enabled    bool
 	localOK    bool // 回环/内网放行
@@ -431,6 +431,18 @@ func NewIPGuard(store GuardStore) *IPGuard {
 	}
 	countryPath, asnPath := geoip.DefaultPaths()
 	now := time.Now()
+	
+	// 创建ML引擎
+	mlEngine := NewMLEngine(MLConfig{
+		ModelDir:          os.Getenv("ML_MODEL_DIR"),
+		EnableIForest:     os.Getenv("ML_ENABLE_IFOREST") != "0",
+		EnableLR:          os.Getenv("ML_ENABLE_LR") != "0",
+		IForestInterval:   24 * time.Hour,
+		IForestMinSamples: 10,
+		IForestMaxSamples: 10000,
+		LRCheckInterval:   1 * time.Minute,
+	})
+	
 	g := &IPGuard{
 		store:              store,
 		key:                key,
@@ -445,16 +457,20 @@ func NewIPGuard(store GuardStore) *IPGuard {
 		fpReport:           map[string][]time.Time{},
 		whitelist:          map[string]time.Time{},
 		fpColl:             newFPCollision(),
-		ml:                 newLRLoader(os.Getenv("ML_MODEL_DIR")),
+		mlEngine:           mlEngine,
 		lastDedupeClean:    now,
 		lastFpReportClean:  now,
 		lastWhitelistClean: now,
 	}
-	// 启动后台清理 goroutine（防止内存泄漏）
+	
+	// 启动后台任务
 	go g.periodicCleanup()
+	mlEngine.Start(g) // 启动ML调度器
+	
 	if g.geo.Enabled() {
 		log.Printf("[ipguard] GeoIP 已启用（%s）", countryPath)
 	}
+	log.Printf("[ipguard] ML引擎已启动（iForest=%v, LR=%v）", mlEngine.cfg.EnableIForest, mlEngine.cfg.EnableLR)
 	return g
 }
 
@@ -873,47 +889,39 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 
 // handshakeAllow 握手通道滑动窗口（60s）判定：放行 true；超限 false 并计分。
 // 计数按 IP 独立存放（ipWindow.hsTimes），与全站速率窗口互不影响。
-// 优化版：减少锁持有时间，在锁外进行耗时的过滤操作。
+// 过滤、判定、追加必须在同一次持锁内完成：锁外化会造成并发请求基于同一快照
+// 判定后互相覆盖写回（计数丢失 → 限流可被并发绕过，见安全评审 P1）。真正的
+// 耗时操作（超限计分的 DB IO）在 g.event 中，保持在锁外。
 func (g *IPGuard) handshakeAllow(ctx context.Context, ip string) bool {
 	limit := handshakeRatePerMin()
 	now := time.Now()
-	
-	// 快速路径：检查窗口是否存在，拷贝数据
+
 	g.mu.Lock()
 	w := g.windows[ip]
 	if w == nil {
 		w = &ipWindow{uaSet: map[string]bool{}, lastFlush: now}
 		g.windows[ip] = w
 	}
-	// 快速拷贝旧时间戳，在锁外处理
-	oldTimes := make([]time.Time, len(w.hsTimes))
-	copy(oldTimes, w.hsTimes)
-	g.mu.Unlock()
-	
-	// 在锁外过滤（耗时操作）
+	// 原地过滤 60s 窗口（窗口内最多 limit 条，开销可忽略）
 	cutoff := now.Add(-time.Minute)
-	keep := make([]time.Time, 0, len(oldTimes)+1)
-	for _, t := range oldTimes {
+	keep := w.hsTimes[:0]
+	for _, t := range w.hsTimes {
 		if t.After(cutoff) {
 			keep = append(keep, t)
 		}
 	}
-	
-	// 检查限流
-	if len(keep) >= limit {
-		// 超限，记录事件（数据库操作在锁外）
-		g.event(ctx, ip, "handshake-rate", sprintf("握手通道 %d req/min（上限 %d）", len(keep), limit), 30, false)
+	w.hsTimes = keep
+	over := len(keep) >= limit
+	if !over {
+		w.hsTimes = append(w.hsTimes, now)
+	}
+	count := len(w.hsTimes)
+	g.mu.Unlock()
+
+	if over {
+		g.event(ctx, ip, "handshake-rate", sprintf("握手通道 %d req/min（上限 %d）", count, limit), 30, false)
 		return false
 	}
-	
-	// 未超限，追加当前时间并写回
-	keep = append(keep, now)
-	g.mu.Lock()
-	if g.windows[ip] != nil {
-		g.windows[ip].hsTimes = keep
-	}
-	g.mu.Unlock()
-	
 	return true
 }
 
@@ -972,13 +980,13 @@ func (g *IPGuard) record(ip, ua string) *ipWindow {
 		w.reqs = 0
 		w.lastFlush = now
 		w.dirty = false
-		go func(ip, ua string, n int) {
+		goSafe("ip-profile-flush", func() {
 			c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			if err := g.store.TouchIPProfile(c, ip, ua, n); err != nil {
+			if err := g.store.TouchIPProfile(c, ip, ua, delta); err != nil {
 				log.Printf("[ipguard] 档案落库失败 %s: %v", ip, err)
 			}
-		}(ip, ua, delta)
+		})
 	}
 	// 优化：改为定期清理（在 periodicCleanup 中处理），只在超限时随机采样清理
 	if len(g.windows) > 50000 && mathrand.Intn(100) == 0 {
@@ -1809,8 +1817,8 @@ func (g *IPGuard) BanIP(ctx context.Context, ip, reason string, hours int) error
 
 // MLModelHealthStatus 暴露ML模型加载器健康状态（用于§10诊断页）。
 func (g *IPGuard) MLModelHealthStatus() map[string]interface{} {
-	if g.ml == nil {
+	if g.mlEngine == nil {
 		return map[string]interface{}{"enabled": false}
 	}
-	return g.ml.HealthStatus()
+	return g.mlEngine.HealthStatus()
 }

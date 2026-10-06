@@ -136,6 +136,10 @@ func Serve(cfg *config.Config) error {
 	if w := cfg.AppSignSeedGraceWarning(); w != "" {
 		fmt.Printf("[warn] %s\n", w)
 	}
+	// 管理端鉴权红线：TLS（公网）部署下 ADMIN_PASSWORD_HASH / ADMIN_TOKEN 双空 = 管理端完全开放，拒绝启动。
+	if err := httpapi.CheckAdminAuthConfig(cfg.TLSEnabled()); err != nil {
+		return err
+	}
 	deps, db, err := build(cfg)
 	if err != nil {
 		return err

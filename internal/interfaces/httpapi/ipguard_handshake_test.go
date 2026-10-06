@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -126,5 +129,39 @@ func TestHandshakeLimitDoesNotBlockRealFlow(t *testing.T) {
 	}
 	if len(store.events) != 0 {
 		t.Fatalf("正常节奏不应产生违规事件，实际 %v", store.kindsOf(ip))
+	}
+}
+
+// TestHandshakeAllowConcurrent 并发计数守恒：N 个并发握手请求，放行数与窗口记录数
+// 必须一致且 ≤ 阈值（锁外写回版本的计数会互相覆盖丢失，限流被系统性绕过）。
+func TestHandshakeAllowConcurrent(t *testing.T) {
+	store := newFakeStore()
+	t.Setenv("IP_GUARD_ENABLED", "1")
+	t.Setenv("HANDSHAKE_RATE_PER_MIN", "5")
+	g := NewIPGuard(store)
+
+	const ip = "203.0.113.99"
+	const n = 50
+	var wg sync.WaitGroup
+	var allowed int64
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if g.handshakeAllow(context.Background(), ip) {
+				atomic.AddInt64(&allowed, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	g.mu.Lock()
+	cnt := len(g.windows[ip].hsTimes)
+	g.mu.Unlock()
+	if int64(cnt) != allowed {
+		t.Fatalf("计数丢失：放行 %d 次但窗口仅记录 %d 条（写回覆盖）", allowed, cnt)
+	}
+	if allowed > 5 {
+		t.Fatalf("限流阈值 5 被绕过：并发下放行了 %d 次", allowed)
 	}
 }

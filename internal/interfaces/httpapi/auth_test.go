@@ -229,3 +229,32 @@ func TestAdminLoginRecordsRequestIP(t *testing.T) {
 		t.Fatalf("同一请求的 IP 口径应一致（XFF 解析后），不应拒绝")
 	}
 }
+
+// CheckAdminAuthConfig 开放模式启动校验：TLS 公网部署拒绝启动，本地纯 HTTP 仅警告。
+func TestCheckAdminAuthConfig(t *testing.T) {
+	cases := []struct {
+		name       string
+		hash, tok  string
+		tls        bool
+		wantReject bool
+	}{
+		{"双空+TLS 拒绝启动", "", "", true, true},
+		{"双空+纯HTTP 本地放行", "", "", false, false},
+		{"有密码哈希+TLS 放行", "argon2id$fake", "", true, false},
+		{"有旧令牌+TLS 放行", "", "legacy-token", true, false},
+		{"两者都有+纯HTTP 放行", "argon2id$fake", "tok", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ADMIN_PASSWORD_HASH", tc.hash)
+			t.Setenv("ADMIN_TOKEN", tc.tok)
+			err := CheckAdminAuthConfig(tc.tls)
+			if tc.wantReject && err == nil {
+				t.Fatalf("期望拒绝启动，实际放行")
+			}
+			if !tc.wantReject && err != nil {
+				t.Fatalf("期望放行，实际拒绝: %v", err)
+			}
+		})
+	}
+}

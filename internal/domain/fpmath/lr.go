@@ -4,7 +4,11 @@
 // 行为特征向量顺序 = behavior.FeatureVector（P4-5），与 FEATURE_NAMES 严格对齐。
 package fpmath
 
-import "math"
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+)
 
 // LRModel 已加载的 LR 模型。
 type LRModel struct {
@@ -39,3 +43,58 @@ func (m *LRModel) Predict(x []float64) float64 {
 }
 
 func sigmoid(z float64) float64 { return 1 / (1 + math.Exp(-z)) }
+
+// Validate 验证模型参数的合法性。
+func (m *LRModel) Validate() error {
+	if m.Version == "" {
+		return fmt.Errorf("模型版本号不能为空")
+	}
+	
+	if len(m.Weights) == 0 {
+		return fmt.Errorf("模型权重为空")
+	}
+	
+	// 检查维度一致性
+	if len(m.Mu) != len(m.Weights) {
+		return fmt.Errorf("Mu维度(%d)与Weights维度(%d)不一致", len(m.Mu), len(m.Weights))
+	}
+	if len(m.Sigma) != len(m.Weights) {
+		return fmt.Errorf("Sigma维度(%d)与Weights维度(%d)不一致", len(m.Sigma), len(m.Weights))
+	}
+	
+	// 检查权重是否包含NaN或Inf
+	for i, w := range m.Weights {
+		if math.IsNaN(w) || math.IsInf(w, 0) {
+			return fmt.Errorf("权重[%d]包含非法值: %v", i, w)
+		}
+	}
+	
+	if math.IsNaN(m.Bias) || math.IsInf(m.Bias, 0) {
+		return fmt.Errorf("Bias包含非法值: %v", m.Bias)
+	}
+	
+	// 验证性能指标
+	if m.Metrics.AUC < 0 || m.Metrics.AUC > 1 {
+		return fmt.Errorf("AUC值超出范围[0,1]: %v", m.Metrics.AUC)
+	}
+	
+	if m.Metrics.FPR < 0 || m.Metrics.FPR > 1 {
+		return fmt.Errorf("FPR值超出范围[0,1]: %v", m.Metrics.FPR)
+	}
+	
+	return nil
+}
+
+// LoadFromJSON 从JSON字节数组加载模型。
+func LoadFromJSON(data []byte) (*LRModel, error) {
+	var model LRModel
+	if err := json.Unmarshal(data, &model); err != nil {
+		return nil, fmt.Errorf("JSON解析失败: %w", err)
+	}
+	
+	if err := model.Validate(); err != nil {
+		return nil, fmt.Errorf("模型验证失败: %w", err)
+	}
+	
+	return &model, nil
+}

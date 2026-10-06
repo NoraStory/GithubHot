@@ -22,7 +22,7 @@ const nextDate = computed(() => {
   return i >= 0 && i < allDates.value.length - 1 ? allDates.value[i + 1] : null
 })
 
-// marked 配置：GFM 表格 + 安全渲染（转义内嵌 HTML，日报内容来自我们自己的流水线）
+// marked 配置：GFM 表格渲染。marked 不转义内嵌 HTML，XSS 防线在服务端 mdEscape（对外部抓取标题做 HTML 转义）
 marked.setOptions({ gfm: true, breaks: false })
 const renderer = {
   // 表格包一层滚动容器，宽表不破版

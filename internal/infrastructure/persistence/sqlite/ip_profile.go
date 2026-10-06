@@ -10,25 +10,35 @@ import (
 
 // TouchIPProfile 第一层 IP 记忆：登记一次访问（累加请求数、补充 UA 集合）。
 // 高频调用由上层限频（每 IP 最多每 60s 落库一次），这里只做幂等 upsert。
+// 读改写在单事务内完成（MaxOpenConns(1) 下串行），否则并发建档互相覆盖；
+// Scan 出现非 ErrNoRows 错误时按查询失败返回，不再误判为新 IP 走 INSERT。
 func (db *DB) TouchIPProfile(ctx context.Context, ip, ua string, reqs int) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	row := db.QueryRowContext(ctx, "SELECT ua_set FROM ip_profiles WHERE ip = ?", ip)
-	var uaJSON string
-	err := row.Scan(&uaJSON)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		// 新 IP：建档
+		return fmt.Errorf("开启档案事务: %w", err)
+	}
+	defer tx.Rollback() // Commit 后为 ErrTxDone，安全忽略
+
+	row := tx.QueryRowContext(ctx, "SELECT ua_set FROM ip_profiles WHERE ip = ?", ip)
+	var uaJSON string
+	err = row.Scan(&uaJSON)
+	if err == sql.ErrNoRows {
+		// 新 IP：建档（并发首访时后到者在同事务内读到已存在行，自动转 UPDATE 路径）
 		set := []string{}
 		if ua != "" {
 			set = append(set, ua)
 		}
 		b, _ := json.Marshal(set)
-		_, err = db.ExecContext(ctx,
+		if _, err = tx.ExecContext(ctx,
 			"INSERT INTO ip_profiles (ip, first_seen, last_seen, reqs, ua_set, ua_last) VALUES (?, ?, ?, ?, ?, ?)",
-			ip, now, now, reqs, string(b), ua)
-		if err != nil {
+			ip, now, now, reqs, string(b), ua); err != nil {
 			return fmt.Errorf("建档 IP 档案: %w", err)
 		}
-		return nil
+		return tx.Commit()
+	}
+	if err != nil {
+		return fmt.Errorf("查询 IP 档案: %w", err)
 	}
 	var set []string
 	_ = json.Unmarshal([]byte(uaJSON), &set)
@@ -46,13 +56,12 @@ func (db *DB) TouchIPProfile(ctx context.Context, ip, ua string, reqs int) error
 	if ua == "" {
 		ua = "(empty)"
 	}
-	_, err = db.ExecContext(ctx,
+	if _, err = tx.ExecContext(ctx,
 		"UPDATE ip_profiles SET last_seen = ?, reqs = reqs + ?, ua_set = ?, ua_last = ? WHERE ip = ?",
-		now, reqs, string(b), ua, ip)
-	if err != nil {
+		now, reqs, string(b), ua, ip); err != nil {
 		return fmt.Errorf("更新 IP 档案: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // IPProfileRow IP 档案行（后台下钻查看）。

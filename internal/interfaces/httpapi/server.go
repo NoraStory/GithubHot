@@ -74,6 +74,7 @@ func (s *Server) Router() http.Handler {
 	})
 	r.Get("/favicon.ico", s.favicon)
 	r.Get("/llms.txt", s.llmsTxt)
+	r.Get("/privacy", s.privacyPageAPI) // 隐私政策页面（SPA路由）
 		r.Get("/api/v1/site/config", s.siteConfig)
 		r.Get("/api/v1/music/playlist", s.musicPlaylist)
 		r.Get("/api/v1/gh/avatar/{owner}", s.ghAvatar)
@@ -109,12 +110,12 @@ func (s *Server) Router() http.Handler {
 
 // ---------- handlers ----------
 
-func (s *Server) buildView() (application.HotView, error) {
-	return application.BuildHotView(s.ctx(), s.Deps, digest.KindDaily)
+func (s *Server) buildView(ctx context.Context) (application.HotView, error) {
+	return application.BuildHotView(ctx, s.Deps, digest.KindDaily)
 }
 
-func (s *Server) hotGitHub(w http.ResponseWriter, _ *http.Request) {
-	v, err := s.buildView()
+func (s *Server) hotGitHub(w http.ResponseWriter, r *http.Request) {
+	v, err := s.buildView(r.Context())
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -122,8 +123,8 @@ func (s *Server) hotGitHub(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{"generatedAt": v.Generated, "items": v.GitHub})
 }
 
-func (s *Server) hotNews(w http.ResponseWriter, _ *http.Request) {
-	v, err := s.buildView()
+func (s *Server) hotNews(w http.ResponseWriter, r *http.Request) {
+	v, err := s.buildView(r.Context())
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -135,8 +136,8 @@ func (s *Server) hotNews(w http.ResponseWriter, _ *http.Request) {
 }
 
 // hotDomestic 国内热榜：实时计算的轻管道视图（多源共振，无 LLM）+ 当日综述。
-func (s *Server) hotDomestic(w http.ResponseWriter, _ *http.Request) {
-	v, err := application.BuildDomesticView(s.ctx(), s.Deps, 0)
+func (s *Server) hotDomestic(w http.ResponseWriter, r *http.Request) {
+	v, err := application.BuildDomesticView(r.Context(), s.Deps, 0)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -147,12 +148,12 @@ func (s *Server) hotDomestic(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"generatedAt": v.Generated,
 		"items":       v.Items,
-		"summary":     application.TodayDomesticSummary(s.ctx(), s.Deps),
+		"summary":     application.TodayDomesticSummary(r.Context(), s.Deps),
 	})
 }
 
-func (s *Server) hotFusion(w http.ResponseWriter, _ *http.Request) {
-	v, err := s.buildView()
+func (s *Server) hotFusion(w http.ResponseWriter, r *http.Request) {
+	v, err := s.buildView(r.Context())
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -161,7 +162,7 @@ func (s *Server) hotFusion(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) hotAll(w http.ResponseWriter, r *http.Request) {
-	v, err := s.buildView()
+	v, err := s.buildView(r.Context())
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -170,7 +171,7 @@ func (s *Server) hotAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) digestLatest(w http.ResponseWriter, r *http.Request) {
-	d, err := s.Deps.Digests.Latest(s.ctx(), digest.KindDaily)
+	d, err := s.Deps.Digests.Latest(r.Context(), digest.KindDaily)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -190,7 +191,7 @@ func (s *Server) digestLatest(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) digestByDate(w http.ResponseWriter, r *http.Request) {
 	date := chi.URLParam(r, "date")
-	d, err := s.Deps.Digests.FindByDate(s.ctx(), date)
+	d, err := s.Deps.Digests.FindByDate(r.Context(), date)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -208,13 +209,13 @@ func (s *Server) digestByDate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sources(w http.ResponseWriter, r *http.Request) {
-	list := s.sourceInfos()
+	list := s.sourceInfos(r.Context())
 	writeJSON(w, 200, map[string]any{"items": list})
 }
 
 // sourceInfos 信源展示行（/api/v1/sources 与控制台共用）。
-func (s *Server) sourceInfos() []SourceInfoDTO {
-	all, err := s.Deps.Sources.All(s.ctx())
+func (s *Server) sourceInfos(ctx context.Context) []SourceInfoDTO {
+	all, err := s.Deps.Sources.All(ctx)
 	if err != nil {
 		return nil
 	}
@@ -257,7 +258,7 @@ type SourceInfoDTO struct {
 
 func (s *Server) searchAPI(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
-	results, err := application.Search(s.ctx(), s.Deps, q, 30)
+	results, err := application.Search(r.Context(), s.Deps, q, 30)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -270,8 +271,8 @@ func (s *Server) searchAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 // usageAPI Token 用量 JSON（APP/运维）。
-func (s *Server) usageAPI(w http.ResponseWriter, _ *http.Request) {
-	v, err := application.UsageOverview(s.ctx(), s.Deps.Usage, s.Deps.Budget, s.Deps.Clock)
+func (s *Server) usageAPI(w http.ResponseWriter, r *http.Request) {
+	v, err := application.UsageOverview(r.Context(), s.Deps.Usage, s.Deps.Budget, s.Deps.Clock)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -285,13 +286,13 @@ func (s *Server) diagnosticsAPI(w http.ResponseWriter, r *http.Request) {
 	if stage == "" {
 		stage = item.StageWritten
 	}
-	items, err := s.Deps.Items.ByStage(s.ctx(), []item.Stage{stage}, 50)
+	items, err := s.Deps.Items.ByStage(r.Context(), []item.Stage{stage}, 50)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
 	}
 	names := map[string]string{}
-	if all, err := s.Deps.Sources.All(s.ctx()); err == nil {
+	if all, err := s.Deps.Sources.All(r.Context()); err == nil {
 		for _, src := range all {
 			names[src.ID] = src.Name
 		}
@@ -319,12 +320,12 @@ func (s *Server) diagnosticsAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 // runsAPI 运行历史 JSON。
-func (s *Server) runsAPI(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) runsAPI(w http.ResponseWriter, r *http.Request) {
 	if s.Runs == nil {
 		writeJSON(w, 200, map[string]any{"items": []any{}})
 		return
 	}
-	rows, err := application.ListRuns(s.ctx(), s.Runs, 20)
+	rows, err := application.ListRuns(r.Context(), s.Runs, 20)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -348,13 +349,11 @@ func (s *Server) runsAPI(w http.ResponseWriter, _ *http.Request) {
 
 // ---------- helpers ----------
 
-var errNotFound = errorString("not found")
-
 type errorString string
 
 func (e errorString) Error() string { return string(e) }
 
-func (s *Server) ctx() context.Context { return context.Background() }
+var errNotFound = errorString("not found")
 
 // cors 跨域中间件：白名单来自 CORS_ORIGINS 环境变量（逗号分隔）。
 // 默认为空 = 不放行任何跨域（同源与原生 APP 不受影响）。

@@ -129,12 +129,12 @@ func (c *Client) startHealthCheck() {
 	}()
 }
 
-// performHealthCheck 执行一次健康检查（调用/health端点）。
+// performHealthCheck 执行一次健康检查（调用/healthz端点）。
 func (c *Client) performHealthCheck() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/health", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/healthz", nil)
 	if err != nil {
 		c.recordHealthCheckFailure(fmt.Errorf("build health request: %w", err))
 		return

@@ -194,7 +194,12 @@ func (s *Server) beginPasskeyLogin(w http.ResponseWriter, r *http.Request) {
 
 // finishPasskeyLogin POST /api/v1/admin/passkey/finish-login（免密入口，守卫外）。
 func (s *Server) finishPasskeyLogin(w http.ResponseWriter, r *http.Request) {
-	rawBody, _ := io.ReadAll(r.Body)
+	// 免密入口限 body 1MB：WebAuthn assertion 正常远小于此，防超大 body 耗尽内存
+	rawBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		writeErr(w, 400, errorString("请求体过大或读取失败"))
+		return
+	}
 	r.Body = io.NopCloser(strings.NewReader(string(rawBody)))
 	var p struct {
 		Token    string `json:"token"`

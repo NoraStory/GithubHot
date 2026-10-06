@@ -52,6 +52,6 @@ func (s *Server) probesRunAPI(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 503, errorString("探针未启用"))
 		return
 	}
-	go s.Probes.RunProbes(context.Background())
+	goSafe("probes-run", func() { s.Probes.RunProbes(context.Background()) })
 	writeJSON(w, 200, map[string]any{"ok": true, "started": true})
 }

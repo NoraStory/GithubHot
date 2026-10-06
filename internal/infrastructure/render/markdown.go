@@ -119,8 +119,15 @@ func orDash(s string) string {
 	return s
 }
 
-// mdEscape 转义 Markdown 表格敏感字符。
+// mdEscape 转义 Markdown 表格敏感字符与 HTML（标题/摘要是外部抓取内容，
+// 经前端 marked+v-html 渲染，不转义 HTML 会构成存储型 XSS——恶意标题形如
+// <img src=x onerror=...>）。先转 & 避免二次转义实体。
 func mdEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	s = strings.ReplaceAll(s, "'", "&#39;")
 	s = strings.ReplaceAll(s, "|", "\\|")
 	s = strings.ReplaceAll(s, "\n", " ")
 	if len([]rune(s)) > 80 {

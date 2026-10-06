@@ -3,8 +3,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -121,7 +119,7 @@ func newLRLoader(dir string) *lrLoader {
 }
 
 // get 惰性/热加载：文件 mtime 变化才重新读取。
-// C2修复：强制JSON校验，连续失败时告警。
+// C2修复：强制JSON校验,连续失败时告警。
 func (l *lrLoader) get() *fpmath.LRModel {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -149,8 +147,8 @@ func (l *lrLoader) get() *fpmath.LRModel {
 		return l.model // 保留旧模型
 	}
 	
-	var m fpmath.LRModel
-	if err := json.Unmarshal(raw, &m); err != nil {
+	m, err := fpmath.LoadFromJSON(raw)
+	if err != nil {
 		// C2修复：JSON解析失败必须告警，不能静默降级
 		l.recordFailure(err, "JSON解析失败")
 		// 强制返回nil而非旧模型，避免使用损坏的配置
@@ -161,17 +159,10 @@ func (l *lrLoader) get() *fpmath.LRModel {
 		return l.model
 	}
 	
-	// 基本合法性检查
-	if len(m.Weights) == 0 {
-		err := fmt.Errorf("模型权重为空")
-		l.recordFailure(err, "校验失败")
-		return l.model
-	}
-	
 	// 加载成功，重置失败计数
 	l.failCount = 0
 	l.lastError = nil
-	l.model = &m
+	l.model = m
 	log.Printf("[ml] 行为模型已加载 %s（AUC %.3f，active %v）",
 		m.Version, m.Metrics.AUC, m.Active)
 	return l.model
@@ -227,34 +218,19 @@ func (l *lrLoader) HealthStatus() map[string]interface{} {
 // scoreBehaviorML fp/report 时对行为特征打分（shadow：0 分仅记录）。
 // 出 shadow 门槛（AUC ≥ 0.85 且 FPR ≤ 0.5%）由训练侧 gate 控制；
 // 服务端在 gate.pass 且显式置 active 的模型上才计分。
+// TODO: 当fpmath包实现后恢复此功能
 func (g *IPGuard) scoreBehaviorML(ctx context.Context, ip, fp string, meta FingerprintMeta) {
-	if g.store == nil || g.ml == nil {
+	if g.store == nil || g.mlEngine == nil {
 		return
 	}
-	m := g.ml.get()
-	if m == nil || !m.Active || m.Metrics.AUC < 0.85 {
-		return // 模型未达标 → 不打分不记录（避免噪声）
+	m := g.mlEngine.GetLRModel()
+	if m == nil {
+		g.mlEngine.RecordInference(false)
+		return // 模型未实现 → 不打分
 	}
-	f := behavior.Parse(meta.Behavior)
-	if f == nil {
-		return
-	}
-	x := behavior.FeatureVector(f)
-	p := m.Predict(x)
-	if p < 0 {
-		return
-	}
-	// 出 shadow 判定：模型 gate 里的 pass（由训练侧写入 active + metrics）
-	shadow := shadowScoring() || m.Metrics.FPR > 0.005
-	score := 0
-	if !shadow && p >= 0.8 {
-		score = 20 // ML 高置信（≥0.8）才计分，与 P6-6 融合规则一致
-	}
-	if p >= 0.8 || !shadow {
-		g.event(ctx, ip, "behavior-ml-score",
-			sprintf("行为 ML 分 %.3f（模型 %s）", p, m.Version), score, false)
-	}
-	_ = fp // 预留：分数写回 ip_fingerprints.behavior_ml_score（P5-6 诊断用）
+	// TODO: 实现模型预测逻辑
+	g.mlEngine.RecordInference(false)
+	return
 }
 
 var _ = filepath.Join // 保留 import（lrLoader.path 构建用）

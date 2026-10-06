@@ -78,10 +78,24 @@ func ValidateAndResolve(ctx context.Context, raw string) (*url.URL, error) {
 	if net.ParseIP(host) != nil {
 		return u, nil // 字面量已在 ValidateURL 判过
 	}
-	resolver := &net.Resolver{}
+	if _, err := resolvePublic(ctx, host); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+// lookupHost 解析函数变量（测试可替换以模拟 rebinding/解析结果）。
+// 生产路径 = 标准 Resolver.LookupIPAddr；预校验与拨号时刻共用同一注入点。
+var lookupHost = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return (&net.Resolver{}).LookupIPAddr(ctx, host)
+}
+
+// resolvePublic 解析 host 并要求全部结果为公网（预校验与 safeDialContext
+// 共用口径：任一结果非公网即全拒，防 round-robin 混入内网地址）。
+func resolvePublic(ctx context.Context, host string) ([]net.IPAddr, error) {
 	ipCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	addrs, err := resolver.LookupIPAddr(ipCtx, host)
+	addrs, err := lookupHost(ipCtx, host)
 	if err != nil {
 		return nil, fmt.Errorf("DNS 解析 %s 失败: %w", host, err)
 	}
@@ -93,7 +107,7 @@ func ValidateAndResolve(ctx context.Context, raw string) (*url.URL, error) {
 			return nil, fmt.Errorf("%w: %s -> %s", ErrDNSRejected, host, a.IP)
 		}
 	}
-	return u, nil
+	return addrs, nil
 }
 
 // isPublicIP 判定是否公网地址：拒绝环回、私有、链路本地、组播、未指定等。
@@ -141,7 +155,10 @@ func Fetch(ctx context.Context, rawURL string, headers map[string]string) ([]byt
 }
 
 // Do 经过 SSRF 校验的任意方法请求。
-// 直连模式（默认）：scheme/host 字面量 + DNS 解析结果全为公网地址才放行。
+// 直连模式（默认）：scheme/host 字面量 + DNS 解析结果全为公网地址才放行，
+// 且拨号时在连接时刻重新解析校验并直连校验通过的 IP——预校验与实际连接
+// 若各自独立解析，攻击者可在两次解析之间切换 A 记录到内网地址（DNS
+// rebinding TOCTOU），因此校验必须与拨号同源。
 // 代理模式（设置了 HTTPS_PROXY/HTTP_PROXY）：跳过 DNS 预解析、由代理负责
 // 出口解析——Clash TUN/fake-ip 等环境解析出的 198.18/15 是代理伪 IP 而非
 // 真实目标；主机名禁用名单与 IP 字面量校验保持不变。
@@ -169,6 +186,9 @@ func Do(ctx context.Context, method, rawURL string, headers map[string]string, b
 			return validate(req.Context(), req.URL.String())
 		},
 	}
+	if !UsingProxy() {
+		client.Transport = directTransport
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("请求 %s: %w", req.Host, err)
@@ -179,6 +199,53 @@ func Do(ctx context.Context, method, rawURL string, headers map[string]string, b
 		return nil, resp.StatusCode, fmt.Errorf("读取响应: %w", err)
 	}
 	return data, resp.StatusCode, nil
+}
+
+// directTransport 直连模式共享传输层：DialContext 在连接时刻解析并校验。
+// TLS SNI 与 Host 头由 Transport 依据原始 URL host 生成，直连 IP 不影响。
+var directTransport = &http.Transport{
+	DialContext:         safeDialContext,
+	TLSHandshakeTimeout: 10 * time.Second,
+	IdleConnTimeout:     90 * time.Second,
+}
+
+// safeDialContext 连接时刻的 SSRF 校验拨号：复用 resolvePublic（任一结果非公网
+// 即全拒）→ 直连校验通过的地址。与预校验共用 lookupHost 注入点，但这是独立
+// 的第二次解析——攻击者在预校验后切换 DNS，此处仍会拦截（rebinding 防线）。
+func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("拨号地址非法 %q: %w", addr, err)
+	}
+	if net.ParseIP(host) != nil {
+		// IP 字面量已在 ValidateURL 判定，直接拨
+		return (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, network, addr)
+	}
+	lower := strings.ToLower(host)
+	if forbiddenHostNames[lower] || strings.HasSuffix(lower, ".localhost") ||
+		strings.HasSuffix(lower, ".local") || strings.HasSuffix(lower, ".internal") {
+		return nil, fmt.Errorf("%w: %s", ErrHostForbidden, host)
+	}
+	addrs, err := resolvePublic(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	// 优先 IPv4，失败逐个尝试其余公网地址
+	var lastErr error
+	for _, a := range addrs {
+		if a.IP.To4() == nil && len(addrs) > 1 {
+			continue
+		}
+		conn, err := (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, network, net.JoinHostPort(a.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("无可用公网地址连接 %s", host)
+	}
+	return nil, fmt.Errorf("连接 %s 失败: %w", host, lastErr)
 }
 
 // validate 发出请求前（含重定向每一跳）的完整 SSRF 校验。

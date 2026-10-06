@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -40,6 +41,28 @@ type AdminSessions interface {
 	FindAdminSession(ctx context.Context, id string) (created, expires time.Time, ip string, found bool, err error)
 	RenewAdminSession(ctx context.Context, id string, ttl time.Duration) error
 	DeleteAdminSession(ctx context.Context, id string) error
+}
+
+// adminOpenMode 管理端是否处于无鉴权开放模式（密码哈希与旧令牌均为空）。
+func adminOpenMode() bool {
+	return os.Getenv("ADMIN_PASSWORD_HASH") == "" && os.Getenv("ADMIN_TOKEN") == ""
+}
+
+// CheckAdminAuthConfig serve 启动校验（在 adminAuth 之外兜底）：
+// TLS（公网部署标志）下开放模式直接拒绝启动——与 APP_SIGN_SEED 同一严格度，
+// 否则忘配密码的公网实例会把封禁/解封/信源管理/访客指纹档案全部暴露给任何人；
+// 纯 HTTP 视为本地开发，保留开放模式但打 CRITICAL 级警告。
+func CheckAdminAuthConfig(tlsEnabled bool) error {
+	if !adminOpenMode() {
+		return nil
+	}
+	if tlsEnabled {
+		return fmt.Errorf("管理端鉴权未配置（ADMIN_PASSWORD_HASH / ADMIN_TOKEN 均为空）：TLS 公网部署下管理端完全开放，拒绝启动；"+
+			"请执行 `githubhot admin hash 你的密码` 生成哈希并写入 .env 的 ADMIN_PASSWORD_HASH")
+	}
+	log.Printf("[CRITICAL] 管理端完全开放（ADMIN_PASSWORD_HASH / ADMIN_TOKEN 均未配置）：所有 /api/v1/admin/* 端点无需鉴权；"+
+		"仅限本机开发使用，任何非回环部署必须配置其一")
+	return nil
 }
 
 // adminAuth 管理端守卫：按上述三种模式校验。
@@ -229,7 +252,7 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p loginPayload
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil || p.Password == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&p); err != nil || p.Password == "" {
 		writeErr(w, 400, errorString("请求体需要 {\"password\": \"...\"}"))
 		return
 	}

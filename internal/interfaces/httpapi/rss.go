@@ -62,7 +62,7 @@ func writeRSS(w http.ResponseWriter, body string) {
 
 // feedNews AI 资讯精选 feed：48h 内热度 Top 30 事件。
 func (s *Server) feedNews(w http.ResponseWriter, r *http.Request) {
-	v, err := s.buildView()
+	v, err := s.buildView(r.Context())
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -86,7 +86,7 @@ func (s *Server) feedNews(w http.ResponseWriter, r *http.Request) {
 
 // feedGitHub GitHub 项目榜 feed。
 func (s *Server) feedGitHub(w http.ResponseWriter, r *http.Request) {
-	v, err := s.buildView()
+	v, err := s.buildView(r.Context())
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -110,7 +110,7 @@ func (s *Server) feedGitHub(w http.ResponseWriter, r *http.Request) {
 
 // feedDigest 期刊 feed：最近的日报/周报/月报。
 func (s *Server) feedDigest(w http.ResponseWriter, r *http.Request) {
-	ctx := s.ctx()
+	ctx := r.Context()
 	var items []rssItem
 	for _, kind := range []string{"daily", "weekly", "monthly"} {
 		list, err := s.Deps.Digests.List(ctx, digestKind(kind), 5)

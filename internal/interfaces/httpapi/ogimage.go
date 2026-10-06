@@ -65,7 +65,7 @@ func (r *ImageResolver) Resolve(rawURL string) string {
 	}
 	r.inflight[rawURL] = true
 	r.mu.Unlock()
-	go r.fetchAndStore(rawURL)
+	goSafe("ogimage-fetch", func() { r.fetchAndStore(rawURL) })
 	return ""
 }
 

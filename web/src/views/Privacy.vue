@@ -8,7 +8,7 @@ onMounted(() => {
 
 <template>
   <div id="page">
-    <div id="page-header" class="full_page">
+    <div id="page-header" class="not-home-page">
       <div id="site-info">
         <h1 id="site-title">隐私政策</h1>
         <div id="site-subtitle">
@@ -18,7 +18,7 @@ onMounted(() => {
     </div>
 
     <main class="layout" id="content-inner">
-      <div id="page" class="flink">
+      <div id="privacy-page" class="flink">
         <article class="post-content">
           <div class="privacy-policy-content">
             <section class="policy-section">
@@ -243,48 +243,6 @@ onMounted(() => {
             </section>
 
             <section class="policy-section">
-              <h2>🔧 技术细节（开发者）</h2>
-              <details class="tech-details">
-                <summary>点击展开技术实现说明</summary>
-                <div class="tech-content">
-                  <h4>指纹生成算法</h4>
-                  <ul>
-                    <li><strong>MinHash</strong>：用于字体列表、插件列表的相似度计算（128 哈希，Jaccard 相似度）</li>
-                    <li><strong>PHash</strong>：用于 Canvas 图像的感知哈希（汉明距离 ≤5 视为相同）</li>
-                    <li><strong>LSH (Locality Sensitive Hashing)</strong>：快速查找相似指纹（10 bands × 13 rows）</li>
-                  </ul>
-                  
-                  <h4>封禁决策逻辑</h4>
-                  <pre><code>违规积分 = Σ(事件积分 × 时间衰减)
-封禁时长 = min(24h, 基础时长 × 1.5^(累计封禁次数))
-
-事件积分示例：
-- 访问 404：2 分
-- 短时高频（>60 req/min）：10 分
-- 自动化工具特征：15 分
-- 登录暴力破解：30 分
-
-封禁阈值：
-- 第一次警告：30 分（封禁 30 分钟）
-- 第二次：45 分（封禁 1 小时）
-- 第三次及以后：60 分（封禁 2-24 小时）</code></pre>
-
-                  <h4>数据库表结构</h4>
-                  <ul>
-                    <li><code>ip_events</code>：违规事件表（ip, kind, score, created_at）</li>
-                    <li><code>ip_fingerprints</code>：指纹表（fp, ip, ua, components, minhash_sig, phash）</li>
-                    <li><code>ip_bans</code>：封禁表（ip, reason, expires_at, strikes）</li>
-                    <li><code>fp_lsh_buckets</code>：LSH 索引表（fp, band, bucket_hash）</li>
-                  </ul>
-
-                  <h4>开源代码</h4>
-                  <p>本站完整源码已在 GitHub 开源：<a href="https://github.com/NoraStory/GithubHot" target="_blank">https://github.com/NoraStory/GithubHot</a></p>
-                  <p>防护模块路径：<code>repo/internal/interfaces/httpapi/ipguard.go</code></p>
-                </div>
-              </details>
-            </section>
-
-            <section class="policy-section">
               <h2>📝 政策变更</h2>
               <p>
                 本隐私政策可能不时更新。重大变更时，我们会在首页显著位置通知用户。
@@ -311,6 +269,33 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* 页面头部 - 非全屏样式 */
+#page-header.not-home-page {
+  height: auto;
+  min-height: 200px;
+  padding: 80px 20px 40px;
+  background: linear-gradient(135deg, var(--anzhiyu-theme-op) 0%, var(--anzhiyu-background) 100%);
+  text-align: center;
+}
+
+#site-info {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+#site-title {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--anzhiyu-fontcolor);
+  margin-bottom: 12px;
+}
+
+#site-subtitle {
+  font-size: 1.1rem;
+  color: var(--anzhiyu-secondfontcolor);
+  opacity: 0.9;
+}
+
 .privacy-policy-content {
   max-width: 900px;
   margin: 0 auto;

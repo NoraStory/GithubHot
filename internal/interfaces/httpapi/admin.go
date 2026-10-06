@@ -121,7 +121,7 @@ func (s *Server) createSource(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
-	if err := s.Deps.Sources.Save(s.ctx(), src); err != nil {
+	if err := s.Deps.Sources.Save(r.Context(), src); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
@@ -136,7 +136,7 @@ func (s *Server) deleteSource(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, errorString("仓储不支持删除"))
 		return
 	}
-	if err := ar.Delete(s.ctx(), id); err != nil {
+	if err := ar.Delete(r.Context(), id); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
@@ -165,7 +165,7 @@ func (s *Server) testSource(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	ftctx, cancel := contextWithTimeout(s.ctx())
+	ftctx, cancel := contextWithTimeout(r.Context())
 	defer cancel()
 	raws, err := fetcher.Fetch(ftctx, src, time.Now())
 	if err != nil {
@@ -205,7 +205,7 @@ func (s *Server) pushItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
-	it, err := application.PushItem(s.ctx(), s.Deps, p.SourceID, p.URL, p.Title, p.Summary)
+	it, err := application.PushItem(r.Context(), s.Deps, p.SourceID, p.URL, p.Title, p.Summary)
 	if err != nil {
 		writeErr(w, 400, err)
 		return
@@ -214,15 +214,15 @@ func (s *Server) pushItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // domesticSummaryStatus 国内热榜综述开关状态。
-func (s *Server) domesticSummaryStatus(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) domesticSummaryStatus(w http.ResponseWriter, r *http.Request) {
 	if s.Deps.Settings == nil {
 		writeErr(w, 500, errorString("设置仓储不可用"))
 		return
 	}
 	date := time.Now().Format("2006-01-02")
-	has, _, _ := s.Deps.Settings.DomesticSummary(s.ctx(), date)
+	has, _, _ := s.Deps.Settings.DomesticSummary(r.Context(), date)
 	writeJSON(w, 200, map[string]any{
-		"enabled":     application.DomesticSummaryEnabled(s.ctx(), s.Deps),
+		"enabled":     application.DomesticSummaryEnabled(r.Context(), s.Deps),
 		"date":        date,
 		"hasSummary":  has != "",
 		"summaryDate": date,
@@ -246,7 +246,7 @@ func (s *Server) domesticSummaryToggle(w http.ResponseWriter, r *http.Request) {
 	if p.Enabled {
 		v = "1"
 	}
-	if err := s.Deps.Settings.Set(s.ctx(), application.SettingDomesticSummaryEnabled, v); err != nil {
+	if err := s.Deps.Settings.Set(r.Context(), application.SettingDomesticSummaryEnabled, v); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
@@ -263,7 +263,7 @@ func (s *Server) lockStory(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
-	if err := s.Deps.Stories.SetManual(s.ctx(), id, p.Manual); err != nil {
+	if err := s.Deps.Stories.SetManual(r.Context(), id, p.Manual); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
@@ -273,8 +273,8 @@ func (s *Server) lockStory(w http.ResponseWriter, r *http.Request) {
 // ---------- Agent 出口 ----------
 
 // llmsTxt 面向 Agent 的站点说明（llms.txt 约定）。
-func (s *Server) llmsTxt(w http.ResponseWriter, _ *http.Request) {
-	v, err := s.buildView()
+func (s *Server) llmsTxt(w http.ResponseWriter, r *http.Request) {
+	v, err := s.buildView(r.Context())
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -310,8 +310,8 @@ func (s *Server) llmsTxt(w http.ResponseWriter, _ *http.Request) {
 }
 
 // agentMD Agent Markdown 报告：双榜完整 Markdown（llms 风格内容面）。
-func (s *Server) agentMD(w http.ResponseWriter, _ *http.Request) {
-	v, err := s.buildView()
+func (s *Server) agentMD(w http.ResponseWriter, r *http.Request) {
+	v, err := s.buildView(r.Context())
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -348,7 +348,7 @@ func fmtF(b *strings.Builder, format string, args ...any) {
 // storyAPI 事件详情 JSON（APP 契约）。
 func (s *Server) storyAPI(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	v, err := application.BuildStoryDetail(s.ctx(), s.Deps, id)
+	v, err := application.BuildStoryDetail(r.Context(), s.Deps, id)
 	if err != nil {
 		writeErr(w, 404, err)
 		return

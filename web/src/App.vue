@@ -59,6 +59,8 @@ function toggleMusic() {
   if (ap) ap.toggle()
   musicOn.value = ap ? !ap.audio.paused : !musicOn.value
 }
+function musicSkipBack() { window.anzhiyu && window.anzhiyu.musicSkipBack() }
+function musicSkipForward() { window.anzhiyu && window.anzhiyu.musicSkipForward() }
 
 // 背景视频滚动渐变虚化（不支持 scroll 时间线的浏览器走 JS 兜底；支持的浏览器
 // 由 App.vue 的 gh-media-blur 动画接管，动画值覆盖内联变量，二者不冲突）
@@ -79,6 +81,9 @@ function toggleRightside() {  // 参考站 main.js rightSideFn["rightside-config
   }
   hide.classList.toggle('show')
 }
+
+// 模板层薄包装：Vue3 模板表达式无法访问 window，统一经此调用 shim
+function toggleHideAside() { window.anzhiyu && window.anzhiyu.hideAsideBtn() }
 
 // 参考站 scrollFn 同构：滚动后右侧工具滑入；页面不满一屏时始终显示
 function updateRightside() {
@@ -135,6 +140,7 @@ function startBarrage() {
   setTimeout(barrageSpawn, 1200)
 }
 function stopBarrage() { if (barrageTimer) { clearInterval(barrageTimer); barrageTimer = null } }
+function toggleBarrage() { window.anzhiyu && window.anzhiyu.switchCommentBarrage() }
 
 // ===== 快捷键系统（参考站 keyUpEven 同构：M/R/H/D/I/G/N/F + Esc，开关持久化）=====
 const keyboardOn = ref(localStorage.getItem('keyboardToggle') !== 'false')
@@ -158,6 +164,8 @@ function keyHandler(e) {
       break
   }
 }
+
+function toggleKeyboard() { window.anzhiyu && window.anzhiyu.keyboardToggle() }
 
 // ===== 右键自定义菜单（参考站 #rightMenu + #rightmenu-mask 同构，上下文感知）=====
 const rightMenu = ref(null)
@@ -322,33 +330,23 @@ async function initFingerprintCollection() {
     await new Promise(resolve => setTimeout(resolve, 300))
     
     fingerprintStage.value = 'collecting'
-    
-    // 动态导入指纹库（避免阻塞首屏）
-    const { getFingerprint, initBehaviorReporting } = await import('./lib/fingerprint.js')
+    await new Promise(resolve => setTimeout(resolve, 500))
     
     fingerprintStage.value = 'analyzing'
+    await new Promise(resolve => setTimeout(resolve, 500))
     
-    // 获取指纹
-    const fp = await getFingerprint()
+    fingerprintStage.value = 'reporting'
     
-    if (fp) {
-      // 启动行为采集（键盘鼠标）
-      initBehaviorReporting(() => fp)
-      
-      fingerprintStage.value = 'reporting'
-      
-      // 上报指纹
-      await api.post('/api/v1/fp/report', { fp })
-      
-      fingerprintStage.value = 'complete'
-      
-      // 完成后短暂显示，然后隐藏
-      setTimeout(() => {
-        fingerprintLoading.value = false
-      }, 800)
-    } else {
-      throw new Error('指纹采集失败')
-    }
+    // 动态导入指纹库并上报（避免阻塞首屏）
+    const { reportFingerprint } = await import('./lib/fingerprint.js')
+    await reportFingerprint()
+    
+    fingerprintStage.value = 'complete'
+    
+    // 完成后短暂显示，然后隐藏
+    setTimeout(() => {
+      fingerprintLoading.value = false
+    }, 800)
   } catch (e) {
     console.error('指纹采集失败', e)
     fingerprintStage.value = 'error'
@@ -600,7 +598,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
       </div>
       <!-- AnZhiYu 返回顶部（带滚动百分比） -->
       <div class="nav-button" id="nav-totop">
-        <a class="totopbtn" href="javascript:void(0);" @click="window.anzhiyu && window.anzhiyu.scrollToDest(0, 500)">
+        <a class="totopbtn" href="javascript:void(0);" @click="rmTop">
           <i class="anzhiyufont anzhiyu-icon-arrow-up"></i><span id="percent">0</span>
         </a>
       </div>
@@ -669,16 +667,16 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
           <i class="anzhiyufont anzhiyu-icon-moon"></i>
         </a>
       </div>
-      <div class="console-btn-item" id="consoleHideAside" title="边栏显示控制" @click="window.anzhiyu && window.anzhiyu.hideAsideBtn()">
+      <div class="console-btn-item" id="consoleHideAside" title="边栏显示控制" @click="toggleHideAside">
         <a class="asideSwitch" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-arrows-left-right"></i></a>
       </div>
-      <div class="console-btn-item" id="consoleCommentBarrage" :class="{ on: barrageOn }" title="快讯弹幕开关" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()">
+      <div class="console-btn-item" id="consoleCommentBarrage" :class="{ on: barrageOn }" title="快讯弹幕开关" @click="toggleBarrage">
         <a class="commentBarrage" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-message"></i></a>
       </div>
       <div class="console-btn-item" id="consoleMusic" title="音乐开关" @click="toggleMusic">
         <a class="music-switch" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-music"></i></a>
       </div>
-      <div class="console-btn-item" id="consoleKeyboard" :class="{ on: keyboardOn }" title="快捷键开关" @click="window.anzhiyu && window.anzhiyu.keyboardToggle()">
+      <div class="console-btn-item" id="consoleKeyboard" :class="{ on: keyboardOn }" title="快捷键开关" @click="toggleKeyboard">
         <a class="keyboard-switch" href="javascript:void(0);"><i class="anzhiyufont anzhiyu-icon-keyboard"></i></a>
       </div>
       <div class="console-btn-item" id="consoleRandomPost" title="随机逛逛" @click="toRandom">
@@ -716,12 +714,12 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
     <div id="rightside-config-hide">
       <button id="translateLink" type="button" title="简繁转换" @click="translateToggle">繁</button>
       <button id="darkmode" type="button" title="浅色和深色模式转换" @click="dark = !dark; applyTheme()"><i class="anzhiyufont anzhiyu-icon-circle-half-stroke"></i></button>
-      <button id="hide-aside-btn" type="button" title="单栏和双栏切换" @click="window.anzhiyu && window.anzhiyu.hideAsideBtn()"><i class="anzhiyufont anzhiyu-icon-arrows-left-right"></i></button>
+      <button id="hide-aside-btn" type="button" title="单栏和双栏切换" @click="toggleHideAside"><i class="anzhiyufont anzhiyu-icon-arrows-left-right"></i></button>
     </div>
     <div id="rightside-config-show">
       <button id="rightside-config" type="button" title="设置" @click="toggleRightside"><i class="anzhiyufont anzhiyu-icon-gear"></i></button>
-      <a id="switch-commentBarrage" href="javascript:void(0);" title="开关弹幕" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()"><i class="anzhiyufont anzhiyu-icon-danmu"></i></a>
-      <button id="go-up" type="button" title="回到顶部" @click="window.anzhiyu && window.anzhiyu.scrollToDest(0, 500)"><i class="anzhiyufont anzhiyu-icon-arrow-up"></i></button>
+      <a id="switch-commentBarrage" href="javascript:void(0);" title="开关弹幕" @click="toggleBarrage"><i class="anzhiyufont anzhiyu-icon-danmu"></i></a>
+      <button id="go-up" type="button" title="回到顶部" @click="rmTop"><i class="anzhiyufont anzhiyu-icon-arrow-up"></i></button>
     </div>
   </div>
 
@@ -760,9 +758,9 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
       </template>
       <div class="rightMenu-item" id="menu-search" @click="rmSearch"><i class="anzhiyufont anzhiyu-icon-magnifying-glass"></i><span>站内搜索</span></div>
       <div class="rightMenu-item" id="menu-searchBaidu" @click="rmSearchBaidu"><i class="anzhiyufont anzhiyu-icon-magnifying-glass"></i><span>百度搜索</span></div>
-      <div class="rightMenu-item" id="menu-music-toggle" @click="window.anzhiyu && window.anzhiyu.musicToggle()"><i class="anzhiyufont anzhiyu-icon-play"></i><span>播放/暂停音乐</span></div>
-      <div class="rightMenu-item" id="menu-music-back" @click="window.anzhiyu && window.anzhiyu.musicSkipBack()"><i class="anzhiyufont anzhiyu-icon-backward"></i><span>切换到上一首</span></div>
-      <div class="rightMenu-item" id="menu-music-forward" @click="window.anzhiyu && window.anzhiyu.musicSkipForward()"><i class="anzhiyufont anzhiyu-icon-forward"></i><span>切换到下一首</span></div>
+      <div class="rightMenu-item" id="menu-music-toggle" @click="toggleMusic"><i class="anzhiyufont anzhiyu-icon-play"></i><span>播放/暂停音乐</span></div>
+      <div class="rightMenu-item" id="menu-music-back" @click="musicSkipBack"><i class="anzhiyufont anzhiyu-icon-backward"></i><span>切换到上一首</span></div>
+      <div class="rightMenu-item" id="menu-music-forward" @click="musicSkipForward"><i class="anzhiyufont anzhiyu-icon-forward"></i><span>切换到下一首</span></div>
       <div class="rightMenu-item" id="menu-music-copyMusicName" @click="rmCopyMusicName"><i class="anzhiyufont anzhiyu-icon-copy"></i><span>复制歌名</span></div>
     </div>
     <div class="rightMenu-group rightMenu-line rightMenuOther">
@@ -772,7 +770,7 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
     </div>
     <div class="rightMenu-group rightMenu-line rightMenuOther">
       <a class="rightMenu-item" id="menu-copy" href="javascript:void(0);" @click="rmCopyLink()"><i class="anzhiyufont anzhiyu-icon-copy"></i><span>复制地址</span></a>
-      <a class="rightMenu-item" id="menu-commentBarrage" href="javascript:void(0);" @click="window.anzhiyu && window.anzhiyu.switchCommentBarrage()"><i class="anzhiyufont anzhiyu-icon-message"></i><span class="menu-commentBarrage-text">{{ barrageOn ? '关闭快讯' : '显示快讯' }}</span></a>
+      <a class="rightMenu-item" id="menu-commentBarrage" href="javascript:void(0);" @click="toggleBarrage"><i class="anzhiyufont anzhiyu-icon-message"></i><span class="menu-commentBarrage-text">{{ barrageOn ? '关闭快讯' : '显示快讯' }}</span></a>
       <a class="rightMenu-item" id="menu-darkmode" href="javascript:void(0);" @click="rmDarkmode"><i class="anzhiyufont anzhiyu-icon-circle-half-stroke"></i><span class="menu-darkmode-text">{{ dark ? '浅色模式' : '深色模式' }}</span></a>
       <a class="rightMenu-item" id="menu-translate" href="javascript:void(0);" @click="rmTranslate"><i class="anzhiyufont anzhiyu-icon-language"></i><span>转为繁体</span></a>
     </div>

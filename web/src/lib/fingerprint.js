@@ -17,6 +17,8 @@ import { initBehaviorReporting } from './behavior'
 
 const FP_KEY = 'gh_fp'
 const REPORTED_KEY = 'gh_fp_reported'
+const REPORTED_TIMESTAMP_KEY = 'gh_fp_reported_ts'
+const REPORT_CACHE_TTL_MS = 5 * 60 * 1000  // 5分钟缓存，之后允许重新上报
 const DETECT_TIMEOUT_MS = 5000
 let reportRetry = 0
 
@@ -131,12 +133,40 @@ function envAudit() {
     const ua = (navigator.userAgent || '').toLowerCase()
     const p = (navigator.platform || '').toLowerCase()
     // 1) UA ↔ platform 矛盾（改机工具常留此类痕迹）
+    // Chrome 127+ 平台固化特性兼容：优先使用 Client Hints，navigator.platform 已被弃用
     const saysWin = ua.includes('windows'), saysMac = ua.includes('mac os') || ua.includes('macintosh')
     const saysLinux = ua.includes('linux') && !ua.includes('android')
     const saysAndroid = ua.includes('android')
-    if (p && ((p.startsWith('win') && !saysWin) || (p.startsWith('mac') && !saysMac)
-      || (p.includes('android') && !saysAndroid) || (p.includes('linux') && !saysLinux && !saysAndroid))) {
-      flags.push('ua-platform-mismatch')
+    
+    // 提取 Chrome 版本号（格式：Chrome/xxx.x.x.x）
+    const chromeMatch = ua.match(/chrome\/(\d+)/)
+    const chromeVersion = chromeMatch ? parseInt(chromeMatch[1], 10) : 0
+    
+    // Chrome 127+ 使用平台固化（Win32/MacIntel），不再反映真实架构
+    // 这种行为是正常的隐私保护，不应标记为可疑
+    const isPlatformHardened = chromeVersion >= 127 || 
+      (ua.includes('edg/') && chromeVersion >= 127) || // Edge 基于 Chromium
+      ua.includes('chrome/1') // 任何 Chrome 100+ 可能启用
+    
+    // 只有在非固化平台或明显矛盾时才标记
+    if (p && !isPlatformHardened) {
+      if ((p.startsWith('win') && !saysWin) || (p.startsWith('mac') && !saysMac)
+        || (p.includes('android') && !saysAndroid) || (p.includes('linux') && !saysLinux && !saysAndroid)) {
+        flags.push('ua-platform-mismatch')
+      }
+    } else if (p && isPlatformHardened) {
+      // Chrome 127+ 的额外验证：检测明显的自动化工具特征
+      // Win32/Win64 混淆（自动化工具常错误伪造）
+      const platformSaysWin = p.startsWith('win')
+      const platformSaysLinux = p.includes('linux')
+      const platformSaysMac = p.includes('mac')
+      
+      // 如果 platform 说 Windows 但 UA 说 Linux/Mac = 明显伪造
+      if ((platformSaysWin && (saysLinux || saysMac)) ||
+          (platformSaysLinux && (saysWin || saysMac)) ||
+          (platformSaysMac && (saysWin || saysLinux))) {
+        flags.push('ua-platform-mismatch')
+      }
     }
     // 2) 无头浏览器特征
     if (ua.includes('headless') || ua.includes('phantom') || ua.includes('selenium')) flags.push('headless-ua')
@@ -237,9 +267,18 @@ async function detectFlags() {
 
 // 采集 + 上报（每会话一次，成功后打标；失败 8 秒后重试一次）。
 // 旧版本先打标再请求，遇到服务重启等瞬时失败会整会话不再上报——这里修正。
+// 优化：使用带时间戳的缓存机制，5分钟后允许重新上报（解决刷新后不更新的问题）
 export async function reportFingerprint() {
   try {
-    if (sessionStorage.getItem(REPORTED_KEY)) return
+    // 检查上报缓存：如果5分钟内已上报，跳过
+    const lastReported = sessionStorage.getItem(REPORTED_TIMESTAMP_KEY)
+    if (lastReported) {
+      const elapsed = Date.now() - parseInt(lastReported, 10)
+      if (elapsed < REPORT_CACHE_TTL_MS) {
+        return  // 5分钟内已上报，跳过
+      }
+    }
+    
     const [canvas, webgl, rtc, audio, fonts] = await Promise.all(
       [canvasFp(), webglFp(), webrtcIPs(), audioFp(), fontsFp()])
     const fp = await sha256([canvas.hash, webgl.hash, audio, fonts.hash, envSignals()].join('~'))
@@ -276,14 +315,19 @@ export async function reportFingerprint() {
       })
     })
     if (!res.ok) throw new Error('http ' + res.status)
+    
+    // 上报成功，记录时间戳（替代旧的布尔标记）
     sessionStorage.setItem(REPORTED_KEY, '1')
+    sessionStorage.setItem(REPORTED_TIMESTAMP_KEY, String(Date.now()))
+    
     // P4-5/P4-6：指纹就绪后启动行为/时钟偏移的周期性补充上报（每 5 分钟 + 页面隐藏/卸载）
     initBehaviorReporting(() => localStorage.getItem(FP_KEY) || '')
     const d = await res.json().catch(() => ({}))
     if (d.banned) location.reload()
   } catch {
     // 上报失败（如服务重启瞬间）不阻塞站点，稍后重试（最多 3 次）
-    if (!sessionStorage.getItem(REPORTED_KEY) && reportRetry++ < 3) {
+    const lastReported = sessionStorage.getItem(REPORTED_TIMESTAMP_KEY)
+    if (!lastReported && reportRetry++ < 3) {
       setTimeout(() => reportFingerprint(), 8000)
     }
   }
