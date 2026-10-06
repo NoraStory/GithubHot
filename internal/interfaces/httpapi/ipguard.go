@@ -192,6 +192,7 @@ type FingerprintDTO struct {
 	ClockSkewPPM *float64          // P4-6 时钟偏移（ppm；NULL=未采集）
 	ClusterID   *int64             // P4-4 图聚类簇归属（NULL=未聚类）
 	GNNScore    *float64           // P6-3 GNN 推理 bot 概率（NULL=未打分）
+	AnomalyScore *float64          // P5-2 iForest 异常分（NULL=未计算）
 }// PHashRowDTO 感知哈希候选行（同源关联扫描）。
 type PHashRowDTO struct {
 	Fingerprint string

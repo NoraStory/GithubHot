@@ -182,7 +182,7 @@ func toFingerprintDTOs(rows []sqlite.FingerprintRow) []httpapi.FingerprintDTO {
 			CanvasPHash: f.CanvasPHash, MinHashSig: f.MinHashSig,
 			EntropyBits: f.EntropyBits, Stability: f.Stability, CompStability: f.CompStability,
 			JA4: f.JA4, Attestation: f.AttestationJSON,
-			BehaviorJSON: f.BehaviorJSON, ClockSkewPPM: f.ClockSkewPPM, ClusterID: f.ClusterID, GNNScore: f.GNNScore,
+			BehaviorJSON: f.BehaviorJSON, ClockSkewPPM: f.ClockSkewPPM, ClusterID: f.ClusterID, GNNScore: f.GNNScore, AnomalyScore: f.AnomalyScore,
 		})
 	}
 	return out

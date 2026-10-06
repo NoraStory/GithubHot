@@ -429,6 +429,20 @@ const rtcLeak = f => (f.Webrtc || []).some(x => x && x !== detail.value?.ip)
                         </div>
                       </template>
                       <div v-else class="empty">该指纹环境核验全部通过</div>
+                      <h5>P2–P6 信号</h5>
+                      <div class="kv tight">
+                        <div v-if="f.CanvasPHash"><span>canvas pHash</span><b class="mono">{{ f.CanvasPHash }}</b></div>
+                        <div v-if="f.MinHashSig"><span>MinHash</span><b class="mono">{{ f.MinHashSig.slice(0, 16) }}…</b></div>
+                        <div v-if="f.EntropyBits > 0"><span>熵权</span><b class="num">{{ f.EntropyBits }} bit</b></div>
+                        <div v-if="f.Stability > 0"><span>稳定度</span><b class="num">{{ f.Stability }}</b></div>
+                        <div v-if="f.JA4"><span>JA4</span><b class="mono">{{ f.JA4 }}</b></div>
+                        <div v-if="f.ClusterID"><span>簇</span><b class="num">#{{ f.ClusterID }}</b></div>
+                        <div v-if="f.GNNScore != null"><span>GNN</span><b class="num">{{ f.GNNScore.toFixed(3) }}</b></div>
+                        <div v-if="f.Attestation && f.Attestation !== '{}'"><span>证明</span><b class="mono break">{{ f.Attestation }}</b></div>
+                        <div v-if="f.BehaviorJSON && f.BehaviorJSON !== '{}'"><span>行为</span><b class="mono break">{{ f.BehaviorJSON }}</b></div>
+                        <div v-if="f.ClockSkewPPM != null"><span>时钟偏移</span><b class="num">{{ f.ClockSkewPPM }} ppm</b></div>
+                        <div v-if="f.AnomalyScore != null"><span>iForest</span><b class="num">{{ f.AnomalyScore?.toFixed(3) }}</b></div>
+                      </div>
                     </div>
                   </div>
                 </td>

@@ -602,6 +602,15 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
 - **正交性 cron**：CheckOrthogonality 每日执行——behavior_ml 与 gnn_score 的
   皮尔逊相关 ≥ 0.6 → 日志 ⚠ 特征泄漏告警。
 
+### §10 批二：IPGuard 下钻面板 P2–P6 信号扩展 ✅
+
+- 指纹展开行新增 P2–P6 信号区块：canvas pHash / MinHash / 熵权（bit）/ 稳定度 / JA4 /
+  簇归属 / GNN 分 / 平台证明 / 行为 JSON / 时钟偏移（ppm）/ iForest 异常分。
+  每项条件渲染（有值才显示），旧数据不报错。
+- AdminLayout 菜单新增 Review 队列 + ML 诊断项。
+- **待做**（后续批次）：FpCard/ScoreBars 组件抽取（当前直接内联展开行）、
+  集群力导向图（d3-force）、LabelDialog 弹窗组件化、PSI 全量实现（需训练基准分布）。
+
 ## 已知边界 / 后续项
 
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，

@@ -105,6 +105,7 @@ type FingerprintRow struct {
 	BehaviorJSON      string // P4-5 行为生物特征（滑窗统计量 JSON，'{}'=未采集）
 	ClockSkewPPM      *float64 // P4-6 时钟偏移（ppm；NULL=未采集）
 	ClusterID         *int64  // P4-4 图聚类簇归属（NULL=未聚类）
+	AnomalyScore      *float64 // P5-2 iForest 异常分（NULL=未计算）
 }
 
 // UpsertFingerprint 登记一次指纹上报；返回该指纹历史上出现过的所有 IP。
@@ -210,7 +211,7 @@ func scanFingerprintRows(rows *sql.Rows) ([]FingerprintRow, error) {
 		var ipsJSON, rtcJSON, compJSON, flagsJSON, first, last string
 		if err := rows.Scan(&f.Fingerprint, &ipsJSON, &rtcJSON, &compJSON, &flagsJSON, &f.UA, &first, &last, &f.Hits,
 			&f.CanvasPHash, &f.MinHashSig, &f.EntropyBits, &f.Stability, &f.CompStabilityJSON, &f.JA4, &f.AttestationJSON, &f.GNNScore,
-			&f.BehaviorJSON, &f.ClockSkewPPM, &f.ClusterID); err != nil {
+			&f.BehaviorJSON, &f.ClockSkewPPM, &f.ClusterID, &f.AnomalyScore); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(ipsJSON), &f.IPs)

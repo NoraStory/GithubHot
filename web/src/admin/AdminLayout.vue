@@ -15,6 +15,8 @@ const menus = [
   { path: '/admin/sources', label: '🛠 信源管理' },
   { path: '/admin/digests', label: '📰 期刊' },
   { path: '/admin/ipguard', label: '🛡 IP 防护' },
+  { path: '/admin/review', label: '📋 Review 队列' },
+  { path: '/admin/mldiag', label: '📊 ML 诊断' },
   { path: '/admin/probes', label: '🩺 健康探针' },
   { path: '/admin/passkeys', label: '通行密钥' },
         { path: '/admin/system', label: '📊 资源监测' }
