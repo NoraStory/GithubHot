@@ -24,6 +24,17 @@ const detailError = ref('')
 
 const match = (ip) => !ipFilter.value || (ip || '').includes(ipFilter.value.trim())
 
+// isPrivateAccessIP 访问 IP 是本机/内网地址：此场景下 STUN 反射的是 NAT 出口
+// 公网地址，与访问 IP 不一致是网络拓扑的必然结果，不应标红（面板展示辅助）。
+function isPrivateAccessIP(ip) {
+  if (!ip) return false
+  if (ip === '::1' || ip.startsWith('127.') || ip.startsWith('fc') || ip.startsWith('fd')) return true
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(ip)
+  if (!m) return false
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+}
+
 const talkers = computed(() => (data.value?.talkers || []).filter(t => match(t.ip)))
 const bansFiltered = computed(() => (data.value?.bans || []).filter(b => match(b.IP)))
 const eventsFiltered = computed(() => (data.value?.events || []).filter(e => match(e.IP)))
@@ -397,9 +408,15 @@ const rtcLeak = f => (f.Webrtc || []).some(x => x && x !== detail.value?.ip)
                       </div>
                       <h5>WebRTC 真实 IP（STUN 探测）</h5>
                       <div v-if="(f.Webrtc || []).length" class="chip-row">
-                        <span v-for="x in f.Webrtc" :key="x" class="chip" :class="{ bad: x !== detail.ip }">
-                          {{ x }}{{ x !== detail.ip ? ' ≠ 访问 IP' : ' ✓ 与访问 IP 一致' }}
-                        </span>
+                        <template v-for="x in f.Webrtc" :key="x">
+                          <!-- .local = Chrome mDNS 匿名化本机候选（RFC 8115），不是 IP，不参与比对 -->
+                          <span v-if="x.endsWith('.local')" class="chip">{{ x }}（本机候选，浏览器匿名化）</span>
+                          <!-- 管理员自己从本机访问（127.0.0.1/内网）时，STUN 反射的是 NAT 出口，不一致属必然 -->
+                          <span v-else-if="detail.ip && isPrivateAccessIP(detail.ip)" class="chip">{{ x }}（本机访问：STUN 出口 ≠ 访问 IP 属正常）</span>
+                          <span v-else class="chip" :class="{ bad: x !== detail.ip }">
+                            {{ x }}{{ x !== detail.ip ? ' ≠ 访问 IP' : ' ✓ 与访问 IP 一致' }}
+                          </span>
+                        </template>
                       </div>
                       <div v-else class="empty">未泄漏（或浏览器已屏蔽）</div>
                     </div>
