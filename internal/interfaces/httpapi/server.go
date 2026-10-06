@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-webauthn/webauthn/webauthn"
+	"github.com/NoraStory/GithubHot/internal/infrastructure/sidecarclient"
 	"sync"
 
 	"github.com/NoraStory/GithubHot/internal/application"
@@ -37,6 +38,9 @@ type Server struct {
 
 	passkeyOnce sync.Once
 	passkeyMaps *passkeySessionStore
+
+	sidecarOnce   sync.Once
+	sidecarClient *sidecarclient.Client
 	TLSMode bool          // P3-1：serve 以 TLS 运行（证书或 ACME）→ HSTS 中间件启用
 	Version string
 }

@@ -245,6 +245,10 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 		ClockSkewPPM: p.ClockSkewPPM,
 	}
 	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, meta)
+	// P6-3b GNN sidecar 异步打分（fire-and-forget，不阻塞上报路径）
+	if sidecarEnabled() {
+		s.gnnSidecarScore(ctx, ip, p.Fingerprint)
+	}
 	// 每个命中项记违规事件（积分见 flagScore）。
 	// kind 按 flag 细分（env-flag:<flag>）：使不同命中项成为**独立证据**参与互证，
 	// 同时让 5 分钟去重按 flag 粒度生效——否则多条 flag 会被压成同一条事件。

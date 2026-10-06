@@ -595,3 +595,7 @@ func (f *fakeGuardStore) DeleteFpRuleLabels(context.Context) error {
 func (f *fakeGuardStore) UpdateAnomalyScore(context.Context, string, float64) error {
 	return nil
 }
+
+func (f *fakeGuardStore) UpdateGNN(context.Context, string, float64, string) error {
+	return nil
+}

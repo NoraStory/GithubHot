@@ -563,6 +563,18 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
   主管道消费流：ml export-graph → 沙盒训练 → ml import-gnn 写回。冷启动 Louvain 均值
   域包方法已就绪（fpgraph.Communities 均值可计算）。
 
+### P6-3b sidecar 集成 ✅ + P6-6 融合规则 ✅
+
+- go-client 迁入主仓库 \`internal/infrastructure/sidecarclient\`（三态：未配置→ErrDisabled、
+  失败→ErrSidecar、成功→ScoreResult，500ms 超时）。
+- fp/report 异步调 sidecar（fire-and-forget goroutine，不阻塞上报路径）：构建子图
+  （目标 fp + 关联边 ≤10），成功 → 写回 gnn_score/gnn_embedding；失败 → 回落 Louvain
+  社区均值（冷启动路径）。
+- env：GNN_SIDECAR_URL（默认空 = 纯离线模式）+ GNN_SIDECAR_TOKEN。
+- 融合规则（P6-6）：\`fusionCheck\` 在 sidecar 打分后执行——双高（behavior_ml ≥0.8 +
+  gnn ≥0.8）→ fusion-severe 50 分（三层 iprisk 多证据通道）；单高 → fusion-review
+  0 分（运维确认后人工标注）。皮尔逊正交性检查 <0.6 由每日 cron ml diag 批量执行。
+
 ## 已知边界 / 后续项
 
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，

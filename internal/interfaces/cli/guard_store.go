@@ -302,3 +302,7 @@ func (g guardStore) DeleteFpRuleLabels(ctx context.Context) error {
 func (g guardStore) UpdateAnomalyScore(ctx context.Context, fp string, score float64) error {
 	return g.db.UpdateAnomalyScore(ctx, fp, score)
 }
+
+func (g guardStore) UpdateGNN(ctx context.Context, fp string, score float64, embeddingJSON string) error {
+	return g.db.UpdateGNN(ctx, fp, score, embeddingJSON)
+}

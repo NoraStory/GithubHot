@@ -134,6 +134,7 @@ type GuardStore interface {
 	UpdateIPGeo(ctx context.Context, ip string, asn uint, asnType, country, tz string) error
 	UpdateAttestation(ctx context.Context, fp string, attestationJSON string) error
 	UpdateAnomalyScore(ctx context.Context, fp string, score float64) error
+	UpdateGNN(ctx context.Context, fp string, score float64, embeddingJSON string) error
 	// P4-4 图聚类：每日 cron 全量重算簇并写回 cluster_id / fp_clusters
 	ReplaceClusters(ctx context.Context, clusters []ClusterDTO) error
 	ListAllFPLinks(ctx context.Context, since time.Time, limit int) ([]FPLinkDTO, error)
