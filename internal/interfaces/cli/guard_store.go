@@ -306,3 +306,29 @@ func (g guardStore) UpdateAnomalyScore(ctx context.Context, fp string, score flo
 func (g guardStore) UpdateGNN(ctx context.Context, fp string, score float64, embeddingJSON string) error {
 	return g.db.UpdateGNN(ctx, fp, score, embeddingJSON)
 }
+
+func (g guardStore) AddReviewItem(ctx context.Context, fp string, reasons []string, scores map[string]float64) error {
+	return g.db.AddReviewItem(ctx, fp, reasons, scores)
+}
+
+func (g guardStore) ListReviewItems(ctx context.Context, status string, limit int) ([]httpapi.ReviewItemRow, error) {
+	rows, err := g.db.ListReviewItems(ctx, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]httpapi.ReviewItemRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, httpapi.ReviewItemRow{ID: r.ID, FP: r.FP, Reasons: r.Reasons,
+			Scores: r.Scores, Status: r.Status, CreatedAt: r.CreatedAt,
+			ResolvedAt: r.ResolvedAt, ResolvedBy: r.ResolvedBy})
+	}
+	return out, nil
+}
+
+func (g guardStore) ResolveReviewItems(ctx context.Context, ids []int64, action string, resolvedBy string) error {
+	return g.db.ResolveReviewItems(ctx, ids, action, resolvedBy)
+}
+
+func (g guardStore) CountReviewItems(ctx context.Context, status string) (int, error) {
+	return g.db.CountReviewItems(ctx, status)
+}

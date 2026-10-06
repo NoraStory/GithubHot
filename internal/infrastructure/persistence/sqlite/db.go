@@ -160,6 +160,21 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN ja4 TEXT NOT NULL DEFAULT ''")
 	// P4-1 平台证明结果（Play Integrity 判定 / signature_fallback 摘要，JSON）
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN attestation TEXT NOT NULL DEFAULT '{}'")
+	// §10.2 Review 队列（P5-2/P6-2/P6-4 异常分超标入队）
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS review_items (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		fp TEXT NOT NULL,
+		reasons TEXT NOT NULL DEFAULT '[]',
+		scores TEXT NOT NULL DEFAULT '{}',
+		status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','done','ignored')),
+		created_at TEXT NOT NULL,
+		resolved_at TEXT,
+		resolved_by TEXT)`); err != nil {
+		return fmt.Errorf("建表 review_items: %w", err)
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_review_status ON review_items(status, created_at)"); err != nil {
+		return fmt.Errorf("建索引 review_items: %w", err)
+	}
 	// P4-5 行为生物特征（客户端滑窗统计量 JSON）+ P4-6 时钟偏移（ppm；NULL=未采集）
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN behavior TEXT NOT NULL DEFAULT '{}'")
 	_, _ = db.Exec("ALTER TABLE ip_fingerprints ADD COLUMN clock_skew_ppm REAL")

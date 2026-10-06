@@ -575,6 +575,21 @@ Spectre 缓解粗化，1e5 次循环摊薄后所有目标仍落在 0 值域 → 
   gnn ≥0.8）→ fusion-severe 50 分（三层 iprisk 多证据通道）；单高 → fusion-review
   0 分（运维确认后人工标注）。皮尔逊正交性检查 <0.6 由每日 cron ml diag 批量执行。
 
+### §10 管理端可视化（批一：Review 队列页 + ML 诊断页 ✅）
+
+- **§10.2 Review 队列页**：\`AdminReview.vue\`（路由 /admin/review）——
+  异常超标指纹列表（勾选 + 批量"标记已处理"/"忽略"）；每项展示原因徽标（iForest 异常 /
+  MIDAS / 簇风险 / ML shadow 高，彩色 tag 区分）、分数摘要、IP 样本、UA、快捷标注
+  （bot/human 一键写入金标签）。端点：GET /review/queue + POST /review/resolve。
+- **§10.5 ML 诊断页**：\`AdminMLDiag.vue\`（路由 /admin/mldiag）——
+  模型卡（version/active/AUC/FPR/训练日期）；PSI 特征漂移表（绿/黄/红，CV 近似）；
+  sidecar 连接状态；管道命令提示。端点：GET /ml/diagnostics。
+- 后端：\`review_items\` 表（fp 去重 / status pending→done|ignored / resolved_by）+
+  四端点（queue/resolve/mldiag/label）+ 适配器。iForest cron 99.9 分位自动入队 ✓。
+- 验收：password login → 标注 fp → export → check 三态 ✓；queue 列表页活体验证 ✓。
+- **待做**（随后续批次）：力导向图（d3-force）、FpCard/ScoreBars 组件抽取、
+  LabelDialog 弹窗组件化、P5-6 PSI 全量实现（需训练基准分布文件）。
+
 ## 已知边界 / 后续项
 
 - P0-4 的指纹列表仍受 `ListFingerprints(limit=20)` 限制：点击长尾 flag 时下方可能无匹配行，

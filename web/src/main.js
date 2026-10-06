@@ -31,6 +31,8 @@ import AdminSources from './admin/AdminSources.vue'
 import AdminStories from './admin/AdminStories.vue'
 import AdminDigests from './admin/AdminDigests.vue'
 import AdminIPGuard from './admin/AdminIPGuard.vue'
+import AdminReview from './admin/AdminReview.vue'
+import AdminMLDiag from './admin/AdminMLDiag.vue'
 import AdminProbes from './admin/AdminProbes.vue'
 import AdminSystem from './admin/AdminSystem.vue'
 
@@ -75,6 +77,8 @@ const router = createRouter({
         { path: 'stories', component: AdminStories },
         { path: 'digests', component: AdminDigests },
         { path: 'ipguard', component: AdminIPGuard },
+        { path: 'review', component: AdminReview },
+        { path: 'mldiag', component: AdminMLDiag },
         { path: 'probes', component: AdminProbes },
         { path: 'system', component: AdminSystem }
       ]

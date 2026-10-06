@@ -599,3 +599,19 @@ func (f *fakeGuardStore) UpdateAnomalyScore(context.Context, string, float64) er
 func (f *fakeGuardStore) UpdateGNN(context.Context, string, float64, string) error {
 	return nil
 }
+
+func (f *fakeGuardStore) AddReviewItem(context.Context, string, []string, map[string]float64) error {
+	return nil
+}
+
+func (f *fakeGuardStore) ListReviewItems(context.Context, string, int) ([]ReviewItemRow, error) {
+	return nil, nil
+}
+
+func (f *fakeGuardStore) ResolveReviewItems(context.Context, []int64, string, string) error {
+	return nil
+}
+
+func (f *fakeGuardStore) CountReviewItems(context.Context, string) (int, error) {
+	return 0, nil
+}

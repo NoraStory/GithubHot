@@ -135,6 +135,10 @@ type GuardStore interface {
 	UpdateAttestation(ctx context.Context, fp string, attestationJSON string) error
 	UpdateAnomalyScore(ctx context.Context, fp string, score float64) error
 	UpdateGNN(ctx context.Context, fp string, score float64, embeddingJSON string) error
+	AddReviewItem(ctx context.Context, fp string, reasons []string, scores map[string]float64) error
+	ListReviewItems(ctx context.Context, status string, limit int) ([]ReviewItemRow, error)
+	ResolveReviewItems(ctx context.Context, ids []int64, action string, resolvedBy string) error
+	CountReviewItems(ctx context.Context, status string) (int, error)
 	// P4-4 图聚类：每日 cron 全量重算簇并写回 cluster_id / fp_clusters
 	ReplaceClusters(ctx context.Context, clusters []ClusterDTO) error
 	ListAllFPLinks(ctx context.Context, since time.Time, limit int) ([]FPLinkDTO, error)
@@ -204,6 +208,18 @@ type MinHashSigRow struct {
 type LSHBand struct {
 	Band int
 	Hash string
+}
+
+// ReviewItemRow review_items 行（§10.2）。
+type ReviewItemRow struct {
+	ID         int64
+	FP         string
+	Reasons    []string
+	Scores     map[string]float64
+	Status     string
+	CreatedAt  time.Time
+	ResolvedAt *time.Time
+	ResolvedBy string
 }
 
 // FpLabelRow 标注行（P5-1）。

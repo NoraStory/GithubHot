@@ -60,6 +60,11 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 			r.Get("/system/stats", s.systemStatsAPI)
 			// P5-1 标注（金标签，source=admin）
 			r.Post("/fp/label", s.fpLabelAPI)
+			// §10.2 Review 队列
+			r.Get("/review/queue", s.reviewQueueAPI)
+			r.Post("/review/resolve", s.reviewResolveAPI)
+			// §10.5 ML 诊断
+			r.Get("/ml/diagnostics", s.mlDiagnosticsAPI)
 			// P4-2 通行密钥管理（注册需已登录）
 			r.Post("/passkey/begin-register", s.beginPasskeyRegister)
 			r.Post("/passkey/finish-register", s.finishPasskeyRegister)
