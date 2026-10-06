@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/NoraStory/GithubHot/internal/domain/fpcluster"
@@ -114,11 +116,47 @@ type FingerprintRow struct {
 // ja4 为 P3-2 TLS 客户端指纹（TLS 模式才有，非空覆盖）；
 // behaviorJSON / clockSkewPPM 为 P4-5/P4-6 行为与时钟信号（非空/非 nil 覆盖）。
 func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string, components map[string]string, flags []string, canvasPhash, minhashSig, ja4 string, stability float64, compStabilityJSON, behaviorJSON string, clockSkewPPM *float64) ([]string, error) {
+	// 输入验证：防止资源耗尽攻击
+	const (
+		maxWebRTCCandidates  = 20
+		maxFlags             = 50
+		maxComponentKeys     = 100
+		maxComponentValueLen = 1024
+		maxUALen             = 512
+	)
+	
+	if len(webrtc) > maxWebRTCCandidates {
+		webrtc = webrtc[:maxWebRTCCandidates]
+	}
+	if len(flags) > maxFlags {
+		flags = flags[:maxFlags]
+	}
+	if len(components) > maxComponentKeys {
+		return nil, fmt.Errorf("components数量超限: %d > %d", len(components), maxComponentKeys)
+	}
+	for k, v := range components {
+		if len(k) > 64 {
+			return nil, fmt.Errorf("component key过长: %d", len(k))
+		}
+		if len(v) > maxComponentValueLen {
+			return nil, fmt.Errorf("component value过长: %d", len(v))
+		}
+	}
+	if len(ua) > maxUALen {
+		ua = ua[:maxUALen]
+	}
+	
+	// 验证 clockSkewPPM 范围
+	if clockSkewPPM != nil && (math.IsNaN(*clockSkewPPM) || math.Abs(*clockSkewPPM) > 1e6) {
+		clockSkewPPM = nil // 非法值视为未采集
+	}
+	
+	// 合并查询：一次获取所有需要的字段，避免 N+1
 	row := db.QueryRowContext(ctx,
-		"SELECT ips, ua, hits, webrtc, flags FROM ip_fingerprints WHERE fp = ?", fp)
-	var ipsJSON, oldUA, rtcJSON, flagsJSON string
+		"SELECT ips, ua, hits, webrtc, flags, components FROM ip_fingerprints WHERE fp = ?", fp)
+	var ipsJSON, oldUA, rtcJSON, flagsJSON, oldCompJSON string
 	var hits int
-	err := row.Scan(&ipsJSON, &oldUA, &hits, &rtcJSON, &flagsJSON)
+	err := row.Scan(&ipsJSON, &oldUA, &hits, &rtcJSON, &flagsJSON, &oldCompJSON)
 	now := time.Now().UTC().Format(time.RFC3339)
 	ips := []string{}
 	rtc := []string{}
@@ -137,6 +175,11 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 			rtc = append(rtc, w)
 		}
 	}
+	// 限制 rtc 累积大小
+	if len(rtc) > maxWebRTCCandidates {
+		rtc = rtc[len(rtc)-maxWebRTCCandidates:]
+	}
+	
 	for _, f := range flags {
 		known := false
 		for _, x := range knownFlags {
@@ -149,14 +192,16 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 			knownFlags = append(knownFlags, f)
 		}
 	}
+	// 限制 flags 累积大小
+	if len(knownFlags) > maxFlags {
+		knownFlags = knownFlags[len(knownFlags)-maxFlags:]
+	}
+	
 	rb, _ := json.Marshal(rtc)
 	fb, _ := json.Marshal(knownFlags)
 	// components 渐进合并：新分量非空才覆盖，空值保留旧值（APP WebView 分多次补齐四维）
 	oldComponents := map[string]string{}
 	if err == nil {
-		var oldCompJSON string
-		_ = db.QueryRowContext(ctx,
-			"SELECT components FROM ip_fingerprints WHERE fp = ?", fp).Scan(&oldCompJSON)
 		_ = json.Unmarshal([]byte(oldCompJSON), &oldComponents)
 	}
 	for k, v := range components {
@@ -164,6 +209,20 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 			oldComponents[k] = v
 		}
 	}
+	// 限制 oldComponents 大小
+	if len(oldComponents) > maxComponentKeys {
+		// 保留最新的 maxComponentKeys 个（简单截断）
+		keys := make([]string, 0, len(oldComponents))
+		for k := range oldComponents {
+			keys = append(keys, k)
+		}
+		if len(keys) > maxComponentKeys {
+			for i := 0; i < len(keys)-maxComponentKeys; i++ {
+				delete(oldComponents, keys[i])
+			}
+		}
+	}
+	
 	cb, _ := json.Marshal(oldComponents)
 	if err == sql.ErrNoRows {
 		ips = []string{ip}
@@ -286,10 +345,18 @@ type LSHBandRow struct {
 }
 
 // UpsertLSHBands 重写某指纹的 LSH 桶记录（先删后插，幂等；签名变化时旧桶自动失效）。
+// 优化版：限制 bands 数量，防止DoS攻击。
 func (db *DB) UpsertLSHBands(ctx context.Context, fp string, bands []LSHBandRow) error {
 	if fp == "" || len(bands) == 0 {
 		return nil
 	}
+	
+	// 限制：最多50个band（正常为16）
+	const maxLSHBands = 50
+	if len(bands) > maxLSHBands {
+		return fmt.Errorf("LSH bands数量超限: %d > %d", len(bands), maxLSHBands)
+	}
+	
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.ExecContext(ctx, "DELETE FROM fp_lsh_buckets WHERE fp = ?", fp); err != nil {
 		return fmt.Errorf("清空 LSH 桶: %w", err)
@@ -305,25 +372,39 @@ func (db *DB) UpsertLSHBands(ctx context.Context, fp string, bands []LSHBandRow)
 }
 
 // ListLSHCandidates 同带召回：与目标指纹共享任一 LSH 桶的其他指纹（不含自身）。
+// 优化版：限制 bands 数量，防止查询过大。
 func (db *DB) ListLSHCandidates(ctx context.Context, fp string, bands []LSHBandRow, limit int) ([]string, error) {
 	if fp == "" || len(bands) == 0 {
 		return nil, nil
 	}
+	
+	// 限制：最多50个band（正常为16）
+	const maxLSHBands = 50
+	if len(bands) > maxLSHBands {
+		return nil, fmt.Errorf("LSH bands数量超限: %d > %d", len(bands), maxLSHBands)
+	}
+	
 	if limit <= 0 {
 		limit = 200
 	}
-	query := "SELECT DISTINCT fp FROM fp_lsh_buckets WHERE fp != ? AND ("
+	if limit > 1000 {
+		limit = 1000
+	}
+	
+	// 使用 strings.Builder 提升性能
+	var query strings.Builder
+	query.WriteString("SELECT DISTINCT fp FROM fp_lsh_buckets WHERE fp != ? AND (")
 	args := []any{fp}
 	for i, b := range bands {
 		if i > 0 {
-			query += " OR "
+			query.WriteString(" OR ")
 		}
-		query += "(band = ? AND bucket_hash = ?)"
+		query.WriteString("(band = ? AND bucket_hash = ?)")
 		args = append(args, b.Band, b.Hash)
 	}
-	query += ") LIMIT ?"
+	query.WriteString(") LIMIT ?")
 	args = append(args, limit)
-	rows, err := db.QueryContext(ctx, query, args...)
+	rows, err := db.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("召回 LSH 候选: %w", err)
 	}
@@ -346,34 +427,60 @@ type MinHashSigRow struct {
 }
 
 // ListMinHashSigs 批量取候选指纹的 MinHash 签名（精确 Jaccard 复核用）。
+// 优化版：限制输入大小，批量处理防止查询崩溃。
 func (db *DB) ListMinHashSigs(ctx context.Context, fps []string) ([]MinHashSigRow, error) {
 	out := []MinHashSigRow{}
 	if len(fps) == 0 {
 		return out, nil
 	}
-	query := "SELECT fp, minhash_sig FROM ip_fingerprints WHERE minhash_sig != '' AND fp IN ("
-	args := make([]any, 0, len(fps))
-	for i, f := range fps {
-		if i > 0 {
-			query += ","
+	
+	// 限制：最多5000个指纹
+	const maxBatchSize = 500
+	if len(fps) > 5000 {
+		return nil, fmt.Errorf("fps数组过大: %d > 5000", len(fps))
+	}
+	
+	// 分批查询，每批最多500个占位符
+	for i := 0; i < len(fps); i += maxBatchSize {
+		end := i + maxBatchSize
+		if end > len(fps) {
+			end = len(fps)
 		}
-		query += "?"
-		args = append(args, f)
-	}
-	query += ")"
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("查 MinHash 签名: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var fp, sig string
-		if err := rows.Scan(&fp, &sig); err != nil {
+		batch := fps[i:end]
+		
+		// 构建查询（使用 strings.Builder 提升性能）
+		var query strings.Builder
+		query.WriteString("SELECT fp, minhash_sig FROM ip_fingerprints WHERE minhash_sig != '' AND fp IN (")
+		args := make([]any, 0, len(batch))
+		for j, f := range batch {
+			if j > 0 {
+				query.WriteString(",")
+			}
+			query.WriteString("?")
+			args = append(args, f)
+		}
+		query.WriteString(")")
+		
+		rows, err := db.QueryContext(ctx, query.String(), args...)
+		if err != nil {
+			return nil, fmt.Errorf("查 MinHash 签名(批次%d): %w", i/maxBatchSize, err)
+		}
+		
+		for rows.Next() {
+			var fp, sig string
+			if err := rows.Scan(&fp, &sig); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, MinHashSigRow{FP: fp, Sig: sig})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		out = append(out, MinHashSigRow{FP: fp, Sig: sig})
 	}
-	return out, rows.Err()
+	
+	return out, nil
 }
 
 // FindFingerprint 查单条指纹档案（稳定性/轮换检测/熵权读取用）；无记录返回 (nil, nil)。
@@ -586,9 +693,13 @@ func (db *DB) ListFingerprintsSince(ctx context.Context, since time.Time, limit 
 
 // ListFingerprintsByIP 反查：IPS JSON 中包含该 IP 的指纹（IP 下钻用）。
 func (db *DB) ListFingerprintsByIP(ctx context.Context, ip string) ([]FingerprintRow, error) {
+	// 使用 JSON 函数避免 LIKE 注入风险
 	rows, err := db.QueryContext(ctx,
-		"SELECT "+fingerprintCols+" FROM ip_fingerprints WHERE ips LIKE ? ORDER BY last_seen DESC LIMIT 50",
-		"%\""+ip+"\"%")
+		`SELECT `+fingerprintCols+` FROM ip_fingerprints 
+		 WHERE EXISTS(
+		   SELECT 1 FROM json_each(ips) WHERE value = ?
+		 ) ORDER BY last_seen DESC LIMIT 50`,
+		ip)
 	if err != nil {
 		return nil, fmt.Errorf("反查指纹: %w", err)
 	}
@@ -685,11 +796,32 @@ func (db *DB) BannedAmong(ctx context.Context, ips []string) ([]string, error) {
 // UpsertBan 写入/升级封禁（按已有 strike 递增由调用方算好传入）。
 func (db *DB) UpsertBan(ctx context.Context, ip string, strikes, level int, reason string, duration time.Duration) error {
 	now := time.Now().UTC()
+	expiresAt := now.Add(duration).UTC()
+	// 优化：封禁期间幂等保护，只在未封禁或已过期时才更新
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO ip_bans (ip, strikes, level, reason, banned_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(ip) DO UPDATE SET strikes = excluded.strikes, level = excluded.level,
-			reason = excluded.reason, banned_at = excluded.banned_at, expires_at = excluded.expires_at`,
-		ip, strikes, level, reason, now.Format(time.RFC3339), now.Add(duration).UTC().Format(time.RFC3339))
+		 ON CONFLICT(ip) DO UPDATE SET 
+		   strikes = CASE 
+		     WHEN datetime(expires_at) > datetime('now') THEN strikes  -- 封禁中不升级
+		     ELSE excluded.strikes 
+		   END,
+		   level = CASE 
+		     WHEN datetime(expires_at) > datetime('now') THEN level
+		     ELSE excluded.level
+		   END,
+		   reason = CASE 
+		     WHEN datetime(expires_at) > datetime('now') THEN reason
+		     ELSE excluded.reason
+		   END,
+		   banned_at = CASE 
+		     WHEN datetime(expires_at) > datetime('now') THEN banned_at
+		     ELSE excluded.banned_at
+		   END,
+		   expires_at = CASE 
+		     WHEN datetime(expires_at) > datetime('now') THEN expires_at
+		     ELSE excluded.expires_at
+		   END`,
+		ip, strikes, level, reason, now.Format(time.RFC3339), expiresAt.Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("写入封禁: %w", err)
 	}

@@ -53,14 +53,17 @@ func (c *fpCollision) observe(fp, ip string, now time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// 检查是否已经是suspect，但不要直接返回
+	alreadySuspect := false
 	if exp, ok := c.suspect[fp]; ok {
 		if now.Before(exp) {
-			return true
+			alreadySuspect = true // 记录状态但继续更新观察点
+		} else {
+			delete(c.suspect, fp)
 		}
-		delete(c.suspect, fp)
 	}
 
-	// 追加并裁剪观察点（按时间顺序保留，越过 TTL 的丢弃）
+	// 无论是否已标记，都更新观察点（保持数据新鲜）
 	list := c.sightings[fp]
 	list = append(list, fpSighting{ip: ip, at: now})
 	cut := now.Add(-collisionTTL)
@@ -75,7 +78,12 @@ func (c *fpCollision) observe(fp, ip string, now time.Time) bool {
 	}
 	c.sightings[fp] = keep
 
-	// 窗口内不同 IP 计数
+	// 如果已经是suspect，直接返回
+	if alreadySuspect {
+		return true
+	}
+
+	// 否则检查是否应新标记
 	winCut := now.Add(-collisionWindow)
 	seen := map[string]bool{}
 	for _, s := range keep {
@@ -102,6 +110,8 @@ func (c *fpCollision) pruneLocked(now time.Time) {
 	if len(c.sightings) <= collisionMaxFPs {
 		return
 	}
+	
+	// 超限时主动清理
 	cut := now.Add(-collisionWindow)
 	for fp, list := range c.sightings {
 		if len(list) == 0 {
@@ -110,6 +120,39 @@ func (c *fpCollision) pruneLocked(now time.Time) {
 		}
 		if list[len(list)-1].at.Before(cut) {
 			delete(c.sightings, fp)
+		}
+	}
+	
+	// 如果清理后仍然超限，清理最旧的 20%
+	if len(c.sightings) > collisionMaxFPs*12/10 { // 允许 20% 超限
+		type entry struct {
+			fp string
+			at time.Time
+		}
+		entries := make([]entry, 0, len(c.sightings))
+		for fp, list := range c.sightings {
+			if len(list) > 0 {
+				entries = append(entries, entry{fp: fp, at: list[len(list)-1].at})
+			}
+		}
+		// 按最后观察时间排序，删除最旧的
+		if len(entries) > collisionMaxFPs {
+			// 简单策略：删除最旧的 20%
+			toDelete := len(entries) - collisionMaxFPs
+			for i := 0; i < toDelete && i < len(entries); i++ {
+				oldestIdx := 0
+				oldestTime := entries[0].at
+				for j := 1; j < len(entries); j++ {
+					if entries[j].at.Before(oldestTime) {
+						oldestIdx = j
+						oldestTime = entries[j].at
+					}
+				}
+				delete(c.sightings, entries[oldestIdx].fp)
+				// 从 entries 中移除
+				entries[oldestIdx] = entries[len(entries)-1]
+				entries = entries[:len(entries)-1]
+			}
 		}
 	}
 }

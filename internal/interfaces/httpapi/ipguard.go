@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"log"
 	"math"
+	mathrand "math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -110,6 +111,31 @@ const (
 // rotationWatchKeys P2-4 轮换检测的设备级稳定分量（字体清单/显卡标识——
 // 正常驱动漂移不会动它们；切片不能进 const 块）。
 var rotationWatchKeys = []string{"fonts", "webgl", "renderer"}
+
+// sanitizeForLog 净化字符串以防止日志注入攻击
+func sanitizeForLog(s string) string {
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	s = strings.ReplaceAll(s, "\t", "\\t")
+	// 截断过长的字符串
+	if len(s) > 200 {
+		s = s[:200] + "..."
+	}
+	return s
+}
+
+// init 验证常量边界
+func init() {
+	if stabilityAlpha <= 0 || stabilityAlpha >= 1 {
+		panic("stabilityAlpha must be in (0, 1)")
+	}
+	if fpReportMaxRPM <= 0 || fpReportMaxRPM > 100 {
+		panic("fpReportMaxRPM must be in (0, 100]")
+	}
+	if handshakeRateDefault <= 0 || handshakeRateDefault > 1000 {
+		panic("handshakeRateDefault must be in (0, 1000]")
+	}
+}
 
 // GuardStore 防护存储端口（sqlite.DB 实现，cli 层适配）。
 type GuardStore interface {
@@ -310,7 +336,12 @@ type IPProfileDTO struct {
 }
 
 // banDuration 按违规次数定封禁时长（升级制）。
+// 优化版：防止负数溢出导致封禁时长错误。
 func banDuration(strikes int) time.Duration {
+	// 防御：负数或零按初犯处理
+	if strikes < 1 {
+		strikes = 1
+	}
 	switch {
 	case strikes <= 1:
 		return 30 * time.Minute
@@ -369,6 +400,11 @@ type IPGuard struct {
 	whitelist map[string]time.Time
 	// fpColl 指纹碰撞检测（同型号设备指纹重合 → 豁免连坐）
 	fpColl *fpCollision
+	
+	// 清理时间戳（防止内存泄漏）
+	lastDedupeClean    time.Time
+	lastFpReportClean  time.Time
+	lastWhitelistClean time.Time
 }
 
 type banCacheEntry struct {
@@ -382,27 +418,40 @@ type banCacheEntry struct {
 func NewIPGuard(store GuardStore) *IPGuard {
 	secret := os.Getenv("IP_GUARD_SECRET")
 	key := []byte(secret)
-	if len(key) < 16 {
+	if len(key) < 32 {
 		key = make([]byte, 32)
-		_, _ = rand.Read(key)
+		n, err := rand.Read(key)
+		if err != nil {
+			log.Fatalf("[ipguard] CRITICAL: 随机密钥生成失败: %v", err)
+		}
+		if n != 32 {
+			log.Fatalf("[ipguard] CRITICAL: 随机密钥长度不足: %d/32", n)
+		}
+		log.Printf("[ipguard] 警告: IP_GUARD_SECRET 未设置或过短，已生成随机密钥（重启后令牌失效）")
 	}
 	countryPath, asnPath := geoip.DefaultPaths()
+	now := time.Now()
 	g := &IPGuard{
-		store:        store,
-		key:          key,
-		geo:          geoip.Open(countryPath, asnPath),
-		enabled:      os.Getenv("IP_GUARD_ENABLED") != "0",
-		localOK:      os.Getenv("IP_GUARD_LOCAL") != "0",
-		windows:      map[string]*ipWindow{},
-		talkers:      map[string]int{},
-		talkersReset: time.Now().Truncate(time.Hour).Add(time.Hour),
-		dedupe:       map[string]time.Time{},
-		banCache:     map[string]banCacheEntry{},
-		fpReport:     map[string][]time.Time{},
-		whitelist:    map[string]time.Time{},
-		fpColl:       newFPCollision(),
-		ml:           newLRLoader(os.Getenv("ML_MODEL_DIR")),
+		store:              store,
+		key:                key,
+		geo:                geoip.Open(countryPath, asnPath),
+		enabled:            os.Getenv("IP_GUARD_ENABLED") != "0",
+		localOK:            os.Getenv("IP_GUARD_LOCAL") != "0",
+		windows:            map[string]*ipWindow{},
+		talkers:            map[string]int{},
+		talkersReset:       now.Truncate(time.Hour).Add(time.Hour),
+		dedupe:             map[string]time.Time{},
+		banCache:           map[string]banCacheEntry{},
+		fpReport:           map[string][]time.Time{},
+		whitelist:          map[string]time.Time{},
+		fpColl:             newFPCollision(),
+		ml:                 newLRLoader(os.Getenv("ML_MODEL_DIR")),
+		lastDedupeClean:    now,
+		lastFpReportClean:  now,
+		lastWhitelistClean: now,
 	}
+	// 启动后台清理 goroutine（防止内存泄漏）
+	go g.periodicCleanup()
 	if g.geo.Enabled() {
 		log.Printf("[ipguard] GeoIP 已启用（%s）", countryPath)
 	}
@@ -416,6 +465,107 @@ func isLocalIP(ip string) bool {
 		return false
 	}
 	return p.IsLoopback() || p.IsPrivate() || p.IsLinkLocalUnicast()
+}
+
+// periodicCleanup 定期清理内存map（防止内存泄漏，Critical修复）
+func (g *IPGuard) periodicCleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		now := time.Now()
+		g.mu.Lock()
+
+		// 1. 清理过期 dedupe（5分钟TTL，保留2倍窗口）
+		if len(g.dedupe) > 10000 || now.Sub(g.lastDedupeClean) > 10*time.Minute {
+			cutoff := now.Add(-2 * eventDedupeTTL)
+			cleaned := 0
+			for k, t := range g.dedupe {
+				if t.Before(cutoff) {
+					delete(g.dedupe, k)
+					cleaned++
+				}
+			}
+			g.lastDedupeClean = now
+			if cleaned > 0 {
+				log.Printf("[ipguard] 清理过期去重项: %d 条", cleaned)
+			}
+		}
+
+		// 2. 清理闲置 fpReport（10分钟无活动）
+		if len(g.fpReport) > 50000 || now.Sub(g.lastFpReportClean) > 10*time.Minute {
+			cutoff := now.Add(-10 * time.Minute)
+			cleaned := 0
+			for ip, times := range g.fpReport {
+				if len(times) == 0 || times[len(times)-1].Before(cutoff) {
+					delete(g.fpReport, ip)
+					cleaned++
+				}
+			}
+			g.lastFpReportClean = now
+			if cleaned > 0 {
+				log.Printf("[ipguard] 清理闲置指纹上报记录: %d 条", cleaned)
+			}
+		}
+
+		// 3. 清理过期 whitelist
+		if len(g.whitelist) > 1000 || now.Sub(g.lastWhitelistClean) > time.Hour {
+			cleaned := 0
+			for ip, exp := range g.whitelist {
+				if now.After(exp) {
+					delete(g.whitelist, ip)
+					cleaned++
+				}
+			}
+			g.lastWhitelistClean = now
+			if cleaned > 0 {
+				log.Printf("[ipguard] 清理过期白名单: %d 条", cleaned)
+			}
+		}
+
+		// 4. 清理闲置 windows（超过30分钟无活动且无请求记录）
+		if len(g.windows) > 50000 {
+			cutoff := now.Add(-30 * time.Minute)
+			cleaned := 0
+			for ip, w := range g.windows {
+				if len(w.times) == 0 && w.lastFlush.Before(cutoff) {
+					delete(g.windows, ip)
+					cleaned++
+					if cleaned >= 5000 {
+						break // 每轮最多清理5000条
+					}
+				}
+			}
+			if cleaned > 0 {
+				log.Printf("[ipguard] 清理闲置IP窗口: %d 条", cleaned)
+			}
+		}
+
+		// 5. 清理老化 banCache（超过10分钟的条目）
+		if len(g.banCache) > 10000 {
+			cutoff := now.Add(-10 * time.Minute)
+			cleaned := 0
+			for ip, entry := range g.banCache {
+				if entry.at.Before(cutoff) {
+					delete(g.banCache, ip)
+					cleaned++
+				}
+			}
+			if cleaned > 0 {
+				log.Printf("[ipguard] 清理老化封禁缓存: %d 条", cleaned)
+			}
+		}
+
+		g.mu.Unlock()
+
+		// 记录内存统计（每10分钟）
+		if now.Minute()%10 == 0 {
+			g.mu.Lock()
+			log.Printf("[ipguard] 内存统计: windows=%d talkers=%d dedupe=%d banCache=%d fpReport=%d whitelist=%d",
+				len(g.windows), len(g.talkers), len(g.dedupe), len(g.banCache), len(g.fpReport), len(g.whitelist))
+			g.mu.Unlock()
+		}
+	}
 }
 
 // clientIPFromRequest 见 clientip.go（受信代理解析：默认不信任 X-Forwarded-For）。
@@ -490,22 +640,35 @@ func (g *IPGuard) verifyIDToken(token, currentIP string) (bool, string, string, 
 // ---------- 封禁执行 ----------
 
 // isBanned 查封禁（30s 负缓存 / 到期自动视为解封）。
+// 优化版：使用双重检查锁，防止 TOCTOU 竞态条件。
 func (g *IPGuard) isBanned(ctx context.Context, ip string) bool {
+	now := time.Now()
+	
+	// 第一次检查：快速路径
 	g.mu.Lock()
-	if c, ok := g.banCache[ip]; ok && time.Since(c.at) < 30*time.Second {
+	if c, ok := g.banCache[ip]; ok && now.Sub(c.at) < 30*time.Second {
+		banned := c.banned && now.Before(c.expires)
 		g.mu.Unlock()
-		return c.banned && time.Now().Before(c.expires)
+		return banned
 	}
 	g.mu.Unlock()
+	
+	// 缓存未命中或已过期，查询数据库
 	ban, err := g.store.FindBan(ctx, ip)
-	banned := err == nil && ban != nil && time.Now().Before(ban.ExpiresAt)
-	g.mu.Lock()
-	expires := time.Now()
+	banned := err == nil && ban != nil && now.Before(ban.ExpiresAt)
+	
+	expires := now
 	if ban != nil {
 		expires = ban.ExpiresAt
 	}
-	g.banCache[ip] = banCacheEntry{banned: banned, expires: expires, at: time.Now()}
+	
+	// 第二次检查：只在缓存仍未命中或已过期时更新
+	g.mu.Lock()
+	if c, ok := g.banCache[ip]; !ok || now.Sub(c.at) >= 30*time.Second {
+		g.banCache[ip] = banCacheEntry{banned: banned, expires: expires, at: now}
+	}
 	g.mu.Unlock()
+	
 	return banned
 }
 
@@ -543,14 +706,14 @@ func (g *IPGuard) ban(ctx context.Context, ip, reason string, severe bool) {
 	old, err := g.store.FindBan(ctx, ip)
 	if old != nil && err == nil && time.Now().Before(old.ExpiresAt) {
 		log.Printf("[ipguard] 已在封禁中，不重复升级 %s（剩余 %v）：%s",
-			ip, time.Until(old.ExpiresAt).Round(time.Minute), reason)
+			ip, time.Until(old.ExpiresAt).Round(time.Minute), sanitizeForLog(reason))
 		return
 	}
 	strikes := 1
 	if old != nil && err == nil {
 		strikes = old.Strikes + 1
-		// 累犯衰减：历史封禁超 30 天未再犯，按初犯处理（防止旧误封长期连坐）
-		if time.Since(old.BannedAt) > banStrikeDecay {
+		// 累犯衰减：历史封禁解封后超 30 天未再犯，按初犯处理（防止旧误封长期连坐）
+		if time.Since(old.ExpiresAt) > banStrikeDecay {
 			strikes = 1
 		}
 	}
@@ -565,7 +728,7 @@ func (g *IPGuard) ban(ctx context.Context, ip, reason string, severe bool) {
 	g.mu.Lock()
 	g.banCache[ip] = banCacheEntry{banned: true, expires: time.Now().Add(dur), at: time.Now()}
 	g.mu.Unlock()
-	log.Printf("[ipguard] 封禁 %s（第 %d 次，%v）：%s", ip, strikes, dur, reason)
+	log.Printf("[ipguard] 封禁 %s（第 %d 次，%v）：%s", ip, strikes, dur, sanitizeForLog(reason))
 }
 
 // event 记一条违规事件并做封禁决策。severe=true 仅用于**无歧义的即时严重事件**
@@ -626,10 +789,15 @@ func (g *IPGuard) decideBan(ctx context.Context, ip, trigger string) {
 func (g *IPGuard) uaDiversity(ip string) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	count := 0
 	if w := g.windows[ip]; w != nil {
-		return len(w.uaSet)
+		count = len(w.uaSet)
 	}
-	return 0
+	// 防御性默认：避免除零
+	if count == 0 {
+		count = 1
+	}
+	return count
 }
 
 // ---------- 中间件 ----------
@@ -705,31 +873,47 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 
 // handshakeAllow 握手通道滑动窗口（60s）判定：放行 true；超限 false 并计分。
 // 计数按 IP 独立存放（ipWindow.hsTimes），与全站速率窗口互不影响。
+// 优化版：减少锁持有时间，在锁外进行耗时的过滤操作。
 func (g *IPGuard) handshakeAllow(ctx context.Context, ip string) bool {
 	limit := handshakeRatePerMin()
 	now := time.Now()
+	
+	// 快速路径：检查窗口是否存在，拷贝数据
 	g.mu.Lock()
 	w := g.windows[ip]
 	if w == nil {
 		w = &ipWindow{uaSet: map[string]bool{}, lastFlush: now}
 		g.windows[ip] = w
 	}
+	// 快速拷贝旧时间戳，在锁外处理
+	oldTimes := make([]time.Time, len(w.hsTimes))
+	copy(oldTimes, w.hsTimes)
+	g.mu.Unlock()
+	
+	// 在锁外过滤（耗时操作）
 	cutoff := now.Add(-time.Minute)
-	keep := w.hsTimes[:0]
-	for _, t := range w.hsTimes {
+	keep := make([]time.Time, 0, len(oldTimes)+1)
+	for _, t := range oldTimes {
 		if t.After(cutoff) {
 			keep = append(keep, t)
 		}
 	}
-	w.hsTimes = append(keep, now)
-	n := len(w.hsTimes)
-	g.mu.Unlock()
-
-	if n > limit {
-		// 弱证据（协议类）：限流命中只作为观察与互证素材，单条不封
-		g.event(ctx, ip, "handshake-rate", sprintf("握手通道 %d req/min（上限 %d）", n, limit), 30, false)
+	
+	// 检查限流
+	if len(keep) >= limit {
+		// 超限，记录事件（数据库操作在锁外）
+		g.event(ctx, ip, "handshake-rate", sprintf("握手通道 %d req/min（上限 %d）", len(keep), limit), 30, false)
 		return false
 	}
+	
+	// 未超限，追加当前时间并写回
+	keep = append(keep, now)
+	g.mu.Lock()
+	if g.windows[ip] != nil {
+		g.windows[ip].hsTimes = keep
+	}
+	g.mu.Unlock()
+	
 	return true
 }
 
@@ -782,7 +966,7 @@ func (g *IPGuard) record(ip, ua string) *ipWindow {
 		w.uaSet[ua] = true
 	}
 	w.dirty = true
-	// 档案落频：每 60s 一次；顺带清理闲置窗口
+	// 档案落频：每 60s 一次；顺带清理闲置窗口（优化：随机采样清理，不在每次请求时全遍历）
 	if now.Sub(w.lastFlush) >= profileFlushTTL {
 		delta := w.reqs
 		w.reqs = 0
@@ -796,9 +980,18 @@ func (g *IPGuard) record(ip, ua string) *ipWindow {
 			}
 		}(ip, ua, delta)
 	}
-	for k, x := range g.windows {
-		if len(x.times) == 0 && now.Sub(x.lastFlush) > 2*windowSize {
-			delete(g.windows, k)
+	// 优化：改为定期清理（在 periodicCleanup 中处理），只在超限时随机采样清理
+	if len(g.windows) > 50000 && mathrand.Intn(100) == 0 {
+		cutoff := now.Add(-2 * windowSize)
+		cleaned := 0
+		for k, x := range g.windows {
+			if len(x.times) == 0 && x.lastFlush.Before(cutoff) {
+				delete(g.windows, k)
+				cleaned++
+				if cleaned >= 100 {
+					break // 每轮最多清理100条
+				}
+			}
 		}
 	}
 	return w
@@ -820,19 +1013,24 @@ func isMachineUA(ua string) bool {
 }
 
 // evaluate 第一层/第三层违规判定（速率、爬虫、扫描器）。
+// 优化版：快速拷贝数据后在锁外计算，减少锁持有时间。
 func (g *IPGuard) evaluate(ctx context.Context, ip, path, ua string, w *ipWindow) {
+	// 快速拷贝副本，在锁外计算
 	g.mu.Lock()
-	rate1m := 0
+	times := make([]time.Time, len(w.times))
+	copy(times, w.times)
+	nf := w.notFound
+	g.mu.Unlock()
+
 	now := time.Now()
 	cutoff := now.Add(-time.Minute)
-	for _, t := range w.times {
+	rate1m := 0
+	for _, t := range times {
 		if t.After(cutoff) {
 			rate1m++
 		}
 	}
-	nf := w.notFound
-	total := len(w.times)
-	g.mu.Unlock()
+	total := len(times)
 
 	// 严重：流量攻击
 	if rate1m >= severeRatePerMin {
@@ -876,9 +1074,8 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 		}
 		return
 	}
-	ok, tokFp, tokIP, exp := g.verifyIDToken(cookie.Value, ip)
-	if !ok {
-		st, _, _, _ := g.verifyIDTokenEx(cookie.Value, ip)
+	st, tokFp, tokIP, exp := g.verifyIDTokenEx(cookie.Value, ip)
+	if st != tokenOK {
 		switch st {
 		case tokenMalformed:
 			// 结构非法 = 明确伪造尝试（无歧义，可即时封）
@@ -893,6 +1090,7 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 		}
 		return
 	}
+	// 令牌有效，继续后续逻辑
 	// 令牌绑定的 IP 与当前不符：Cookie 被搬到别的网络。
 	// 出差宽限：设备指纹与令牌绑定一致 = 同一台设备换了网络，只记录不计分；
 	// 无指纹或指纹不符（Cookie 被盗搬到别的设备/网络）才按高危计分。
@@ -940,9 +1138,18 @@ func (g *IPGuard) issue(w http.ResponseWriter, r *http.Request, ip, fp string) {
 // 返回 (响应字段, 该 IP 是否刚被封)。
 func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta FingerprintMeta) (map[string]any, bool) {
 	out := map[string]any{"ok": true, "banned": false}
-	if !g.enabled || g.store == nil || fp == "" {
+	if !g.enabled || g.store == nil {
 		return out, false
 	}
+	
+	// 修复：空指纹应该记录异常事件
+	if fp == "" {
+		g.event(ctx, ip, "fp-report-empty", "空指纹上报", 10, false)
+		out["ok"] = false
+		out["error"] = "empty fingerprint"
+		return out, false
+	}
+	
 	local := g.localOK && isLocalIP(ip)
 
 	// P2-2 服务端计算 MinHash 签名：原始清单（字体/扩展/插件）进签名，客户端自报的
@@ -1136,7 +1343,12 @@ func (g *IPGuard) linkByMinHash(ctx context.Context, ip, fp, sigHex string) {
 		return
 	}
 	sig := decodeMinHashSig(sigHex)
+	if sig == nil {
+		g.event(ctx, ip, "minhash-invalid", "MinHash 签名格式非法", 0, false)
+		return
+	}
 	if len(sig) != fpmath.MinHashK {
+		g.event(ctx, ip, "minhash-length", sprintf("MinHash 签名长度错误: %d != %d", len(sig), fpmath.MinHashK), 0, false)
 		return
 	}
 	keys := fpmath.Bands(sig, fpmath.LSHBands, fpmath.LSHRows)
@@ -1591,6 +1803,6 @@ func (g *IPGuard) BanIP(ctx context.Context, ip, reason string, hours int) error
 	g.mu.Lock()
 	g.banCache[ip] = banCacheEntry{banned: true, expires: time.Now().Add(dur), at: time.Now()}
 	g.mu.Unlock()
-	log.Printf("[ipguard] 手动封禁 %s（%v）：%s", ip, dur, reason)
+	log.Printf("[ipguard] 手动封禁 %s（%v）：%s", ip, dur, sanitizeForLog(reason))
 	return nil
 }
