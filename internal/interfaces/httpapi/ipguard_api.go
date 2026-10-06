@@ -220,6 +220,14 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ---- 第三层：服务端环境核验（不依赖客户端自觉上报）----
+	// P4-5 行为周期补充上报（payload 仅 {fp, behavior, clock_skew_ppm}）不参与核验：
+	// 它不带任何指纹分量/flags/coherent，若走下方"旧客户端补记"，每次页面隐藏与
+	// 每 5 分钟的行为上报都会被误记 ua-platform-mismatch +30（实测全部误报来源于此）。
+	// 环境核验已在该指纹的全量上报时完成，这里只收档行为/时钟信号。
+	behaviorOnly := p.Behavior != nil && p.Canvas == "" && p.WebGL == "" && p.Audio == "" &&
+		p.Fonts == "" && p.Renderer == "" && p.Screen == "" && p.CanvasPHash == "" &&
+		p.MinHashSig == "" && p.WebRTC == nil &&
+		len(p.Components) == 0 && len(p.Sets) == 0 && p.Flags == nil
 	flags := p.Flags
 	hasFlag := func(k string) bool {
 		for _, f := range flags {
@@ -231,7 +239,7 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	// 旧客户端（无 flags 字段，nil 切片）只发 coherent 布尔：不一致时补等价命中项。
 	// 注意区分：新客户端会显式发 "flags": []，反序列化为非 nil 空切片。
-	if p.Flags == nil && !p.Coherent && !hasFlag("ua-platform-mismatch") {
+	if !behaviorOnly && p.Flags == nil && !p.Coherent && !hasFlag("ua-platform-mismatch") {
 		flags = append(flags, "ua-platform-mismatch")
 	}
 	// Client Hints 比对：Sec-CH-UA-Platform 与 UA 声明的系统矛盾 = 伪造 header 的爬虫

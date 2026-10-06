@@ -48,3 +48,23 @@ func TestFinishPasskeyLoginRejectsOversizedBody(t *testing.T) {
 		t.Fatalf("超大 body 应 400，实际 %d", rec.Code)
 	}
 }
+
+// TestBehaviorOnlyReportNoEnvFlag P4-5 行为周期补充上报（仅 {fp,behavior,clock_skew_ppm}，
+// 无 flags/coherent/指纹分量）不得触发"旧客户端"环境核验补记——此前每次页面隐藏
+// 与每 5 分钟的行为上报都被误记 ua-platform-mismatch +30。
+func TestBehaviorOnlyReportNoEnvFlag(t *testing.T) {
+	t.Setenv("IP_GUARD_ENABLED", "1")
+	store := newFakeStore()
+	s := &Server{Guard: NewIPGuard(store)}
+	body := `{"fp":"behavior-ping-fp-00001","behavior":{"mouse":{"events":25}},"clock_skew_ppm":1.5}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/fp/report", strings.NewReader(body))
+	req.RemoteAddr = "198.51.100.90:4444"
+	rec := httptest.NewRecorder()
+	s.fpReportAPI(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("行为上报应 200，实际 %d body=%s", rec.Code, rec.Body.String())
+	}
+	if kinds := store.kindsOf("198.51.100.90"); kinds["env-flag:ua-platform-mismatch"] > 0 {
+		t.Fatalf("行为补充上报不应产生环境核验事件: %v", kinds)
+	}
+}
