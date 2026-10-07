@@ -165,30 +165,29 @@ jobs:
             rm -f githubhot.bak
           "
 
-      # P2-5/P3-3：部署后拉取 GeoIP 国家库 + JA4 映射表（幂等，已有则跳过；失败非致命自动降级）
+      # P2-5/P3-3：部署后补齐 GeoIP 国家库 + JA4 映射表（幂等，已有则跳过；失败非致命自动降级）
+      # 服务器在境内直连 github.com 常超时，改由 Runner 下载后 scp 中转
       - name: 拉取 GeoIP / JA4 数据
         if: needs.check.outputs.has_deploy == 'true'
         env:
           PORT: ${{ secrets.DEPLOY_PORT || 22 }}
           DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
         run: |
-          ssh -i ~/.ssh/deploy -p $PORT \
-            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
-            cd $DIR
-            if [ ! -f data/geo.mmdb ]; then
-              echo '[deploy] 下载 GeoIP 国家库...'
-              ./githubhot geo download || echo '[deploy] GeoIP 下载失败（非致命，核验自动降级）'
-            else
-              echo '[deploy] GeoIP 已存在，跳过'
-            fi
-            if [ ! -f data/ja4-mapping.csv ]; then
-              echo '[deploy] 下载 JA4 映射表...'
-              ./githubhot ja4 update || echo '[deploy] JA4 下载失败（非致命，核验自动降级）'
-            else
-              echo '[deploy] JA4 已存在，跳过'
-            fi
-          "
+          curl -fsSL --max-time 300 -o geo.mmdb \
+            https://github.com/sapics/ip-location-db/releases/download/latest/dbip-country.mmdb \
+            || echo '[warn] GeoIP 下载失败（非致命，核验自动降级）'
+          curl -fsSL --max-time 120 -o ja4-mapping.csv \
+            https://raw.githubusercontent.com/FoxIO-LLC/ja4/main/ja4plus-mapping.csv \
+            || echo '[warn] JA4 下载失败（非致命，核验自动降级）'
+
+          SSH_OPTS=(-i ~/.ssh/deploy -p "$PORT" -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6)
+          TARGET="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
+          ssh "${SSH_OPTS[@]}" "$TARGET" "mkdir -p $DIR/data"
+          [ -s geo.mmdb ] && timeout 900 scp "${SSH_OPTS[@]}" geo.mmdb "$TARGET:$DIR/data/geo.mmdb" \
+            || echo '[warn] GeoIP 上传跳过/失败'
+          [ -s ja4-mapping.csv ] && timeout 300 scp "${SSH_OPTS[@]}" ja4-mapping.csv "$TARGET:$DIR/data/ja4-mapping.csv" \
+            || echo '[warn] JA4 上传跳过/失败'
+          ssh "${SSH_OPTS[@]}" "$TARGET" "ls -la $DIR/data/geo.mmdb $DIR/data/ja4-mapping.csv 2>/dev/null || true; rm -f $DIR/data/geo.mmdb.tmp"
 
   # 后端部署完成后通知 APP 仓库重建（API 契约变动时 APP 跟随出新包）
   notify-app:
