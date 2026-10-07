@@ -1,9 +1,11 @@
 name: 基础设施-管理端鉴权加固
 
-# 手动触发：生产管理端为 open 模式（运行环境未配 ADMIN_PASSWORD_HASH/ADMIN_TOKEN）。
+# 手动触发：生产管理端曾为 open 模式（运行环境未配 ADMIN_PASSWORD_HASH/ADMIN_TOKEN）。
 # 本工作流：从 Secret ADMIN_PASSWORD（用户指定，加密下发、日志自动掩码）服务器侧
-# 生成 argon2id 哈希 → 强制覆盖 .env 的 ADMIN_PASSWORD_HASH → 用该密码做登录回验 →
+# 生成 argon2id 哈希 → 覆盖 .env 的 ADMIN_PASSWORD_HASH → 用该密码做登录回验 →
 # 补传行为 LR 模型 → 重启 → 验证 mode 关闭。
+# 远端脚本为仓库文件 scripts/remote-harden.sh（stdin 喂 bash -s，免 heredoc 转义）。
+# 密码传输：base64 经远端 argv 注入（不落日志、不回显；日志中 Secret 自动掩码）。
 on:
   workflow_dispatch:
 
@@ -11,15 +13,14 @@ jobs:
   harden:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: 配置 SSH
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
           chmod 600 ~/.ssh/deploy
           ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: 上传行为 LR 模型
-        uses: actions/checkout@v4
 
       - name: 服务器加固
         env:
@@ -28,7 +29,7 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: |
           set -e
-          # LR 模型（1.5KB）：/opt/githubhot/models/behavior_lr_v1.json
+          # 行为 LR 模型（1.5KB，仓库 models/ 已入库但服务器缺失）
           tar czf model.tar.gz -C models behavior_lr_v1.json
           SCP_OPTS=(-i ~/.ssh/deploy -P "$PORT" -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6)
           timeout 300 scp "${SCP_OPTS[@]}" model.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/model.tar.gz
@@ -36,63 +37,6 @@ jobs:
 
           # Secret 不会随 env 穿越 SSH：base64 经远端 argv 注入（不落日志、不回显）
           B64PW=$(printf %s "$ADMIN_PASSWORD" | base64 -w0)
-
           ssh -i ~/.ssh/deploy -p $PORT \
             -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "B64PW='$B64PW' bash -s" <<'REMOTE'
-            set -e
-            echo "--- 管理端鉴权状态（加固前）---"
-            curl -s --max-time 5 http://127.0.0.1:8787/api/v1/admin/session | head -c 120 || true
-            echo ""
-
-            ADMIN_PASSWORD=$(printf %s "$B64PW" | base64 -d)
-            [ -n "$ADMIN_PASSWORD" ] || { echo "::error::密码传输为空"; exit 1; }
-            cd $DIR
-            # 强制覆盖（open 模式收口 + 换密均走这里）：stdout 捕获进变量，不回显
-            HASH=$(./githubhot admin hash "$ADMIN_PASSWORD")
-            [ -n "$HASH" ] || { echo "::error::哈希生成失败"; exit 1; }
-            if grep -q "^ADMIN_PASSWORD_HASH=" .env 2>/dev/null; then
-              sed -i "s|^ADMIN_PASSWORD_HASH=.*|ADMIN_PASSWORD_HASH=$HASH|" .env
-              echo "ADMIN_PASSWORD_HASH 已覆盖"
-            else
-              echo "ADMIN_PASSWORD_HASH=$HASH" >> .env
-              echo "ADMIN_PASSWORD_HASH 已写入"
-            fi
-            chmod 600 .env
-            rm -f ADMIN_INITIAL_PASSWORD.txt
-            unset HASH
-
-            echo "--- 行为 LR 模型补传 ---"
-            sudo mkdir -p models
-            sudo tar xzf /tmp/model.tar.gz -C models
-            rm -f /tmp/model.tar.gz
-            ls -la models/
-
-            echo "--- 重启并验证 ---"
-            sudo systemctl restart githubhot
-            ok=""
-            i=0
-            while [ $i -lt 20 ]; do
-              if curl -fsS http://127.0.0.1:8787/api/v1/healthz >/dev/null 2>&1; then ok=1; break; fi
-              sleep 3
-              i=$((i+1))
-            done
-            [ -n "$ok" ] || { echo "::error::重启后不健康"; sudo journalctl -u githubhot -n 30 --no-pager; exit 1; }
-
-            echo '--- 登录回验（指定密码应 200；只打印状态码）---'
-            LCODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
-              -X POST -H "Content-Type: application/json" \
-              -d "{\"password\": \"$ADMIN_PASSWORD\"}" \
-              http://127.0.0.1:8787/api/v1/admin/login)
-            echo "login 状态码: $LCODE"
-            if [ "$LCODE" != "200" ]; then
-              echo "::error::指定密码登录失败（$LCODE）"
-              exit 1
-            fi
-
-            echo "--- 加固后鉴权探测（应 401/未登录，绝不能再是 open）---"
-            curl -s --max-time 5 http://127.0.0.1:8787/api/v1/admin/session | head -c 120
-            echo ""
-            echo "--- 行为模型加载确认 ---"
-            sudo journalctl -u githubhot -n 40 --no-pager | grep -i "行为模型\|behavior" | tail -3 || echo "(未找到行为模型日志行)"
-            REMOTE
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "B64PW='$B64PW' GHDIR='$DIR' bash -s" < scripts/remote-harden.sh
