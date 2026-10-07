@@ -10,6 +10,20 @@ const loading = ref(true)
 const gridEl = ref(null)
 const lightbox = ref(null) // 当前预览下标
 
+// ===== 背景视频墙：主页背景片单全量收录（横屏 + 竖屏两组）=====
+// 全部走 /video/ 代理路径（服务端磁盘缓存）。preload="none"：卡片不点不联网，
+// 16 支视频同屏也不会像背景轮播那样并发缓冲拖垮带宽。
+const videoGroups = ref([])
+function vidName(src) {
+  const m = String(src).match(/([^/]+)\.mp4$/)
+  return m ? m[1] : src
+}
+function togglePlay(e) {
+  const v = e.target
+  if (v.paused) { const p = v.play(); if (p && p.catch) p.catch(() => {}) }
+  else v.pause()
+}
+
 function coverOf(title, idx) {
   let h = (idx * 47) % 360
   for (const c of title) h = (h * 31 + c.charCodeAt(0)) % 360
@@ -45,6 +59,16 @@ onMounted(async () => {
   const d = await api.get('/api/v1/hot/news')
   stories.value = d.items || []
   loading.value = false
+  // 背景片单：失败静默（区块隐藏，不影响画廊主体）
+  api.get('/api/v1/site/config').then((cfg) => {
+    if (!cfg) return
+    const land = String(cfg.homeVideos || '').split('|').filter(Boolean)
+    const port = String(cfg.homePortraitVideos || '').split('|').filter(Boolean)
+    const groups = []
+    if (land.length) groups.push({ label: '横屏 · 主页背景', aspect: '16 / 9', items: land })
+    if (port.length) groups.push({ label: '竖屏 · 移动端背景', aspect: '9 / 16', items: port })
+    videoGroups.value = groups
+  }).catch(() => {})
   await nextTick()
   initGallery()
   document.addEventListener('keydown', onKey)
@@ -65,6 +89,17 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
   <main class="layout" id="content-inner">
     <div id="post">
       <div id="article-container" class="article">
+        <!-- 背景视频墙：主页轮播片单全量收录，点击播放/暂停 -->
+        <section v-for="g in videoGroups" :key="g.label" class="video-wall">
+          <h2 class="video-wall-title"><i class="anzhiyufont anzhiyu-icon-film"></i> {{ g.label }}（{{ g.items.length }}）</h2>
+          <div class="video-grid" :class="{ portrait: g.aspect === '9 / 16' }" :style="{ '--vid-aspect': g.aspect }">
+            <figure class="video-card" v-for="src in g.items" :key="src">
+              <video :src="src" muted loop playsinline preload="none" @click="togglePlay"></video>
+              <figcaption>{{ vidName(src) }}</figcaption>
+            </figure>
+          </div>
+        </section>
+
         <div v-if="loading" class="loading">加载中 </div>
         <div v-else-if="!stories.length" class="empty">暂无事件</div>
         <div v-else ref="gridEl" class="justified-gallery">
@@ -96,6 +131,18 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
 
 <style scoped>
 #post { max-width: 100%; margin: 0; }
+
+/* ===== 背景视频墙 ===== */
+.video-wall { margin-bottom: 28px; }
+.video-wall-title { font-size: 1.15rem; font-weight: 700; color: var(--anzhiyu-fontcolor); margin: 6px 0 12px; }
+.video-wall-title i { color: var(--anzhiyu-theme); margin-right: 4px; }
+.video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.video-grid.portrait { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.video-card { margin: 0; }
+.video-card video { display: block; width: 100%; aspect-ratio: var(--vid-aspect); object-fit: cover; border-radius: 10px; background: #000; cursor: pointer; box-shadow: var(--card-box-shadow); }
+.video-card video:hover { filter: brightness(1.08); }
+.video-card figcaption { text-align: center; font-size: .76rem; color: var(--anzhiyu-gray); padding-top: 5px; }
+
 .post-bg { height: 18rem; position: relative; overflow: hidden; }
 #post-info { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; }
 .post-title { font-size: 1.8rem; font-weight: 700; text-shadow: 0 3px 14px rgba(0,0,0,.3); }
