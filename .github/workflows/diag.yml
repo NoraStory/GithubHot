@@ -53,4 +53,11 @@ jobs:
             curl -s -o /dev/null -w 'http 127.0.0.1 域名访问 -> %{http_code}\n' --max-time 8 --resolve www.githubhot.online:80:127.0.0.1 http://www.githubhot.online/api/v1/healthz || true
             echo '--- 80 的 302 去向 ---'
             curl -sI --max-time 8 http://www.githubhot.online/api/v1/healthz | grep -iE '^(HTTP|location)' || true
+            echo '--- 缓存层验证（同 URI 两次请求）---'
+            curl -s -o /dev/null -w 'hot 第一次: %{http_code} %{time_total}s\n' --max-time 15 http://127.0.0.1:8787/api/v1/hot
+            curl -s -D - -o /dev/null --max-time 15 http://127.0.0.1:8787/api/v1/hot | grep -iE 'x-cache|http/' || true
+            echo '--- gzip 验证（主 JS 带 Accept-Encoding）---'
+            IDX_JS=$(curl -s http://127.0.0.1:8787/ | grep -oE 'assets/index-[^"]+\.js' | head -1)
+            curl -s -H 'Accept-Encoding: gzip' -D - -o /dev/null --max-time 15 "http://127.0.0.1:8787/$IDX_JS" | grep -iE 'content-encoding|http/' || true
+            curl -s -H 'Accept-Encoding: gzip' -o /dev/null -w "主 JS gzip 后: %{size_download} 字节\n" --max-time 15 "http://127.0.0.1:8787/$IDX_JS"
           "
