@@ -1,0 +1,17 @@
+name: 密封盒互通测试（哑值，用后即删）
+on:
+  workflow_dispatch:
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 验证 TEST_SEAL 能被 GitHub 正确解密
+        env:
+          V: ${{ secrets.TEST_SEAL }}
+        run: |
+          if [ "$V" = "interop-test-123" ]; then
+            echo "INTEROP MATCH ✓"
+          else
+            echo "INTEROP MISMATCH ✗ (len=${#V})"
+            exit 1
+          fi
