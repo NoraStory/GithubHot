@@ -128,6 +128,29 @@ jobs:
             curl -fsS http://127.0.0.1:8787/api/v1/healthz
           "
 
+      # P2-5/P3-3：部署后拉取 GeoIP 国家库 + JA4 映射表（幂等，已有则跳过；失败非致命自动降级）
+      - name: 拉取 GeoIP / JA4 数据
+        if: needs.check.outputs.has_deploy == 'true'
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
+            cd $DIR
+            if [ ! -f data/geo.mmdb ]; then
+              echo '[deploy] 下载 GeoIP 国家库...'
+              ./githubhot geo download || echo '[deploy] GeoIP 下载失败（非致命，核验自动降级）'
+            else
+              echo '[deploy] GeoIP 已存在，跳过'
+            fi
+            if [ ! -f data/ja4-mapping.csv ]; then
+              echo '[deploy] 下载 JA4 映射表...'
+              ./githubhot ja4 update || echo '[deploy] JA4 下载失败（非致命，核验自动降级）'
+            else
+              echo '[deploy] JA4 已存在，跳过'
+            fi
+          "
+
   # 后端部署完成后通知 APP 仓库重建（API 契约变动时 APP 跟随出新包）
   notify-app:
     needs: [deploy, check]
