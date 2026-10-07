@@ -24,18 +24,19 @@ const domesticTop = computed(() => (domestic.value.items || []).slice(0, 12))
 const domesticSummary = computed(() => domestic.value.summary || '')
 
 // ===== 横幅背景视频（AnZhiYu #home-media-container 同构：随机选片/竖横屏/视差由 index_media.js 处理）=====
-// 横屏：前 6 个为远程源；x1~x6 与远程重复已剔除，本地只放新增（x7/x8/x10/x11/x12）
+// 全部走本地 /video/ 代理路径（服务端 video_cache.go：首访回源预热落盘，之后本地直出）。
+// x1~x6 源站为主题作者源，x7+/y 系列源站为自家 R2；命名遵循本地规范（x7/x10、y1/y10）。
 const LANDSCAPE_VIDEOS = [
-  'https://pic.lololowe.com/video/x/1.mp4', 'https://pic.lololowe.com/video/x/2.mp4',
-  'https://pic.lololowe.com/video/x/3.mp4', 'https://pic.lololowe.com/video/x/4.mp4',
-  'https://pic.lololowe.com/video/x/5.mp4', 'https://pic.lololowe.com/video/x/6.mp4',
-  '/video/x/7.mp4', '/video/x/8.mp4', '/video/x/10.mp4', '/video/x/11.mp4', '/video/x/12.mp4'
+  '/video/x/1.mp4', '/video/x/2.mp4',
+  '/video/x/3.mp4', '/video/x/4.mp4',
+  '/video/x/5.mp4', '/video/x/6.mp4',
+  '/video/x/x7.mp4', '/video/x/x8.mp4', '/video/x/x10.mp4', '/video/x/x11.mp4', '/video/x/x12.mp4'
 ].join('|')
-// 竖屏：本地 y 系列（y1~y12，无 y9）
+// 竖屏：y 系列（y1~y12，无 y9）
 const PORTRAIT_VIDEOS = [
-  '/video/y/1.mp4', '/video/y/2.mp4', '/video/y/3.mp4', '/video/y/4.mp4',
-  '/video/y/5.mp4', '/video/y/6.mp4', '/video/y/7.mp4', '/video/y/8.mp4',
-  '/video/y/10.mp4', '/video/y/11.mp4', '/video/y/12.mp4'
+  '/video/y/y1.mp4', '/video/y/y2.mp4', '/video/y/y3.mp4', '/video/y/y4.mp4',
+  '/video/y/y5.mp4', '/video/y/y6.mp4', '/video/y/y7.mp4', '/video/y/y8.mp4',
+  '/video/y/y10.mp4', '/video/y/y11.mp4', '/video/y/y12.mp4'
 ].join('|')
 const videoList = ref(LANDSCAPE_VIDEOS)
 const portraitList = ref(PORTRAIT_VIDEOS)
@@ -168,16 +169,24 @@ function bootPeopleCanvas() {
 onMounted(async () => {
   typeLoop()
   loadPoem()
-  view.value = await api.get('/api/v1/hot')
+  // 首屏五个请求全部并行（原先串行 await：hot → hot/news → digests → site/config，
+  // 最慢路径叠加使首页可交互时间成倍拉长），各自失败互不阻塞
+  const [rHot, rNews, rDomestic, rDigests, rCfg] = await Promise.allSettled([
+    api.get('/api/v1/hot'),
+    api.get('/api/v1/hot/news'),
+    api.get('/api/v1/hot/domestic'),
+    api.get('/api/v1/digests?pageSize=50'),
+    api.get('/api/v1/site/config')
+  ])
+  if (rHot.status === 'fulfilled') view.value = rHot.value
+  if (rNews.status === 'fulfilled') stories.value = rNews.value.items || []
+  if (rDomestic.status === 'fulfilled') domestic.value = rDomestic.value
+  if (rDigests.status === 'fulfilled') digestsAll.value = rDigests.value.items || []
+  if (rCfg.status === 'fulfilled' && rCfg.value) {
+    if (rCfg.value.homeVideos) videoList.value = rCfg.value.homeVideos
+    if (rCfg.value.homePortraitVideos) portraitList.value = rCfg.value.homePortraitVideos
+  }
   loading.value = false
-  const d = await api.get('/api/v1/hot/news')
-  stories.value = d.items || []
-  api.get('/api/v1/hot/domestic').then((dd) => { domestic.value = dd }).catch(() => {})
-  const dg = await api.get('/api/v1/digests?pageSize=50')
-  digestsAll.value = dg.items || []
-  const cfg = await api.get('/api/v1/site/config').catch(() => null)
-  if (cfg && cfg.homeVideos) videoList.value = cfg.homeVideos
-  if (cfg && cfg.homePortraitVideos) portraitList.value = cfg.homePortraitVideos
   // 自定义音乐播放器（music-index 改造版）与 peoplecanvas 画布挂载同步
   bootPeopleCanvas()
   setTimeout(() => document.dispatchEvent(new Event('pjax:complete')), 120)

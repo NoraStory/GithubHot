@@ -67,6 +67,10 @@ func (s *Server) Router() http.Handler {
 	if s.AppGuard != nil {
 		r.Use(s.AppGuard.Middleware) // APP 请求：签名校验 + 指纹归档 + 远程封禁/强更
 	}
+	// 性能层：外层 gzip（对最终响应按 Content-Type 决定压缩），内层公共只读 API
+	// 响应缓存（热榜/期刊/归档等分钟级 TTL，防 SQLite 在并发下被全量重建打爆）
+	r.Use(gzipMiddleware)
+	r.Use(responseCacheMiddleware)
 	r.Use(middleware.Timeout(15 * time.Second))
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {

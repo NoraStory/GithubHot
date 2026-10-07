@@ -115,7 +115,9 @@ func videoURL(dir, localPath, r2Key string) string {
 }
 
 // serveDiskVideo 从 videosDir() 提供 /video/ 下的媒体文件。
-// 命中返回 true；文件不存在且配置了 R2 后备时 302 跳 R2；否则返回 false 由调用方回退 embed。
+// 本地命中直接直出；未命中走慢源代理缓存（首次回源 tee 落盘，之后本地直出，
+// 见 video_cache.go）；代理不可用且为 x/y 键时 302 跳 R2 兜底；否则返回 false
+// 由调用方回退 embed。
 func serveDiskVideo(w http.ResponseWriter, r *http.Request, name string) bool {
 	// path.Clean 已处理 ..，这里再拒绝绝对路径与越界分隔符，双保险
 	if filepath.IsAbs(name) || strings.Contains(name, "..") {
@@ -125,19 +127,7 @@ func serveDiskVideo(w http.ResponseWriter, r *http.Request, name string) bool {
 	if dir == "" {
 		return false
 	}
-	full := filepath.Join(dir, filepath.FromSlash(name))
-	info, err := os.Stat(full)
-	if err != nil || info.IsDir() {
-		// R2 后备：/video/x/x7.mp4 → {r2Base}/x/x7.mp4
-		if base := r2Base(); base != "" && (strings.HasPrefix(name, "x/") || strings.HasPrefix(name, "y/")) {
-			http.Redirect(w, r, base+"/"+strings.TrimPrefix(path.Clean("/"+name), "/"), http.StatusFound)
-			return true
-		}
-		return false
-	}
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	http.ServeFile(w, r, full)
-	return true
+	return serveVideoCached(w, r, dir, name)
 }
 
 // appDlLimiter APP 安装包下载限流：每 IP 滑动窗口（10 分钟 5 次）。
@@ -259,35 +249,35 @@ func (s *Server) siteConfig(w http.ResponseWriter, _ *http.Request) {
 	}
 	homeVideos := strings.TrimSpace(os.Getenv("HOME_VIDEOS"))
 	if homeVideos == "" {
-		// 默认片单：前 6 个远程黑白老电影 + 本地/R2 横屏（磁盘有文件走本地直出，缺文件自动落 R2 后备）
-		dir := videosDir()
+		// 默认片单：全部走本地 /video/ 代理路径（video_cache.go 慢源缓存）——
+		// x1~x6 回源主题作者源，x7+/y 系列回源自家 R2；首个访客触发预热落盘，
+		// 之后所有访客本地毫秒级直出。不再把第三方慢源 URL 直接暴露给浏览器。
 		homeVideos = strings.Join([]string{
-			"https://pic.lololowe.com/video/x/1.mp4", "https://pic.lololowe.com/video/x/2.mp4",
-			"https://pic.lololowe.com/video/x/3.mp4", "https://pic.lololowe.com/video/x/4.mp4",
-			"https://pic.lololowe.com/video/x/5.mp4", "https://pic.lololowe.com/video/x/6.mp4",
-			videoURL(dir, "/video/x/x7.mp4", "x/x7.mp4"),
-			videoURL(dir, "/video/x/x8.mp4", "x/x8.mp4"),
-			videoURL(dir, "/video/x/x10.mp4", "x/x10.mp4"),
-			videoURL(dir, "/video/x/x11.mp4", "x/x11.mp4"),
-			videoURL(dir, "/video/x/x12.mp4", "x/x12.mp4"),
+			"/video/x/1.mp4", "/video/x/2.mp4",
+			"/video/x/3.mp4", "/video/x/4.mp4",
+			"/video/x/5.mp4", "/video/x/6.mp4",
+			"/video/x/x7.mp4",
+			"/video/x/x8.mp4",
+			"/video/x/x10.mp4",
+			"/video/x/x11.mp4",
+			"/video/x/x12.mp4",
 		}, "|")
 	}
-	// 竖屏片单：本地/R2 的 y 系列（y1~y12，无 y9）
+	// 竖屏片单：y 系列（y1~y12，无 y9），同样走本地代理路径
 	homePortraitVideos := strings.TrimSpace(os.Getenv("HOME_PORTRAIT_VIDEOS"))
 	if homePortraitVideos == "" {
-		dir := videosDir()
 		homePortraitVideos = strings.Join([]string{
-			videoURL(dir, "/video/y/y1.mp4", "y/y1.mp4"),
-			videoURL(dir, "/video/y/y2.mp4", "y/y2.mp4"),
-			videoURL(dir, "/video/y/y3.mp4", "y/y3.mp4"),
-			videoURL(dir, "/video/y/y4.mp4", "y/y4.mp4"),
-			videoURL(dir, "/video/y/y5.mp4", "y/y5.mp4"),
-			videoURL(dir, "/video/y/y6.mp4", "y/y6.mp4"),
-			videoURL(dir, "/video/y/y7.mp4", "y/y7.mp4"),
-			videoURL(dir, "/video/y/y8.mp4", "y/y8.mp4"),
-			videoURL(dir, "/video/y/y10.mp4", "y/y10.mp4"),
-			videoURL(dir, "/video/y/y11.mp4", "y/y11.mp4"),
-			videoURL(dir, "/video/y/y12.mp4", "y/y12.mp4"),
+			"/video/y/y1.mp4",
+			"/video/y/y2.mp4",
+			"/video/y/y3.mp4",
+			"/video/y/y4.mp4",
+			"/video/y/y5.mp4",
+			"/video/y/y6.mp4",
+			"/video/y/y7.mp4",
+			"/video/y/y8.mp4",
+			"/video/y/y10.mp4",
+			"/video/y/y11.mp4",
+			"/video/y/y12.mp4",
 		}, "|")
 	}
 	writeJSON(w, 200, map[string]any{
