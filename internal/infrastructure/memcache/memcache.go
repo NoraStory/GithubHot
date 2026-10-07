@@ -108,11 +108,16 @@ func (c *Cache) GetOrLoad(key string, ttl time.Duration, load func() (any, error
 		return v, err
 	}
 	v, err := load() // 首个到达者执行
+	if err == nil {
+		// 先落缓存再放行等待者：finish 唤醒的 follower 会立即读缓存，
+		// 若先 finish 后 Set，follower 会在窗口期未命中而重复调 loader
+		//（CI 慢机器上必现的竞态）
+		c.Set(key, v, ttl)
+	}
 	c.inflight.finish(key)
 	if err != nil {
 		return nil, err
 	}
-	c.Set(key, v, ttl)
 	return v, nil
 }
 
