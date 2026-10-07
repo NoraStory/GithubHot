@@ -2,11 +2,13 @@
  * 首页背景媒体加载器（AnZhiYu index_media.js 改造版，本仓库重写为可读源码）
  *
  * 与原版的差异（性能向）：
- * 1. 视差效果用 requestAnimationFrame 合帧：mousemove/touchmove 只记录坐标，
+ * 1. 选片粘滞：sessionStorage 记住本标签页的选片（24h TTL），刷新走浏览器缓存
+ *    秒开，不再每次刷新随机换片导致缓存作废重新缓冲
+ * 2. 视差效果用 requestAnimationFrame 合帧：mousemove/touchmove 只记录坐标，
  *    每帧最多写一次 transform，避免高频 getBoundingClientRect + 样式写入造成主线程抖动
- * 2. 页面隐藏（切标签/锁屏）暂停视频，恢复可见再播——后台标签不再持续下载+解码
- * 3. prefers-reduced-motion: reduce 时不自动播视频与视差，改用 poster/渐变静帧
- * 4. resize 自检从 setInterval(5s) 轮询改为仅在页面可见时低频自愈
+ * 3. 页面隐藏（切标签/锁屏）暂停视频，恢复可见再播——后台标签不再持续下载+解码
+ * 4. prefers-reduced-motion: reduce 时不自动播视频与视差，改用 poster/渐变静帧
+ * 5. resize 自检从 setInterval(5s) 轮询改为仅在页面可见时低频自愈
  * 媒体选片契约不变：容器 data-landscape-video / data-portrait-video（"|" 分隔随机选一）。
  */
 (function () {
@@ -107,8 +109,20 @@
   }
 
   // ---------- 主流程：随机选片并注入媒体元素 ----------
-  function pickOne(list) {
-    return list[Math.floor(Math.random() * list.length)]
+  // 选片粘滞：同一标签页的刷新复用同一选片（sessionStorage + 24h TTL 兜底），
+  // 视频命中浏览器缓存（max-age 86400）后刷新秒开——否则每次刷新随机换片，
+  // 缓存全部作废重新走网络，这正是"每次刷新背景必卡"的根因。新开标签页换新片。
+  function pickSticky(list, orientation) {
+    var KEY = 'gh_bg_media_' + orientation
+    try {
+      var saved = JSON.parse(sessionStorage.getItem(KEY) || 'null')
+      if (saved && saved.src && list.indexOf(saved.src) >= 0 && Date.now() - saved.ts < 86400000) {
+        return saved.src
+      }
+    } catch (e) { /* 存储不可用：退化为每次随机 */ }
+    var src = list[Math.floor(Math.random() * list.length)]
+    try { sessionStorage.setItem(KEY, JSON.stringify({ src: src, ts: Date.now() })) } catch (e) { }
+    return src
   }
 
   function initResponsiveBackground() {
@@ -129,7 +143,7 @@
       : (container.dataset.landscapeVideo || container.dataset.landscapeImg)
     var poster = isPortrait ? container.dataset.portraitPoster : container.dataset.landscapePoster
     if (!src) return
-    if (src.indexOf('|') >= 0) src = pickOne(src.split('|'))
+    if (src.indexOf('|') >= 0) src = pickSticky(src.split('|'), orientation)
 
     var loaderBox = document.createElement('div')
     loaderBox.className = 'custom-loader'

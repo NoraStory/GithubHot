@@ -250,8 +250,9 @@ func (s *Server) siteConfig(w http.ResponseWriter, _ *http.Request) {
 	homeVideos := strings.TrimSpace(os.Getenv("HOME_VIDEOS"))
 	if homeVideos == "" {
 		// 默认片单：全部走本地 /video/ 代理路径（video_cache.go 慢源缓存）——
-		// x1~x6 回源主题作者源，x7+/y 系列回源自家 R2；首个访客触发预热落盘，
-		// 之后所有访客本地毫秒级直出。不再把第三方慢源 URL 直接暴露给浏览器。
+		// x1~x6 回源主题作者源（实测带浏览器 UA 可正常回源，反爬挑战偶发，
+		// 投毒防护会拦截挑战页并 302 兜底），x7+/y 系列回源自家 R2；
+		// 首个访客触发预热落盘，之后所有访客本地毫秒级直出。
 		homeVideos = strings.Join([]string{
 			"/video/x/1.mp4", "/video/x/2.mp4",
 			"/video/x/3.mp4", "/video/x/4.mp4",
