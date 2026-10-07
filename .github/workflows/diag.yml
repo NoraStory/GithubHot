@@ -1,0 +1,49 @@
+name: 服务器诊断（只读）
+
+# 手动触发的只读诊断：公网可达性 + 服务器服务状态 + 启动日志 + .env 键名清单
+# 不改任何文件、不重启服务、不输出任何密钥值
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 公网可达性（GitHub Actions 出口）
+        run: |
+          echo "--- DNS ---"
+          getent hosts www.githubhot.online || true
+          echo "--- https healthz ---"
+          curl -sv --max-time 20 https://www.githubhot.online/api/v1/healthz 2>&1 | tail -15 || true
+          echo "--- http 80 ---"
+          curl -s -o /dev/null -w "%{http_code}\n" --max-time 20 http://www.githubhot.online/api/v1/healthz || true
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 服务器侧只读检查
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
+            echo '--- systemd 单元状态 ---'
+            systemctl show githubhot -p ActiveState,SubState,NRestarts,ExecMainStartTimestamp,ExecMainPID,Restart 2>/dev/null || true
+            echo '--- 最近 25 行日志 ---'
+            sudo journalctl -u githubhot -n 25 --no-pager 2>/dev/null || true
+            echo '--- 监听端口 ---'
+            ss -tlnp 2>/dev/null | grep -E '8787|8792|:443|:80' || echo '(无匹配监听)'
+            echo '--- 目录内二进制 ---'
+            ls -la $DIR/githubhot* 2>/dev/null || true
+            echo '--- .env 键名（只列名，不输出值）---'
+            cut -d= -f1 $DIR/.env 2>/dev/null | grep -v '^#' | grep -v '^\$' || echo '(无 .env)'
+            echo '--- 服务器本机 curl ---'
+            curl -s -o /dev/null -w '127.0.0.1:8787 -> %{http_code}\n' --max-time 5 http://127.0.0.1:8787/api/v1/healthz || true
+            curl -sk -o /dev/null -w 'https 本机 -> %{http_code}\n' --max-time 5 https://127.0.0.1:8787/api/v1/healthz || true
+          "
