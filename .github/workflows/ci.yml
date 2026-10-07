@@ -28,6 +28,9 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Test
-        run: go test ./... -count=1 -race
+        run: go test ./... -count=1 -race -v 2>&1 | tee test-output.txt; exit ${PIPESTATUS[0]}
+      - name: Output failures
+        if: failure()
+        run: grep -B 3 -A 10 -- "--- FAIL" test-output.txt || true
       - name: Build
         run: go build -o githubhot ./cmd/githubhot
