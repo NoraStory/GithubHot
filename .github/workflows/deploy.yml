@@ -180,14 +180,14 @@ jobs:
             https://raw.githubusercontent.com/FoxIO-LLC/ja4/main/ja4plus-mapping.csv \
             || echo '[warn] JA4 下载失败（非致命，核验自动降级）'
 
-          SSH_OPTS=(-i ~/.ssh/deploy -p "$PORT" -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6)
+          SCP_OPTS=(-i ~/.ssh/deploy -P "$PORT" -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6)
           TARGET="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
-          ssh "${SSH_OPTS[@]}" "$TARGET" "mkdir -p $DIR/data"
-          [ -s geo.mmdb ] && timeout 900 scp "${SSH_OPTS[@]}" geo.mmdb "$TARGET:$DIR/data/geo.mmdb" \
+          ssh "${SCP_OPTS[@]}" "$TARGET" "mkdir -p $DIR/data"
+          [ -s geo.mmdb ] && timeout 900 scp "${SCP_OPTS[@]}" geo.mmdb "$TARGET:$DIR/data/geo.mmdb" \
             || echo '[warn] GeoIP 上传跳过/失败'
-          [ -s ja4-mapping.csv ] && timeout 300 scp "${SSH_OPTS[@]}" ja4-mapping.csv "$TARGET:$DIR/data/ja4-mapping.csv" \
+          [ -s ja4-mapping.csv ] && timeout 300 scp "${SCP_OPTS[@]}" ja4-mapping.csv "$TARGET:$DIR/data/ja4-mapping.csv" \
             || echo '[warn] JA4 上传跳过/失败'
-          ssh "${SSH_OPTS[@]}" "$TARGET" "ls -la $DIR/data/geo.mmdb $DIR/data/ja4-mapping.csv 2>/dev/null || true; rm -f $DIR/data/geo.mmdb.tmp"
+          ssh "${SCP_OPTS[@]}" "$TARGET" "ls -la $DIR/data/geo.mmdb $DIR/data/ja4-mapping.csv 2>/dev/null || true; rm -f $DIR/data/geo.mmdb.tmp"
 
   # 后端部署完成后通知 APP 仓库重建（API 契约变动时 APP 跟随出新包）
   notify-app:
