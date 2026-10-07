@@ -26,7 +26,7 @@ jobs:
           printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
           chmod 600 ~/.ssh/deploy
           ssh-keyscan -H -p $PORT ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
-          ssh "${SCP_OPTS[@]}" ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "sudo mkdir -p /opt/githubhot-gnn && sudo chown $(id -u):$(id -g) /opt/githubhot-gnn 2>/dev/null || true; mkdir -p /opt/githubhot-gnn 2>/dev/null || sudo mkdir -p /opt/githubhot-gnn"
+          ssh "${SCP_OPTS[@]}" ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "sudo mkdir -p /opt/githubhot-gnn && sudo chown -R \$(id -un):\$(id -gn) /opt/githubhot-gnn"
           timeout 600 scp "${SCP_OPTS[@]}" mlserve.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/mlserve.tar.gz
 
       - name: 服务器安装并接线
@@ -42,7 +42,8 @@ jobs:
             sudo rm -rf /opt/githubhot-gnn/app /opt/githubhot-gnn/models /opt/githubhot-gnn/requirements.txt /opt/githubhot-gnn/deploy
             sudo tar xzf /tmp/mlserve.tar.gz -C /opt/githubhot-gnn
             rm -f /tmp/mlserve.tar.gz
-            sudo chown -R root:root /opt/githubhot-gnn
+            # 归属部署用户：venv/pip 以部署用户运行，root 属主会导致 Permission denied
+            sudo chown -R "$(id -un):$(id -gn)" /opt/githubhot-gnn
             ls /opt/githubhot-gnn/models/
 
             echo "--- Python 环境 ---"
@@ -51,6 +52,7 @@ jobs:
             fi
             cd /opt/githubhot-gnn
             if [ ! -x .venv/bin/python ]; then
+              sudo rm -rf .venv
               python3 -m venv .venv
               # 境内直连 pypi 常超时：走清华镜像
               .venv/bin/pip install -q -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt || \
