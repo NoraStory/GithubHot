@@ -34,18 +34,20 @@ jobs:
           timeout 300 scp "${SCP_OPTS[@]}" model.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/model.tar.gz
           rm -f model.tar.gz
 
+          # Secret 不会随 env 穿越 SSH：base64 经远端 argv 注入（不落日志、不回显）
+          B64PW=$(printf %s "$ADMIN_PASSWORD" | base64 -w0)
+
           ssh -i ~/.ssh/deploy -p $PORT \
             -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "B64PW='$B64PW' bash -s" <<'REMOTE'
             set -e
             echo "--- 管理端鉴权状态（加固前）---"
             curl -s --max-time 5 http://127.0.0.1:8787/api/v1/admin/session | head -c 120 || true
             echo ""
 
-            cd '"$DIR"'
-            if [ -z "$ADMIN_PASSWORD" ]; then
-              echo "::error::Secret ADMIN_PASSWORD 未配置"; exit 1
-            fi
+            ADMIN_PASSWORD=$(printf %s "$B64PW" | base64 -d)
+            [ -n "$ADMIN_PASSWORD" ] || { echo "::error::密码传输为空"; exit 1; }
+            cd $DIR
             # 强制覆盖（open 模式收口 + 换密均走这里）：stdout 捕获进变量，不回显
             HASH=$(./githubhot admin hash "$ADMIN_PASSWORD")
             [ -n "$HASH" ] || { echo "::error::哈希生成失败"; exit 1; }
@@ -93,4 +95,4 @@ jobs:
             echo ""
             echo "--- 行为模型加载确认 ---"
             sudo journalctl -u githubhot -n 40 --no-pager | grep -i "行为模型\|behavior" | tail -3 || echo "(未找到行为模型日志行)"
-            '
+            REMOTE
