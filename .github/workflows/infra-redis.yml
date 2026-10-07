@@ -1,0 +1,89 @@
+name: 基础设施-Redis（L2 缓存安装）
+
+# 手动触发：在部署服务器上安装并配置 Redis（L2 响应缓存），写入 .env 并重启服务。
+# 幂等：已安装/已配置则跳过对应步骤；重复执行安全。
+# 红线：只加缓存层，不改任何鉴权/风控/反指纹配置；Redis 仅默认回环绑定不对外。
+on:
+  workflow_dispatch:
+
+jobs:
+  redis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 安装配置 Redis 并接线
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
+            set -e
+            echo "--- Redis 安装状态 ---"
+            if command -v redis-server >/dev/null 2>&1; then
+              echo "redis-server 已安装，跳过 apt"
+            else
+              if ! sudo -n true 2>/dev/null; then
+                echo "::error::部署用户 sudo 需要密码（sudo -n 失败），无法自动安装 Redis；请手动安装后重跑"
+                exit 1
+              fi
+              sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
+            fi
+
+            echo "--- redis.conf 调优（256MB LRU，标记幂等）---"
+            CONF=/etc/redis/redis.conf
+            if sudo -n test -f "$CONF"; then
+              if ! sudo -n grep -q "^maxmemory-policy allkeys-lru" "$CONF"; then
+                printf "%s\n" "# githubhot L2 缓存调优" "maxmemory 256mb" "maxmemory-policy allkeys-lru" | sudo -n tee -a "$CONF" >/dev/null
+                sudo -n systemctl restart redis-server
+                echo "已追加 maxmemory 256mb / allkeys-lru 并重启 redis"
+              else
+                echo "调优已存在，跳过"
+              fi
+            else
+              echo "::warning::未找到 /etc/redis/redis.conf（发行版路径不同？），跳过调优"
+            fi
+            sudo -n systemctl enable --now redis-server 2>/dev/null || true
+            sleep 1
+            echo "--- Redis 连通 ---"
+            redis-cli ping
+
+            echo "--- .env 接线（幂等）---"
+            cd '"$DIR"'
+            if grep -q "^REDIS_ADDR=" .env 2>/dev/null; then
+              echo "REDIS_ADDR 已配置，跳过"
+            else
+              echo "REDIS_ADDR=127.0.0.1:6379" >> .env
+              chmod 600 .env
+              echo "已写入 REDIS_ADDR=127.0.0.1:6379"
+            fi
+
+            echo "--- 重启服务并验证 ---"
+            sudo systemctl restart githubhot
+            ok=""
+            i=0
+            while [ $i -lt 20 ]; do
+              if curl -fsS http://127.0.0.1:8787/api/v1/healthz >/dev/null 2>&1; then ok=1; break; fi
+              sleep 3
+              i=$((i+1))
+            done
+            if [ -z "$ok" ]; then
+              echo "::error::重启后不健康"
+              sudo journalctl -u githubhot -n 30 --no-pager || true
+              exit 1
+            fi
+            curl -fsS http://127.0.0.1:8787/api/v1/healthz
+            echo ""
+            echo "--- 缓存生效验证 ---"
+            curl -s -o /dev/null http://127.0.0.1:8787/api/v1/hot
+            curl -s -D - -o /dev/null http://127.0.0.1:8787/api/v1/hot | grep -i x-cache || true
+            redis-cli keys "gh:*" | head -5
+            redis-cli dbsize
+            '

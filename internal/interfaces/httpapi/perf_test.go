@@ -10,10 +10,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NoraStory/GithubHot/internal/infrastructure/cache"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/memcache"
 )
 
-func resetRespCache() { respCache = memcache.New(0) }
+func resetRespCache() { respCache = cache.New(memcache.New(0), "", "", 0, "ghtest", nil) }
+
+func TestEntryEnvelopeRoundTrip(t *testing.T) {
+	e := cache.Entry{ContentType: "application/xml; charset=utf-8", Body: []byte("<rss/>")}
+	raw := e.Encode()
+	got, ok := cache.DecodeEntry(raw)
+	if !ok || got.ContentType != e.ContentType || string(got.Body) != "<rss/>" {
+		t.Fatalf("envelope 往返不符: %+v ok=%v", got, ok)
+	}
+	if _, ok := cache.DecodeEntry([]byte("no-newline")); ok {
+		t.Fatal("无分隔符的值应解析失败")
+	}
+}
 
 func TestGzipMiddlewareCompresses(t *testing.T) {
 	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

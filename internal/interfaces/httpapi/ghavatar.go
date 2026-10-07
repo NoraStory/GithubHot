@@ -7,11 +7,12 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/NoraStory/GithubHot/internal/infrastructure/cache"
+	"github.com/NoraStory/GithubHot/internal/infrastructure/memcache"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/safehttp"
 )
 
@@ -20,15 +21,10 @@ const ghAvatarTTL = time.Hour
 var (
 	ghOwnerPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
-	ghAvatarMu    sync.Mutex
-	ghAvatarCache = map[string]ghAvatarEntry{}
+	// ghAvatarCache 两级缓存：L1 进程内 + L2 Redis（InitCaches 按 REDIS_ADDR 装配）。
+	// 重启后仍能命中 L2，避免冷启动对 github.com 的头像拉取风暴。
+	ghAvatarCache = cache.New(memcache.New(1024), "", "", 0, "ghavatar", nil)
 )
-
-type ghAvatarEntry struct {
-	body   []byte
-	until  time.Time
-	status int
-}
 
 // ghAvatar 代理仓库所有者头像：GET /api/v1/gh/avatar/{owner}.png
 func (s *Server) ghAvatar(w http.ResponseWriter, r *http.Request) {
@@ -38,15 +34,10 @@ func (s *Server) ghAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := owner
-	ghAvatarMu.Lock()
-	e, hit := ghAvatarCache[key]
-	valid := hit && time.Now().Before(e.until)
-	ghAvatarMu.Unlock()
-	if valid && e.status == http.StatusOK {
+	if e, ok := ghAvatarCache.Get("avatar:" + owner); ok && len(e.Body) > 0 {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=1800")
-		_, _ = w.Write(e.body)
+		_, _ = w.Write(e.Body)
 		return
 	}
 
@@ -70,9 +61,7 @@ func (s *Server) ghAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ghAvatarMu.Lock()
-	ghAvatarCache[key] = ghAvatarEntry{body: resp, until: time.Now().Add(ghAvatarTTL), status: status}
-	ghAvatarMu.Unlock()
+	ghAvatarCache.Set("avatar:"+owner, cache.Entry{ContentType: "image/png", Body: resp}, ghAvatarTTL)
 
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=1800")

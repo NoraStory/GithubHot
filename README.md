@@ -101,6 +101,9 @@ go build -o githubhot ./cmd/githubhot
 | `githubhot ja4 update` | TLS/JA4 | 子命令：下载 FoxIO ja4plus-mapping.csv → `data/ja4-mapping.csv`（`DATA_DIR/ja4-mapping.csv`）。文件在位时启用 **UA↔TLS 交叉核验**：浏览器 UA + 已知非浏览器 TLS 栈（curl/Go/Python/okhttp 等）→ `fpb_ua_tls_mismatch`（高置信 +25，灰度 0 分）；JA4 不在库 → `tls_unknown` 仅记录。文件缺失 → 核验整体降级 |
 | `APP_SIGN_SEED` | APP/签名 | APP 请求签名种子（`githubhot admin seed` 生成，32B base64）。**serve 模式必填**：未配置或仍为出厂默认 `gh-dev-seed-v1` 时拒绝启动。APP 侧构建期注入同值，不再经 `/api/v1/site/config` 下发 |
 | `APP_SIGN_SEED_GRACE` | 过渡期 | 旧种子列表（逗号分隔）：存量 APP 未发版时兜底验签；过渡期内验签不通过只观察不计分，建议 ≤14 天后清空 |
+| `REDIS_ADDR` | 缓存 | L2 响应缓存 Redis 地址（如 `127.0.0.1:6379`），空 = 纯进程内缓存。热榜/期刊/归档等公共只读 API 的响应在 L1+L2 双层缓存：L1 微秒级，L2 跨重启保温；Redis 宕机自动降级 L1，不影响可用性 |
+| `REDIS_PASSWORD` | 缓存 | Redis 密码（本地回环部署可空） |
+| `REDIS_DB` | 缓存 | Redis 逻辑库，默认 `0` |
 | `DATA_DIR` | | 数据目录，默认 `./data` |
 | `PORT` | | serve 端口，默认 `8787` |
 | `HOT_CRON` | | serve 内置调度（cron 表达式，本地时区），默认 `30 7 * * *` |

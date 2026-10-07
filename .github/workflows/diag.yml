@@ -43,6 +43,9 @@ jobs:
             ls -la $DIR/githubhot* 2>/dev/null || true
             echo '--- .env 键名（只列名，不输出值）---'
             cut -d= -f1 $DIR/.env 2>/dev/null | grep -v '^#' | grep -v '^\$' || echo '(无 .env)'
+            echo '--- Redis L2（若已安装）---'
+            redis-cli ping 2>/dev/null || echo '(redis-cli 不可用或未安装)'
+            redis-cli dbsize 2>/dev/null || true
             echo '--- 服务器本机 curl ---'
             curl -s -o /dev/null -w '127.0.0.1:8787 -> %{http_code}\n' --max-time 5 http://127.0.0.1:8787/api/v1/healthz || true
             curl -sk -o /dev/null -w 'https 本机 -> %{http_code}\n' --max-time 5 https://127.0.0.1:8787/api/v1/healthz || true

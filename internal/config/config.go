@@ -41,6 +41,9 @@ type Config struct {
 	RedirectHTTP        bool     // P3 REDIRECT_HTTP=1：80 端口 301 跳 HTTPS
 	WebAuthnRPID        string   // P4-2 通行密钥 RP ID（域名）
 	WebAuthnOrigin      string   // P4-2 通行密钥完整 origin
+	RedisAddr           string   // L2 响应缓存 Redis（REDIS_ADDR，空 = 纯进程内缓存）
+	RedisPassword       string   // Redis 密码（REDIS_PASSWORD，本地回环无密码部署可空）
+	RedisDB             int      // Redis 逻辑库（REDIS_DB，默认 0）
 }
 	
 // WebAuthnEnabled 通行密钥是否启用（RP ID 与 origin 齐备）。
@@ -149,6 +152,9 @@ func Load() (*Config, error) {
 		RedirectHTTP:        getEnv("REDIRECT_HTTP", "") == "1",
 		WebAuthnRPID:        getEnv("WEBAUTHN_RP_ID", ""),
 		WebAuthnOrigin:      getEnv("WEBAUTHN_ORIGIN", ""),
+		RedisAddr:           strings.TrimSpace(os.Getenv("REDIS_ADDR")),
+		RedisPassword:       os.Getenv("REDIS_PASSWORD"),
+		RedisDB:             getEnvInt("REDIS_DB", 0),
 	}
 	if cfg.LLMBaseURL != "" || cfg.LLMAPIKey != "" || cfg.LLMModelA != "" {
 		if cfg.LLMBaseURL == "" || cfg.LLMAPIKey == "" || cfg.LLMModelA == "" {

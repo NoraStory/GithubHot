@@ -3,19 +3,34 @@ package httpapi
 import (
 	"bytes"
 	"compress/gzip"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/NoraStory/GithubHot/internal/infrastructure/cache"
 	"github.com/NoraStory/GithubHot/internal/infrastructure/memcache"
 )
 
 // ---------- 响应缓存（"Redis 类"缓存层的服务端入口）----------
 
-// respCache 公共只读 API 的响应字节缓存：同 URI 命中直接回放，未命中捕获
-// writeJSON 输出后落缓存。管理端 / 鉴权路由不注册，天然不缓存。
-var respCache = memcache.New(2048)
+// respCache 两级响应缓存：L1 进程内 + L2 Redis（InitCaches 按 REDIS_ADDR 装配）。
+// 公共只读 API 命中直接回放；管理端 / 鉴权路由不在缓存面，天然不受影响。
+// 包级默认纯 L1（测试与非 serve 模式），Serve 启动时经 InitCaches 重建。
+var respCache = newDefaultRespCache()
+
+func newDefaultRespCache() *cache.TwoTier {
+	return cache.New(memcache.New(2048), "", "", 0, "gh", func(msg string) { log.Printf("[cache] %s", msg) })
+}
+
+// InitCaches 按 Redis 配置重建两级缓存。必须在 config.Load 之后调用（.env 已
+// 落到进程环境），Serve 启动早期调用一次；测试可直接替换包级变量。
+func InitCaches(redisAddr, redisPassword string, redisDB int) {
+	enableLog := func(msg string) { log.Printf("[cache] %s", msg) }
+	respCache = cache.New(memcache.New(2048), redisAddr, redisPassword, redisDB, "gh", enableLog)
+	ghAvatarCache = cache.New(memcache.New(1024), redisAddr, redisPassword, redisDB, "ghavatar", nil)
+}
 
 type cachedWriter struct {
 	http.ResponseWriter
@@ -45,6 +60,8 @@ func cacheTTLFor(path string) time.Duration {
 		return 60 * time.Second
 	case strings.HasPrefix(path, "/api/v1/digest"), strings.HasPrefix(path, "/api/v1/stories"), strings.HasPrefix(path, "/api/v1/story/"):
 		return 120 * time.Second
+	case strings.HasPrefix(path, "/api/v1/search"):
+		return 60 * time.Second
 	case strings.HasPrefix(path, "/api/v1/site/config"), strings.HasPrefix(path, "/api/v1/music/"), strings.HasPrefix(path, "/api/v1/sources"):
 		return 300 * time.Second
 	case strings.HasPrefix(path, "/feed/"):
@@ -54,6 +71,7 @@ func cacheTTLFor(path string) time.Duration {
 }
 
 // responseCacheMiddleware 只缓 GET 命中 cacheTTLFor 的路径；非 200 不缓存。
+// 回放还原捕获时的 Content-Type（/api JSON 与 /feed XML 各归其位）。
 // 守护/风控中间件在更外层已跑完，此处回放不影响防护计分。
 func responseCacheMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,18 +81,20 @@ func responseCacheMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		key := "resp:" + r.URL.RequestURI()
-		if v, ok := respCache.Get(key); ok {
-			b := v.([]byte)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if e, ok := respCache.Get(key); ok {
+			w.Header().Set("Content-Type", e.ContentType)
 			w.Header().Set("X-Cache", "HIT")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(b)
+			_, _ = w.Write(e.Body)
 			return
 		}
 		cw := &cachedWriter{ResponseWriter: w}
 		next.ServeHTTP(cw, r)
 		if cw.status == http.StatusOK && cw.buf.Len() > 0 && cw.buf.Len() < 2<<20 {
-			respCache.Set(key, append([]byte(nil), cw.buf.Bytes()...), ttl)
+			respCache.Set(key, cache.Entry{
+				ContentType: cw.Header().Get("Content-Type"),
+				Body:        append([]byte(nil), cw.buf.Bytes()...),
+			}, ttl)
 		}
 	})
 }

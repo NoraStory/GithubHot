@@ -128,6 +128,14 @@ func Run(cfg *config.Config) error {
 
 // Serve 启动 API + 双榜页 + 内置定时调度。
 func Serve(cfg *config.Config) error {
+	// 两级响应缓存装配：REDIS_ADDR 配置时启用 L2 Redis（宕机自动降级 L1），
+	// 未配置保持纯 L1。必须在 config.Load 之后（.env 已落进程环境）。
+	httpapi.InitCaches(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+	if cfg.RedisAddr != "" {
+		fmt.Printf("[cache] 两级缓存已启用（L1 进程内 + L2 Redis %s db=%d；Redis 故障自动降级 L1）\n", cfg.RedisAddr, cfg.RedisDB)
+	} else {
+		fmt.Println("[cache] 进程内缓存已启用（REDIS_ADDR 未配置，未启用 L2 Redis）")
+	}
 	// APP 签名种子红线：serve 模式拒绝以出厂默认/空种子启动
 	// （该值历史版本随 /api/v1/site/config 公开下发，等于签名机制形同虚设）。
 	if err := cfg.CheckAppSignSeed(); err != nil {
