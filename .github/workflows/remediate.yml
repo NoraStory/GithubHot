@@ -1,0 +1,80 @@
+name: 生产恢复（APP_SIGN_SEED 写入 + 重启验证）
+
+# P0-1 红线导致的服务拒绝启动恢复：服务器 .env 写入随机种子 + 过渡期旧种子白名单。
+# 种子值只进服务器 .env，绝不打印到本 workflow 日志（公开仓库）。
+on:
+  workflow_dispatch:
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 写入种子并重启验证
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
+            set -e
+            cd $DIR
+            if [ -f .env ] && grep -q '^APP_SIGN_SEED=' .env; then
+              echo 'APP_SIGN_SEED 已存在，跳过写入'
+            else
+              # admin seed：stdout 第一行=种子；用命令替换捕获，不落日志
+              SEED=\$(./githubhot admin seed 2>/dev/null | head -1)
+              if [ -z \"\$SEED\" ]; then echo '::error::admin seed 未输出种子'; exit 1; fi
+              {
+                [ -f .env ] || touch .env
+                grep -q '^APP_SIGN_SEED=' .env || echo \"APP_SIGN_SEED=\$SEED\" >> .env
+                # 过渡期：存量 APP 以出厂默认种子签名，保留验签兼容（≤14 天，APP 发版后移除）
+                grep -q '^APP_SIGN_SEED_GRACE=' .env || echo 'APP_SIGN_SEED_GRACE=gh-dev-seed-v1' >> .env
+                chmod 600 .env
+              }
+              echo \"seed 已写入 .env（长度 \$(printf %s \"\$SEED\" | wc -c) 字符），值不回显\"
+              unset SEED
+            fi
+            sudo systemctl restart githubhot
+            ok=''
+            for i in \$(seq 1 20); do
+              if curl -fsS http://127.0.0.1:8787/api/v1/healthz; then ok=1; break; fi
+              sleep 3
+            done
+            if [ -z \"\$ok\" ]; then
+              echo '::error::重启后仍不健康，journalctl 最后 30 行：'
+              sudo journalctl -u githubhot -n 30 --no-pager || true
+              exit 1
+            fi
+            sleep 10
+            ST=\$(systemctl show githubhot -p ActiveState,SubState,NRestarts)
+            echo \"10s 后状态：\$ST\"
+            echo '--- GeoIP / JA4 数据拉取（幂等，失败非致命）---'
+            if [ ! -f data/geo.mmdb ]; then
+              ./githubhot geo download || echo '[warn] GeoIP 下载失败（非致命，核验自动降级）'
+            else
+              echo 'GeoIP 已存在，跳过'
+            fi
+            if [ ! -f data/ja4-mapping.csv ]; then
+              ./githubhot ja4 update || echo '[warn] JA4 下载失败（非致命，核验自动降级）'
+            else
+              echo 'JA4 已存在，跳过'
+            fi
+            "
+
+      - name: 公网验证（GitHub Actions 出口）
+        run: |
+          for i in 1 2 3; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 https://www.githubhot.online/api/v1/healthz || true)
+            echo "公网 https healthz: $CODE"
+            [ "$CODE" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "::warning::公网仍未 200（可能 CDN/防火墙另有原因，服务器本地已健康）"
