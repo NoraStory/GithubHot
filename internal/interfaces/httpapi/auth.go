@@ -314,12 +314,15 @@ func (s *Server) adminLogout(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[admin] 删除会话失败: %v", err)
 		}
 	}
+	// 属性与登录下发保持一致（含 Secure）：删除 Cookie 按 名称+域+路径 匹配，
+	// 属性镜像虽非必需，但避免个别浏览器实现对 Secure 作用域的差异处理
 	http.SetCookie(w, &http.Cookie{
 		Name:     adminCookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
 		MaxAge:   -1,
 	})
 	writeJSON(w, 200, map[string]any{"ok": true})

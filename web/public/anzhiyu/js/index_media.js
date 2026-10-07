@@ -2,8 +2,9 @@
  * 首页背景媒体加载器（AnZhiYu index_media.js 改造版，本仓库重写为可读源码）
  *
  * 与原版的差异（性能向）：
- * 1. 选片粘滞：sessionStorage 记住本标签页的选片（24h TTL），刷新走浏览器缓存
- *    秒开，不再每次刷新随机换片导致缓存作废重新缓冲
+ * 1. 预热池随机选片：≤4 支已进浏览器缓存的池子内随机（排除上一支），后台把池外
+ *    随机视频拉进缓存轮换补充——每次刷新随机换片且零缓冲；页面加载至多预热
+ *    2 支（带宽上限），预热走 <video> 媒体管线（含 302/Range），不绕过服务端中间件
  * 2. 视差效果用 requestAnimationFrame 合帧：mousemove/touchmove 只记录坐标，
  *    每帧最多写一次 transform，避免高频 getBoundingClientRect + 样式写入造成主线程抖动
  * 3. 页面隐藏（切标签/锁屏）暂停视频，恢复可见再播——后台标签不再持续下载+解码
@@ -108,21 +109,78 @@
     })
   }
 
-  // ---------- 主流程：随机选片并注入媒体元素 ----------
-  // 选片粘滞：同一标签页的刷新复用同一选片（sessionStorage + 24h TTL 兜底），
-  // 视频命中浏览器缓存（max-age 86400）后刷新秒开——否则每次刷新随机换片，
-  // 缓存全部作废重新走网络，这正是"每次刷新背景必卡"的根因。新开标签页换新片。
-  function pickSticky(list, orientation) {
-    var KEY = 'gh_bg_media_' + orientation
+  // ---------- 主流程：随机选片 + 预热池 ----------
+  // 需求：每次刷新随机换片，但不能重新缓冲卡顿。方案 = 预热池随机：
+  //   - localStorage 维护 ≤4 支"已进浏览器缓存"的视频（条目 24h TTL）
+  //   - 刷新时从池内随机抽取（排除上一次播放的那支）→ 命中 HTTP 缓存秒开
+  //   - 播放稳定后，后台把一支"池外随机"视频拉进缓存并入池、淘汰最旧
+  //     → 池子持续轮换，每次刷新看起来都是随机的新背景，且全程零缓冲
+  //   - 冷启动（池空）才走一次网络加载，属不可避免的一次性成本
+  var WARM_KEY = 'gh_bg_warm_'
+  var WARM_MAX = 4
+  var WARM_TTL = 86400000 // 24h
+
+  function warmList(orientation) {
     try {
-      var saved = JSON.parse(sessionStorage.getItem(KEY) || 'null')
-      if (saved && saved.src && list.indexOf(saved.src) >= 0 && Date.now() - saved.ts < 86400000) {
-        return saved.src
-      }
-    } catch (e) { /* 存储不可用：退化为每次随机 */ }
-    var src = list[Math.floor(Math.random() * list.length)]
-    try { sessionStorage.setItem(KEY, JSON.stringify({ src: src, ts: Date.now() })) } catch (e) { }
-    return src
+      var arr = JSON.parse(localStorage.getItem(WARM_KEY + orientation) || '[]')
+      var now = Date.now()
+      return arr.filter(function (e) {
+        return e && e.src && now - e.ts < WARM_TTL
+      }).map(function (e) { return e.src })
+    } catch (e) { return [] }
+  }
+  function warmSave(orientation, srcs) {
+    try {
+      localStorage.setItem(WARM_KEY + orientation, JSON.stringify(
+        srcs.map(function (s) { return { src: s, ts: Date.now() } })
+      ))
+    } catch (e) { /* 存储不可用：退化为每次冷加载 */ }
+  }
+  function warmAdd(orientation, src) {
+    var w = warmList(orientation)
+    if (w.indexOf(src) >= 0) return
+    w.push(src)
+    while (w.length > WARM_MAX) w.shift()
+    warmSave(orientation, w)
+  }
+  function lastPlayed(orientation) {
+    try { return localStorage.getItem(WARM_KEY + 'last_' + orientation) || '' } catch (e) { return '' }
+  }
+  function pickRandom(list, orientation) {
+    var warm = warmList(orientation).filter(function (s) { return list.indexOf(s) >= 0 })
+    // 排除上一次播放的那支（池内还有其他候选时），避免"刷新还是同一支"
+    if (warm.length > 1) warm = warm.filter(function (s) { return s !== lastPlayed(orientation) })
+    var pool = warm.length ? warm : list
+    return pool[Math.floor(Math.random() * pool.length)]
+  }
+  // 后台预热：当前视频已充分缓冲且页面可见时，把一支池外随机视频拉进缓存。
+  // 每次页面加载至多 2 支（带宽上限）；预热走 <video preload=auto> 的媒体管线，
+  // 与真实播放同路（含 302 跟随/Range 处理），不会绕过任何服务端中间件。
+  function startPrefetch(list, orientation) {
+    if (reducedMotion()) return
+    var budget = 2
+    var timer = setInterval(function () {
+      if (budget <= 0 || document.visibilityState === 'hidden') return
+      if (!currentVideo || !currentVideo.isConnected || currentVideo.readyState < 3) return
+      var warm = warmList(orientation)
+      var candidates = list.filter(function (s) { return warm.indexOf(s) < 0 })
+      if (!candidates.length) { clearInterval(timer); return }
+      budget--
+      var src = candidates[Math.floor(Math.random() * candidates.length)]
+      var pv = document.createElement('video')
+      pv.preload = 'auto'
+      pv.muted = true
+      var done = false
+      pv.addEventListener('canplaythrough', function () {
+        if (done) return
+        done = true
+        warmAdd(orientation, src)
+        pv.removeAttribute('src')
+        pv.load()
+      }, { once: true })
+      pv.addEventListener('error', function () { done = true }, { once: true })
+      pv.src = src
+    }, 4000)
   }
 
   function initResponsiveBackground() {
@@ -143,7 +201,8 @@
       : (container.dataset.landscapeVideo || container.dataset.landscapeImg)
     var poster = isPortrait ? container.dataset.portraitPoster : container.dataset.landscapePoster
     if (!src) return
-    if (src.indexOf('|') >= 0) src = pickSticky(src.split('|'), orientation)
+    var fullList = src.indexOf('|') >= 0 ? src.split('|') : [src]
+    src = pickRandom(fullList, orientation)
 
     var loaderBox = document.createElement('div')
     loaderBox.className = 'custom-loader'
@@ -203,12 +262,14 @@
       if (typeof WeixinJSBridge === 'object' && typeof WeixinJSBridge.invoke === 'function') {
         WeixinJSBridge.invoke('getNetworkType', {}, function () { v.play() })
       }
+      try { localStorage.setItem(WARM_KEY + 'last_' + orientation, src) } catch (e) { }
       var p = v.play()
       if (p && p.catch) p.catch(function () { v.muted = true; v.play().catch(function () {}) })
       v.addEventListener('loadeddata', hideLoader)
       v.addEventListener('canplay', hideLoader)
       attachParallax(container, v)
       initScrollFadeEffect()
+      startPrefetch(fullList, orientation)
     } else {
       var img = document.createElement('img')
       img.className = 'home-media'

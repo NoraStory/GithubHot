@@ -1,0 +1,110 @@
+name: 基础设施-GNN Sidecar（mlserve 部署）
+
+# 手动触发：把仓库内的 mlserve（GNN 在线推理 sidecar，规格书 §9 P6-3b）部署到
+# 服务器 127.0.0.1:8790，并与主服务接线（GNN_SIDECAR_URL/TOKEN → /opt/githubhot/.env）。
+# 幂等：重复执行安全；token 只在服务器生成/写入，绝不打印到日志。
+# 红线：sidecar 仅本机回环监听；主服务侧只是"加分项"（掉线自动回落 Louvain
+# 社区均值），指纹采集/风控中间件链路零改动。
+on:
+  workflow_dispatch:
+
+jobs:
+  sidecar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 打包并上传 mlserve
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+        run: |
+          set -e
+          tar czf mlserve.tar.gz -C mlserve .
+          SCP_OPTS=(-i ~/.ssh/deploy -P "$PORT" -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6)
+          # 复用既有 SSH 配置步骤的密钥
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p $PORT ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          ssh "${SCP_OPTS[@]}" ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "sudo mkdir -p /opt/githubhot-gnn && sudo chown $(id -u):$(id -g) /opt/githubhot-gnn 2>/dev/null || true; mkdir -p /opt/githubhot-gnn 2>/dev/null || sudo mkdir -p /opt/githubhot-gnn"
+          timeout 600 scp "${SCP_OPTS[@]}" mlserve.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/mlserve.tar.gz
+
+      - name: 服务器安装并接线
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
+            set -e
+            echo "--- 解包 mlserve ---"
+            sudo rm -rf /opt/githubhot-gnn/app /opt/githubhot-gnn/models /opt/githubhot-gnn/requirements.txt /opt/githubhot-gnn/deploy
+            sudo tar xzf /tmp/mlserve.tar.gz -C /opt/githubhot-gnn
+            rm -f /tmp/mlserve.tar.gz
+            sudo chown -R root:root /opt/githubhot-gnn
+            ls /opt/githubhot-gnn/models/
+
+            echo "--- Python 环境 ---"
+            if ! command -v python3 >/dev/null 2>&1 || ! python3 -m venv --help >/dev/null 2>&1; then
+              sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv python3-pip
+            fi
+            cd /opt/githubhot-gnn
+            if [ ! -x .venv/bin/python ]; then
+              python3 -m venv .venv
+              # 境内直连 pypi 常超时：走清华镜像
+              .venv/bin/pip install -q -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt || \
+              .venv/bin/pip install -q -r requirements.txt
+            fi
+
+            echo "--- token 生成与 unit 安装 ---"
+            if ! grep -q "^ML_SERVE_TOKEN=" /opt/githubhot-gnn/override.env 2>/dev/null; then
+              TOKEN=$(head -c 32 /dev/urandom | base64 | tr -dc "A-Za-z0-9" | head -c 40)
+              echo "ML_SERVE_TOKEN=$TOKEN" > /opt/githubhot-gnn/override.env
+              chmod 600 /opt/githubhot-gnn/override.env
+              echo "token 已生成（不回显）"
+            fi
+            sudo cp /opt/githubhot-gnn/deploy/githubhot-gnn.service /etc/systemd/system/
+            sudo mkdir -p /etc/systemd/system/githubhot-gnn.service.d
+            sudo sed "s|Environment=ML_SERVE_PORT=8790|Environment=ML_SERVE_PORT=8790\nEnvironmentFile=/opt/githubhot-gnn/override.env|" \
+              /opt/githubhot-gnn/deploy/githubhot-gnn.service > /tmp/unit-check 2>/dev/null || true
+            sudo sh -c "grep -q EnvironmentFile /etc/systemd/system/githubhot-gnn.service || sed -i \"/\[Service\]/a EnvironmentFile=/opt/githubhot-gnn/override.env\" /etc/systemd/system/githubhot-gnn.service"
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now githubhot-gnn 2>/dev/null || sudo systemctl restart githubhot-gnn
+            sleep 3
+
+            echo "--- sidecar 健康检查 ---"
+            curl -fsS http://127.0.0.1:8790/healthz && echo ""
+
+            echo "--- 主服务接线（幂等）---"
+            cd '"$DIR"'
+            if ! grep -q "^GNN_SIDECAR_URL=" .env 2>/dev/null; then
+              echo "GNN_SIDECAR_URL=http://127.0.0.1:8790" >> .env
+            fi
+            if ! grep -q "^GNN_SIDECAR_TOKEN=" .env 2>/dev/null; then
+              # 与 sidecar 的 override.env 共用同一 token（服务器侧拼装，不落日志）
+              sudo sh -c "printf \"GNN_SIDECAR_TOKEN=%s\n\" \$(grep -oP \"(?<=^ML_SERVE_TOKEN=).*\" /opt/githubhot-gnn/override.env) >> /opt/githubhot/.env"
+              chmod 600 .env
+            fi
+            sudo systemctl restart githubhot
+            ok=""
+            i=0
+            while [ $i -lt 20 ]; do
+              if curl -fsS http://127.0.0.1:8787/api/v1/healthz >/dev/null 2>&1; then ok=1; break; fi
+              sleep 3
+              i=$((i+1))
+            done
+            if [ -z "$ok" ]; then
+              echo "::error::主服务重启后不健康"
+              sudo journalctl -u githubhot -n 30 --no-pager || true
+              exit 1
+            fi
+
+            echo "--- 端到端验证（sidecar 打分 + 主服务日志）---"
+            TOK=$(grep -oP "(?<=^ML_SERVE_TOKEN=).*" /opt/githubhot-gnn/override.env)
+            curl -fsS -X POST -H "X-Sidecar-Token: $TOK" -H "Content-Type: application/json" \
+              -d "{\"nodes\":[{\"id\":\"probe\",\"features\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]}],\"edges\":[]}" \
+              http://127.0.0.1:8790/v1/score | head -c 300
+            echo ""
+            sudo journalctl -u githubhot -n 20 --no-pager | grep -i "sidecar\|gnn" || echo "(主服务暂无 sidecar 相关日志：惰性客户端，首次 fp/report 打分时建立连接)"
+            '

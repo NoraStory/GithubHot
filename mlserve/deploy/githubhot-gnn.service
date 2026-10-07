@@ -1,0 +1,30 @@
+# githubhot-gnn — mlserve sidecar 独立单元（规格书 §9 P6-3b）
+# 安装: sudo cp githubhot-gnn.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now githubhot-gnn
+[Unit]
+Description=GithubHot mlserve (GNN online inference sidecar)
+After=network.target githubhot.service
+
+[Service]
+Type=simple
+# 部署路径按实际调整（与主服务 DEPLOY_DIR 同级约定 /opt/githubhot-gnn）
+WorkingDirectory=/opt/githubhot-gnn
+ExecStart=/opt/githubhot-gnn/.venv/bin/python -m app.main
+# 热换模型（SIGHUP 等价实现，见 models/README.md）：需要 ML_SERVE_TOKEN 写入 override
+ExecReload=/bin/sh -c 'curl -s -X POST -H "X-Sidecar-Token: $ML_SERVE_TOKEN" http://127.0.0.1:8790/admin/reload'
+Environment=OMP_NUM_THREADS=1
+Environment=ML_SERVE_PORT=8790
+Environment=ML_SERVE_HOST=127.0.0.1
+# 敏感变量（ML_SERVE_TOKEN 等）写入 override:
+#   sudo systemctl edit githubhot-gnn
+# 内存红线：ONNX 模式 ≤200MB（MemoryMax=320M）；torch 回退模式改 560M 并同步 README
+MemoryMax=320M
+Restart=always
+RestartSec=3
+# 硬化
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/githubhot-gnn/models
+
+[Install]
+WantedBy=multi-user.target

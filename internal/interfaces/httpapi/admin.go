@@ -33,9 +33,12 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 		// P4-2 通行密钥免密登录入口（守卫外；成功后复用 gh_admin_session 通道）
 		r.Post("/passkey/begin-login", s.beginPasskeyLogin)
 		r.Post("/passkey/finish-login", s.finishPasskeyLogin)
+		// 登出必须在鉴权组之外：会话被网段绑定拒绝或已过期时，管理员连"退出"
+		// 都会被 401 拦下（Cookie 清不掉、服务端会话删不掉），表现为退出无效。
+		// 清除自身 Cookie 无需鉴权，handler 对缺失/失效 Cookie 幂等。
+		r.Post("/logout", s.adminLogout)
 		r.Group(func(r chi.Router) {
 			r.Use(s.adminAuth)
-			r.Post("/logout", s.adminLogout)
 			r.Post("/sources", s.createSource)
 			r.Delete("/sources/{id}", s.deleteSource)
 			r.Post("/sources/test", s.testSource)
