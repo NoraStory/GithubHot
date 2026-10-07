@@ -1,0 +1,85 @@
+name: 基础设施-管理端鉴权加固
+
+# 手动触发：生产管理端当前为 open 模式（ADMIN_PASSWORD_HASH/ADMIN_TOKEN 双空，
+# nginx 终结 TLS 使应用按本地部署放行启动）。
+# 本工作流：服务器侧生成随机强密码（绝不打印）→ argon2id 哈希写入 .env →
+# 密码落到 600 权限文件供管理员 SSH 领取 → 补传行为 LR 模型 → 重启 → 验证 mode 关闭。
+on:
+  workflow_dispatch:
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 上传行为 LR 模型
+        uses: actions/checkout@v4
+
+      - name: 服务器加固
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
+        run: |
+          set -e
+          # LR 模型（1.5KB）：/opt/githubhot/models/behavior_lr_v1.json
+          tar czf model.tar.gz -C models behavior_lr_v1.json
+          SCP_OPTS=(-i ~/.ssh/deploy -P "$PORT" -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6)
+          timeout 300 scp "${SCP_OPTS[@]}" model.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/model.tar.gz
+          rm -f model.tar.gz
+
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
+            set -e
+            echo "--- 管理端鉴权状态（加固前）---"
+            curl -s --max-time 5 http://127.0.0.1:8787/api/v1/admin/session | head -c 120 || true
+            echo ""
+
+            cd '"$DIR"'
+            if grep -q "^ADMIN_PASSWORD_HASH=" .env 2>/dev/null; then
+              echo "ADMIN_PASSWORD_HASH 已存在，跳过（如需换密请手动执行 ./githubhot admin hash）"
+            else
+              # 1) 服务器侧生成 20 位强密码：只进变量与 600 权限文件，不进任何日志
+              PW=$(head -c 64 /dev/urandom | base64 | tr -dc "A-Za-z0-9" | head -c 20)
+              [ -n "$PW" ] || { echo "::error::随机密码生成失败"; exit 1; }
+              # 2) 用二进制自带的 admin hash 生成 argon2id（stdout 捕获进变量，不回显）
+              HASH=$(./githubhot admin hash "$PW")
+              [ -n "$HASH" ] || { echo "::error::哈希生成失败"; exit 1; }
+              echo "ADMIN_PASSWORD_HASH=$HASH" >> .env
+              chmod 600 .env
+              umask 077
+              printf "%s\n" "GithubHot 管理端初始密码（请立即登录并在方便时更换；本文件可删除）：" "$PW" > ADMIN_INITIAL_PASSWORD.txt
+              chmod 600 ADMIN_INITIAL_PASSWORD.txt
+              unset PW HASH
+              echo "哈希已写入 .env，密码已落 ADMIN_INITIAL_PASSWORD.txt（600，SSH 领取）"
+            fi
+
+            echo "--- 行为 LR 模型补传 ---"
+            sudo mkdir -p models
+            sudo tar xzf /tmp/model.tar.gz -C models
+            rm -f /tmp/model.tar.gz
+            ls -la models/
+
+            echo "--- 重启并验证 ---"
+            sudo systemctl restart githubhot
+            ok=""
+            i=0
+            while [ $i -lt 20 ]; do
+              if curl -fsS http://127.0.0.1:8787/api/v1/healthz >/dev/null 2>&1; then ok=1; break; fi
+              sleep 3
+              i=$((i+1))
+            done
+            [ -n "$ok" ] || { echo "::error::重启后不健康"; sudo journalctl -u githubhot -n 30 --no-pager; exit 1; }
+
+            echo "--- 加固后鉴权探测（应 401/未登录，绝不能再是 open）---"
+            curl -s --max-time 5 http://127.0.0.1:8787/api/v1/admin/session | head -c 120
+            echo ""
+            echo "--- 行为模型加载确认 ---"
+            sudo journalctl -u githubhot -n 40 --no-pager | grep -i "行为模型\|behavior" | tail -3 || echo "(未找到行为模型日志行)"
+            '
