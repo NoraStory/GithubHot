@@ -266,7 +266,7 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 		// 而非旧实现的 7 天——管理员自己连错 5 次密码不应被月级封禁）
 		if s.Guard != nil && !adminLoginGuard.allow(ip) {
 			ctx2, cancel2 := contextWithTimeout(r.Context())
-			s.Guard.Event(ctx2, ip, "admin-brute", "管理端密码爆破锁定", 100, false)
+			s.Guard.Event(ctx2, ip, "admin-brute", "管理端密码爆破锁定", 100, true)
 			cancel2()
 		}
 		log.Printf("[admin] %s 登录失败", ip)

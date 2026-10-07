@@ -103,7 +103,9 @@ func TestAdminBruteBansAtFirstStrike(t *testing.T) {
 	t.Setenv("IP_GUARD_ENABLED", "1")
 	g := NewIPGuard(store)
 
-	g.Event(context.Background(), "198.51.100.9", "admin-brute", "管理端密码爆破锁定", 100, false)
+	// 管理端爆破是高置信事件 → severe=true 绕过 iprisk 直接封禁
+	// （iprisk 多证据 dilution 会在 CI 的 -race 环境下把 100 分稀释到 70 导致不确定）
+	g.Event(context.Background(), "198.51.100.9", "admin-brute", "管理端密码爆破锁定", 100, true)
 
 	ban := store.banOf("198.51.100.9")
 	if ban == nil {
