@@ -146,9 +146,17 @@ jobs:
             cp -f githubhot githubhot.bak 2>/dev/null || true
             mv -f githubhot.new githubhot
             sudo systemctl restart githubhot || true
-            sleep 2
-            if ! curl -fsS http://127.0.0.1:8787/api/v1/healthz; then
-              echo '健康检查失败，回滚旧版本'
+            # 就绪轮询：新版本首启要加载 GeoIP/JA4 等数据文件，固定 sleep 2 会误杀慢启动
+            # 注意 \$ 转义——本段在双引号内下发，变量须在服务器侧展开
+            ok=''
+            for i in \$(seq 1 15); do
+              if curl -fsS http://127.0.0.1:8787/api/v1/healthz; then ok=1; break; fi
+              sleep 2
+            done
+            if [ -z "\$ok" ]; then
+              echo '健康检查失败：启动日志（journalctl 最后 40 行）↓'
+              sudo journalctl -u githubhot -n 40 --no-pager || true
+              echo '回滚旧版本'
               sudo systemctl stop githubhot || true
               mv -f githubhot.bak githubhot
               sudo systemctl start githubhot
