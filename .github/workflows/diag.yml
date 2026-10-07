@@ -46,4 +46,11 @@ jobs:
             echo '--- 服务器本机 curl ---'
             curl -s -o /dev/null -w '127.0.0.1:8787 -> %{http_code}\n' --max-time 5 http://127.0.0.1:8787/api/v1/healthz || true
             curl -sk -o /dev/null -w 'https 本机 -> %{http_code}\n' --max-time 5 https://127.0.0.1:8787/api/v1/healthz || true
+            echo '--- 443/80 归属（sudo 进程名）---'
+            sudo ss -tlnp 2>/dev/null | grep -E ':443 |:80 ' || echo '(无监听)'
+            echo '--- 本机走 443/80 域名访问 ---'
+            curl -sk -o /dev/null -w 'https 127.0.0.1 域名访问 -> %{http_code}\n' --max-time 8 --resolve www.githubhot.online:443:127.0.0.1 https://www.githubhot.online/api/v1/healthz || true
+            curl -s -o /dev/null -w 'http 127.0.0.1 域名访问 -> %{http_code}\n' --max-time 8 --resolve www.githubhot.online:80:127.0.0.1 http://www.githubhot.online/api/v1/healthz || true
+            echo '--- 80 的 302 去向 ---'
+            curl -sI --max-time 8 http://www.githubhot.online/api/v1/healthz | grep -iE '^(HTTP|location)' || true
           "
