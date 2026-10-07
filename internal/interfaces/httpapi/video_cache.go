@@ -29,6 +29,10 @@ const (
 	videoHTTPTimeout  = 5 * time.Minute
 	videoWaitTimeout  = 12 * time.Second
 	videoMaxBytes     = 2 << 30 // 2GB：超限按最旧文件驱逐（约 200 个 10MB 视频）
+	// videoMinBytes 缓存有效性下限：源站（又拍云等）对非浏览器请求会返回几十到
+	// 几百字节的反爬 JS 挑战页（HTTP 200 + video 假象靠校验 CT 兜住），小于该值
+	// 的"视频"一律视为投毒，拒绝缓存/拒绝直出。
+	videoMinBytes = 256 << 10
 )
 
 // videoKeyRe 只允许 x|y/<短字母数字>.mp4 回源（含本地命名 x7/y1 与远程命名 1..6），
@@ -80,12 +84,12 @@ func videoCacheDir(dir string) string {
 func serveVideoCached(w http.ResponseWriter, r *http.Request, dir, name string) bool {
 	full := filepath.Join(dir, filepath.FromSlash(name))
 	// 1) 本地命中：ServeContent 自带 Range（拖动/分段缓冲都在毫秒级）
-	if fi, ok := statFile(full); ok {
+	if fi, ok := statValidVideo(full); ok {
 		return serveCachedVideoFile(w, r, full, fi)
 	}
 	cacheName := strings.ReplaceAll(name, "/", "_")
 	cacheFull := filepath.Join(videoCacheDir(dir), cacheName)
-	if fi, ok := statFile(cacheFull); ok {
+	if fi, ok := statValidVideo(cacheFull); ok {
 		return serveCachedVideoFile(w, r, cacheFull, fi)
 	}
 	if !videoKeyRe.MatchString(name) || r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -96,20 +100,24 @@ func serveVideoCached(w http.ResponseWriter, r *http.Request, dir, name string) 
 	if lock.TryLock() {
 		defer lock.Unlock()
 		// 双检：等待期间可能已被前一个下载完
-		if fi, ok := statFile(cacheFull); ok {
+		if fi, ok := statValidVideo(cacheFull); ok {
 			return serveCachedVideoFile(w, r, cacheFull, fi)
 		}
-		return videoProxyStream(w, r, dir, name, cacheFull)
-	}
-	// 等待已在进行的下载（按 500ms 步进轮询文件，简单且不引入更多同步机制）
-	deadline := time.Now().Add(videoWaitTimeout)
-	for time.Now().Before(deadline) {
-		time.Sleep(500 * time.Millisecond)
-		if fi, ok := statFile(cacheFull); ok {
-			return serveCachedVideoFile(w, r, cacheFull, fi)
+		if videoProxyStream(w, r, dir, name, cacheFull) {
+			return true
+		}
+	} else {
+		// 等待已在进行的下载（按 500ms 步进轮询文件，简单且不引入更多同步机制）
+		deadline := time.Now().Add(videoWaitTimeout)
+		for time.Now().Before(deadline) {
+			time.Sleep(500 * time.Millisecond)
+			if fi, ok := statValidVideo(cacheFull); ok {
+				return serveCachedVideoFile(w, r, cacheFull, fi)
+			}
 		}
 	}
-	// 仍未就绪：302 让客户端直连源站兜底（x/y 键均有对应远端）
+	// 3) 兜底：302 让浏览器直连源站（反爬挑战由浏览器 JS 执行通过，
+	// 与既有热链行为一致；x/y 键均有对应远端）
 	if src := videoOriginURL(name); src != "" {
 		http.Redirect(w, r, src, http.StatusFound)
 		return true
@@ -120,6 +128,20 @@ func serveVideoCached(w http.ResponseWriter, r *http.Request, dir, name string) 
 func statFile(path string) (os.FileInfo, bool) {
 	fi, err := os.Stat(path)
 	if err != nil || fi.IsDir() {
+		return nil, false
+	}
+	return fi, true
+}
+
+// statValidVideo 带投毒防护的缓存命中：小于 videoMinBytes 的文件是反爬挑战页
+// 残留，删除并视为未命中。
+func statValidVideo(path string) (os.FileInfo, bool) {
+	fi, ok := statFile(path)
+	if !ok {
+		return nil, false
+	}
+	if fi.Size() < videoMinBytes {
+		_ = os.Remove(path)
 		return nil, false
 	}
 	return fi, true
@@ -147,6 +169,10 @@ func videoProxyStream(w http.ResponseWriter, r *http.Request, dir, name, final s
 	if err != nil {
 		return false
 	}
+	// 浏览器特征：又拍云等 CDN 对 "Go-http-client" 无 UA 特征返回反爬挑战页
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://www.githubhot.online/")
+	req.Header.Set("Accept", "*/*")
 	resp, err := videoHTTPClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		if resp != nil {
@@ -155,6 +181,11 @@ func videoProxyStream(w http.ResponseWriter, r *http.Request, dir, name, final s
 		return false
 	}
 	defer resp.Body.Close()
+	// 响应校验：非 video 类型（如反爬挑战页的 text/html）不缓存不转发，
+	// 交由上层 302 兜底让浏览器直连过挑战
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "video/") {
+		return false
+	}
 
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -203,7 +234,11 @@ func videoProxyStream(w http.ResponseWriter, r *http.Request, dir, name, final s
 		return true
 	}
 	if err := os.Rename(tmp, final); err == nil {
-		videoCacheEvict(cachePath)
+		if fi, e := os.Stat(final); e == nil && fi.Size() < videoMinBytes {
+			_ = os.Remove(final) // 类型像视频但体积异常：投毒复核，拒绝入缓存
+		} else {
+			videoCacheEvict(cachePath)
+		}
 	}
 	return true
 }
