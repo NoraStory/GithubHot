@@ -40,25 +40,25 @@ func realIP(r *http.Request) string {
 // ---------- 指纹上报（公开端点，第二层入口） ----------
 
 type fpPayload struct {
-	Fingerprint string            `json:"fp"`
-	WebRTC      []string          `json:"webrtc"`
-	Canvas      string            `json:"canvas"`
-	WebGL       string            `json:"webgl"`
-	Audio       string            `json:"audio"`
-	Fonts       string            `json:"fonts"`
-	Components  map[string]string `json:"components"` // 各技术分量指纹明细（canvas/webgl/audio/fonts/screen/renderer）
-	Flags       []string          `json:"flags"`      // 第三层环境核验命中项
-	Renderer    string            `json:"renderer"`
-	Screen      string            `json:"screen"`
-	Coherent    bool              `json:"coherent"`     // 旧客户端兼容：UA 与 platform 一致性
-	CanvasPHash string            `json:"canvas_phash"` // P2-1 64bit 感知哈希（hex16，可选）
-	MinHashSig  string            `json:"minhash_sig"`  // 已废弃：签名改由服务端计算（客户端值不采信，防 LSH 桶投毒）
-	Sets        map[string][]string `json:"sets"`         // P2-2 原始清单（fonts/webgl_exts/plugins，可选）
-	TZ          string              `json:"tz"`           // P2-5 客户端 IANA 时区（可选）
-	TZOffsetMin int                 `json:"tz_offset_min"` // P2-5 时区偏移分钟数（可选）
-	Altcha      *altchaSolution     `json:"altcha"`        // P4-3 PoW 解（强制开启时必需；可选字段，旧服务端忽略）
-	Behavior    json.RawMessage     `json:"behavior"`       // P4-5 行为滑窗统计量 JSON（可选）
-	ClockSkewPPM *float64           `json:"clock_skew_ppm"` // P4-6 时钟偏移 ppm（可选）
+	Fingerprint  string              `json:"fp"`
+	WebRTC       []string            `json:"webrtc"`
+	Canvas       string              `json:"canvas"`
+	WebGL        string              `json:"webgl"`
+	Audio        string              `json:"audio"`
+	Fonts        string              `json:"fonts"`
+	Components   map[string]string   `json:"components"` // 各技术分量指纹明细（canvas/webgl/audio/fonts/screen/renderer）
+	Flags        []string            `json:"flags"`      // 第三层环境核验命中项
+	Renderer     string              `json:"renderer"`
+	Screen       string              `json:"screen"`
+	Coherent     bool                `json:"coherent"`       // 旧客户端兼容：UA 与 platform 一致性
+	CanvasPHash  string              `json:"canvas_phash"`   // P2-1 64bit 感知哈希（hex16，可选）
+	MinHashSig   string              `json:"minhash_sig"`    // 已废弃：签名改由服务端计算（客户端值不采信，防 LSH 桶投毒）
+	Sets         map[string][]string `json:"sets"`           // P2-2 原始清单（fonts/webgl_exts/plugins，可选）
+	TZ           string              `json:"tz"`             // P2-5 客户端 IANA 时区（可选）
+	TZOffsetMin  int                 `json:"tz_offset_min"`  // P2-5 时区偏移分钟数（可选）
+	Altcha       *altchaSolution     `json:"altcha"`         // P4-3 PoW 解（强制开启时必需；可选字段，旧服务端忽略）
+	Behavior     json.RawMessage     `json:"behavior"`       // P4-5 行为滑窗统计量 JSON（可选）
+	ClockSkewPPM *float64            `json:"clock_skew_ppm"` // P4-6 时钟偏移 ppm（可选）
 }
 
 // sanitizePHash 校验客户端上报的感知哈希（P2-1）：必须 hex16，否则丢弃（不关联）。
@@ -265,15 +265,15 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	meta := FingerprintMeta{
-		Webrtc:      p.WebRTC,
-		Components:  sanitizeComponents(p.Components),
-		Flags:       flags,
-		CanvasPHash: sanitizePHash(p.CanvasPHash),
-		Sets:        sanitizeSets(p.Sets),
-		TZ:          sanitizeTZ(p.TZ),
-		TZOffsetMin: p.TZOffsetMin,
-		JA4:         JA4FromContext(ctx), // P3-2：TLS 模式下由连接上下文注入（纯 HTTP 为空）
-		Behavior:    sanitizeBehavior(string(p.Behavior)),
+		Webrtc:       p.WebRTC,
+		Components:   sanitizeComponents(p.Components),
+		Flags:        flags,
+		CanvasPHash:  sanitizePHash(p.CanvasPHash),
+		Sets:         sanitizeSets(p.Sets),
+		TZ:           sanitizeTZ(p.TZ),
+		TZOffsetMin:  p.TZOffsetMin,
+		JA4:          JA4FromContext(ctx), // P3-2：TLS 模式下由连接上下文注入（纯 HTTP 为空）
+		Behavior:     sanitizeBehavior(string(p.Behavior)),
 		ClockSkewPPM: p.ClockSkewPPM,
 	}
 	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, meta)
@@ -357,6 +357,35 @@ func (s *Server) flagStats(ctx context.Context) []fpstats.FlagStat {
 
 // flagStatsTop 面板展示条数（Top-N 横向条形）。
 const flagStatsTop = 15
+
+// ipCheckAPI GET /api/v1/ip/check：浏览器初始化时查询当前 IP 是否被封。
+// 被封 IP 也需要能拿到封禁原因/剩余时间，所以中间件会把这条路径放行到本 handler。
+func (s *Server) ipCheckAPI(w http.ResponseWriter, r *http.Request) {
+	if s.Guard == nil {
+		writeJSON(w, 200, map[string]any{"ok": true, "banned": false})
+		return
+	}
+	ctx, cancel := contextWithTimeout(r.Context())
+	defer cancel()
+	ip := clientIPFromRequest(r)
+	ban, err := s.Guard.store.FindBan(ctx, ip)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	if ban == nil || !ban.ExpiresAt.After(time.Now()) {
+		writeJSON(w, 200, map[string]any{"ok": true, "banned": false, "ip": ip})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok":        true,
+		"banned":    true,
+		"ip":        ip,
+		"reason":    ban.Reason,
+		"strikes":   ban.Strikes,
+		"expiresAt": ban.ExpiresAt.Format(time.RFC3339),
+	})
+}
 
 // ipGuardBanAPI POST /api/v1/admin/ipguard/ban {ip, hours, reason} 手动封禁。
 func (s *Server) ipGuardBanAPI(w http.ResponseWriter, r *http.Request) {
@@ -467,6 +496,7 @@ func parseHours(s string) int {
 
 // registerIPGuardRoutes 挂防护端点（仅公开上报口;管理端操作端点在 admin.go 的守卫组内)。
 func (s *Server) registerIPGuardRoutes(r chi.Router) {
+	r.Get("/ip/check", s.ipCheckAPI)
 	r.Post("/fp/report", s.fpReportAPI)
 	// P4-3 ALTCHA PoW：挑战签发（前端/APP 刷成本用）与独立校验通道。
 	r.Get("/altcha/challenge", s.altchaChallengeAPI)

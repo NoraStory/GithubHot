@@ -65,10 +65,10 @@ const (
 	// 严重违规：直接按 7 天档
 	severeRatePerMin = 600
 	// 普通阈值
-	warnRatePerMin   = 150
-	adminRatePerMin  = 30
-	scannerMinReqs   = 50
-	scanner404Ratio  = 0.4
+	warnRatePerMin  = 150
+	adminRatePerMin = 30
+	scannerMinReqs  = 50
+	scanner404Ratio = 0.4
 	// 指纹全生命周期关联 IP 数超此值记漂移观察（出差多年累积也难触及）
 	fpChurnMaxIPs = 12
 	// 连坐/漂移判定"设备劣迹"的时间窗与抽查 IP 数
@@ -78,7 +78,7 @@ const (
 	banStrikeDecay = 30 * 24 * time.Hour
 
 	// P2-1 感知哈希关联扫描：30 天窗口、单次最多取 2000 条候选
-	phashLinkWindow    = 30 * 24 * time.Hour
+	phashLinkWindow     = 30 * 24 * time.Hour
 	phashCandidateLimit = 2000
 
 	// P2-2 MinHash+LSH：签名 128 位 = 16 带 × 8 行；召回上限与精确 Jaccard 关联阈值
@@ -198,28 +198,28 @@ type IPEventDTO struct {
 	At     time.Time
 }
 type FingerprintDTO struct {
-	Fingerprint string
-	IPs         []string
-	Webrtc      []string
-	Components  map[string]string
-	Flags       []string
-	UA          string
-	FirstSeen   time.Time
-	LastSeen    time.Time
-	Hits        int
-	CanvasPHash string             // P2-1 感知哈希（hex16）
-	MinHashSig  string             // P2-2 组件集合 MinHash 签名（hex）
-	EntropyBits float64            // P2-3 分量熵权（信息量 bit，每日 cron 刷新；0=未计算）
-	Stability   float64            // P2-4 整体时间稳定度（0-1）
+	Fingerprint   string
+	IPs           []string
+	Webrtc        []string
+	Components    map[string]string
+	Flags         []string
+	UA            string
+	FirstSeen     time.Time
+	LastSeen      time.Time
+	Hits          int
+	CanvasPHash   string             // P2-1 感知哈希（hex16）
+	MinHashSig    string             // P2-2 组件集合 MinHash 签名（hex）
+	EntropyBits   float64            // P2-3 分量熵权（信息量 bit，每日 cron 刷新；0=未计算）
+	Stability     float64            // P2-4 整体时间稳定度（0-1）
 	CompStability map[string]float64 // P2-4 各分量稳定度（键 → EWMA，缺失键 = 无历史）
-	JA4         string             // P3-2 TLS 客户端指纹（TLS 模式下捕获；纯 HTTP 为空）
-	Attestation string             // P4-1 平台证明结果（原始 JSON，'{}'=未验证）
-	BehaviorJSON string            // P4-5 行为生物特征（滑窗统计量 JSON，'{}'=未采集）
-	ClockSkewPPM *float64          // P4-6 时钟偏移（ppm；NULL=未采集）
-	ClusterID   *int64             // P4-4 图聚类簇归属（NULL=未聚类）
-	GNNScore    *float64           // P6-3 GNN 推理 bot 概率（NULL=未打分）
-	AnomalyScore *float64          // P5-2 iForest 异常分（NULL=未计算）
-}// PHashRowDTO 感知哈希候选行（同源关联扫描）。
+	JA4           string             // P3-2 TLS 客户端指纹（TLS 模式下捕获；纯 HTTP 为空）
+	Attestation   string             // P4-1 平台证明结果（原始 JSON，'{}'=未验证）
+	BehaviorJSON  string             // P4-5 行为生物特征（滑窗统计量 JSON，'{}'=未采集）
+	ClockSkewPPM  *float64           // P4-6 时钟偏移（ppm；NULL=未采集）
+	ClusterID     *int64             // P4-4 图聚类簇归属（NULL=未聚类）
+	GNNScore      *float64           // P6-3 GNN 推理 bot 概率（NULL=未打分）
+	AnomalyScore  *float64           // P5-2 iForest 异常分（NULL=未计算）
+} // PHashRowDTO 感知哈希候选行（同源关联扫描）。
 type PHashRowDTO struct {
 	Fingerprint string
 	PHash       string
@@ -278,19 +278,19 @@ type ClusterDTO struct {
 
 // FingerprintMeta 指纹上报的附带信息（WebRTC IP、分量明细、环境核验命中、P2 数学指纹）。
 type FingerprintMeta struct {
-	Webrtc      []string
-	Components  map[string]string
-	Flags       []string
-	CanvasPHash string             // P2-1 64bit 感知哈希（hex16），可选
-	MinHashSig  string             // P2-2 组件集合 MinHash 签名（hex），可选（服务端计算）
-	Sets        map[string][]string // P2-2 原始清单（fonts/webgl_exts/plugins，仅用于算签名，不入库）
-	TZ          string              // P2-5 客户端 IANA 时区（Asia/Shanghai），可选
-	TZOffsetMin int                 // P2-5 客户端时区偏移（分钟，东八区=480），可选
-	Stability   float64             // P2-4 整体稳定度（引擎计算后随 upsert 落库）
-	CompStability map[string]float64 // P2-4 各分量稳定度（引擎计算后随 upsert 落库）
-	JA4         string              // P3-2 TLS 客户端指纹（TLS 模式下由连接上下文注入）
-	Behavior    string              // P4-5 行为生物特征 JSON（客户端滑窗统计量，已清洗）
-	ClockSkewPPM *float64           // P4-6 时钟偏移（ppm；nil=未采集）
+	Webrtc        []string
+	Components    map[string]string
+	Flags         []string
+	CanvasPHash   string              // P2-1 64bit 感知哈希（hex16），可选
+	MinHashSig    string              // P2-2 组件集合 MinHash 签名（hex），可选（服务端计算）
+	Sets          map[string][]string // P2-2 原始清单（fonts/webgl_exts/plugins，仅用于算签名，不入库）
+	TZ            string              // P2-5 客户端 IANA 时区（Asia/Shanghai），可选
+	TZOffsetMin   int                 // P2-5 客户端时区偏移（分钟，东八区=480），可选
+	Stability     float64             // P2-4 整体稳定度（引擎计算后随 upsert 落库）
+	CompStability map[string]float64  // P2-4 各分量稳定度（引擎计算后随 upsert 落库）
+	JA4           string              // P3-2 TLS 客户端指纹（TLS 模式下由连接上下文注入）
+	Behavior      string              // P4-5 行为生物特征 JSON（客户端滑窗统计量，已清洗）
+	ClockSkewPPM  *float64            // P4-6 时钟偏移（ppm；nil=未采集）
 }
 
 // ja4CtxKey TLS 指纹的 context 键（连接级注入，请求级读取）。
@@ -318,6 +318,7 @@ func JA4FromContext(ctx context.Context) string {
 	}
 	return ""
 }
+
 type BanDTO struct {
 	IP        string
 	Strikes   int
@@ -356,10 +357,10 @@ func banDuration(strikes int) time.Duration {
 
 // ipWindow 单 IP 的内存滑动档案（第一层）。
 type ipWindow struct {
-	times    []time.Time // 最近 5 分钟请求时间
-	notFound int         // 窗口内 404 数
-	reqs     int         // 本小时累计
-	uaSet    map[string]bool
+	times     []time.Time // 最近 5 分钟请求时间
+	notFound  int         // 窗口内 404 数
+	reqs      int         // 本小时累计
+	uaSet     map[string]bool
 	lastFlush time.Time
 	dirty     bool
 	hsTimes   []time.Time // 握手通道请求时间（独立 60s 窗口，见 handshakeAllow）
@@ -380,27 +381,27 @@ type JA4Mapper interface {
 
 // IPGuard 防护引擎。
 type IPGuard struct {
-	store GuardStore
-	key   []byte // HMAC 密钥
-	geo   GeoProvider
-	ja4   JA4Mapper
+	store    GuardStore
+	key      []byte // HMAC 密钥
+	geo      GeoProvider
+	ja4      JA4Mapper
 	mlEngine *MLEngine // 统一ML调度器（P5-2 iForest + P5-3 LR + P6-3 GNN）
 
-	enabled    bool
-	localOK    bool // 回环/内网放行
+	enabled bool
+	localOK bool // 回环/内网放行
 
-	mu       sync.Mutex
-	windows  map[string]*ipWindow
-	talkers  map[string]int // 本小时请求计数（整点重置）
+	mu           sync.Mutex
+	windows      map[string]*ipWindow
+	talkers      map[string]int // 本小时请求计数（整点重置）
 	talkersReset time.Time
-	dedupe   map[string]time.Time // ip+kind → 上次事件时间
-	banCache map[string]banCacheEntry
-	fpReport map[string][]time.Time // 指纹上报限频
+	dedupe       map[string]time.Time // ip+kind → 上次事件时间
+	banCache     map[string]banCacheEntry
+	fpReport     map[string][]time.Time // 指纹上报限频
 	// whitelist 管理端会话 IP 临时免封禁（登录/会话校验时刷新，TTL 与会话一致）
 	whitelist map[string]time.Time
 	// fpColl 指纹碰撞检测（同型号设备指纹重合 → 豁免连坐）
 	fpColl *fpCollision
-	
+
 	// 清理时间戳（防止内存泄漏）
 	lastDedupeClean    time.Time
 	lastFpReportClean  time.Time
@@ -431,7 +432,7 @@ func NewIPGuard(store GuardStore) *IPGuard {
 	}
 	countryPath, asnPath := geoip.DefaultPaths()
 	now := time.Now()
-	
+
 	// 创建ML引擎
 	mlEngine := NewMLEngine(MLConfig{
 		ModelDir:          os.Getenv("ML_MODEL_DIR"),
@@ -442,7 +443,7 @@ func NewIPGuard(store GuardStore) *IPGuard {
 		IForestMaxSamples: 10000,
 		LRCheckInterval:   1 * time.Minute,
 	})
-	
+
 	g := &IPGuard{
 		store:              store,
 		key:                key,
@@ -462,11 +463,11 @@ func NewIPGuard(store GuardStore) *IPGuard {
 		lastFpReportClean:  now,
 		lastWhitelistClean: now,
 	}
-	
+
 	// 启动后台任务
 	go g.periodicCleanup()
 	mlEngine.Start(g) // 启动ML调度器
-	
+
 	if g.geo.Enabled() {
 		log.Printf("[ipguard] GeoIP 已启用（%s）", countryPath)
 	}
@@ -659,7 +660,7 @@ func (g *IPGuard) verifyIDToken(token, currentIP string) (bool, string, string, 
 // 优化版：使用双重检查锁，防止 TOCTOU 竞态条件。
 func (g *IPGuard) isBanned(ctx context.Context, ip string) bool {
 	now := time.Now()
-	
+
 	// 第一次检查：快速路径
 	g.mu.Lock()
 	if c, ok := g.banCache[ip]; ok && now.Sub(c.at) < 30*time.Second {
@@ -668,23 +669,23 @@ func (g *IPGuard) isBanned(ctx context.Context, ip string) bool {
 		return banned
 	}
 	g.mu.Unlock()
-	
+
 	// 缓存未命中或已过期，查询数据库
 	ban, err := g.store.FindBan(ctx, ip)
 	banned := err == nil && ban != nil && now.Before(ban.ExpiresAt)
-	
+
 	expires := now
 	if ban != nil {
 		expires = ban.ExpiresAt
 	}
-	
+
 	// 第二次检查：只在缓存仍未命中或已过期时更新
 	g.mu.Lock()
 	if c, ok := g.banCache[ip]; !ok || now.Sub(c.at) >= 30*time.Second {
 		g.banCache[ip] = banCacheEntry{banned: banned, expires: expires, at: now}
 	}
 	g.mu.Unlock()
-	
+
 	return banned
 }
 
@@ -840,6 +841,7 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 		// 攻击者任何未授权入口）。
 		if g.isBanned(ctx, ip) {
 			if local || g.isWhitelisted(ip) || r.URL.Path == "/healthz" ||
+				r.URL.Path == "/api/v1/ip/check" ||
 				strings.HasPrefix(r.URL.Path, "/api/v1/admin/ipguard/") ||
 				strings.HasPrefix(r.URL.Path, "/api/v1/admin/probes") ||
 				strings.HasPrefix(r.URL.Path, "/api/v1/admin/system/") {
@@ -1149,7 +1151,7 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 	if !g.enabled || g.store == nil {
 		return out, false
 	}
-	
+
 	// 修复：空指纹应该记录异常事件
 	if fp == "" {
 		g.event(ctx, ip, "fp-report-empty", "空指纹上报", 10, false)
@@ -1157,7 +1159,7 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 		out["error"] = "empty fingerprint"
 		return out, false
 	}
-	
+
 	local := g.localOK && isLocalIP(ip)
 
 	// P2-2 服务端计算 MinHash 签名：原始清单（字体/扩展/插件）进签名，客户端自报的

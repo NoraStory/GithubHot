@@ -18,6 +18,13 @@ const current = computed(() => playlist.value[index.value] || null)
 const hasCover = computed(() => !!(current.value && current.value.pic))
 const coverError = ref(false)
 const showCover = computed(() => hasCover.value && !coverError.value)
+const loopMode = ref('all')
+const loopLabel = computed(() => {
+  if (loopMode.value === 'one') return '单曲循环'
+  if (loopMode.value === 'all') return '列表循环'
+  return '循环关闭'
+})
+const loopTitle = computed(() => `${loopLabel.value}，点击切换`)
 const cover = computed(() => {
   const t = current.value
   if (!t || !t.pic) return defaultCover
@@ -96,6 +103,14 @@ function startRandom() {
 function next() {
   if (!playlist.value.length) return
   select((index.value + 1) % playlist.value.length, true)
+}
+
+function cycleLoop() {
+  loopMode.value = loopMode.value === 'all' ? 'one' : loopMode.value === 'one' ? 'off' : 'all'
+}
+
+function onEnded() {
+  if (loopMode.value === 'all') next()
 }
 
 function onPlay() { rotating.value = true }
@@ -279,7 +294,19 @@ onBeforeUnmount(() => { if (crowdStop) crowdStop() })
         </div>
       </div>
       <div class="anzhiyuCustomPlayer-controls-area">
-        <audio ref="audioEl" id="anzhiyuCustomPlayer-audio-element" controls preload="auto" @play="onPlay" @pause="onPause" @ended="next"></audio>
+        <div class="anzhiyuCustomPlayer-extra-controls">
+          <button
+            class="anzhiyuCustomPlayer-loop-button"
+            :class="{ active: loopMode !== 'off' }"
+            type="button"
+            :title="loopTitle"
+            :aria-label="loopTitle"
+            @click="cycleLoop"
+          >
+            <i class="anzhiyufont anzhiyu-icon-repeat" aria-hidden="true"></i>{{ loopLabel }}
+          </button>
+        </div>
+        <audio ref="audioEl" id="anzhiyuCustomPlayer-audio-element" controls preload="auto" :loop="loopMode === 'one'" @play="onPlay" @pause="onPause" @ended="onEnded"></audio>
       </div>
     </div>
   </div>
@@ -304,7 +331,7 @@ onBeforeUnmount(() => { if (crowdStop) crowdStop() })
 #anzhiyuCustomPlayer-artist-name { font-size: 0.85em; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--anzhiyu-second-fontcolor, gray); display: block; max-width: 150px; }
 .anzhiyuCustomPlayer-sound-hint { font-size: 0.72em; margin: 6px 0 0; color: var(--anzhiyu-theme, #e0506d); max-width: 170px; white-space: normal; line-height: 1.5; }
 .anzhiyuCustomPlayer-right-column { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.anzhiyuCustomPlayer-playlist-container { height: 200px; overflow-y: auto; border: 1px solid var(--anzhiyu-card-border, #ddd); padding: 5px; border-radius: var(--anzhiyu-border-radius-small, 8px); background-color: var(--anzhiyu-theme-op, rgba(234, 188, 189, .10)); margin-bottom: 10px; }
+.anzhiyuCustomPlayer-playlist-container { height: 200px; overflow-y: auto; border: 1px solid var(--anzhiyu-card-border, #ddd); padding: 5px; border-radius: var(--anzhiyu-border-radius-small, 8px); background-color: var(--anzhiyu-card-bg, white); margin-bottom: 10px; }
 .anzhiyuCustomPlayer-playlist-item { display: flex; align-items: center; padding: 6px 8px; margin-bottom: 3px; cursor: pointer; border-radius: 6px; transition: background-color 0.2s ease-in-out; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .anzhiyuCustomPlayer-playlist-item:hover { background-color: var(--anzhiyu-gray-a, #eee); }
 .anzhiyuCustomPlayer-playlist-item-active { background-color: var(--anzhiyu-theme-op, rgba(255, 102, 102, 0.15)); color: var(--anzhiyu-theme, #ff6666); font-weight: bold; }
@@ -313,6 +340,10 @@ onBeforeUnmount(() => { if (crowdStop) crowdStop() })
 .anzhiyuCustomPlayer-playlist-item-info { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; color: var(--anzhiyu-fontcolor, #333); }
 .anzhiyuCustomPlayer-playlist-item-active .anzhiyuCustomPlayer-playlist-item-info { color: var(--anzhiyu-theme, #ff6666); }
 .anzhiyuCustomPlayer-controls-area { margin-top: auto; }
+.anzhiyuCustomPlayer-extra-controls { display: flex; justify-content: flex-start; margin-bottom: 8px; }
+.anzhiyuCustomPlayer-loop-button { display: inline-flex; align-items: center; gap: 6px; background: var(--anzhiyu-theme-op, rgba(234, 188, 189, .1)); color: var(--anzhiyu-fontcolor, #333); border: 1px solid var(--anzhiyu-card-border, #ddd); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: .8rem; cursor: pointer; transition: background-color .2s ease, color .2s ease, border-color .2s ease; }
+.anzhiyuCustomPlayer-loop-button.active { background: var(--anzhiyu-theme, #eabcbd); border-color: var(--anzhiyu-theme, #eabcbd); color: #fff; }
+.anzhiyuCustomPlayer-loop-button i { font-size: .9rem; }
 .anzhiyuCustomPlayer-retry { margin-left: auto; background: var(--anzhiyu-theme, #eabcbd); color: #fff; border: none; border-radius: 12px; padding: 2px 12px; font-size: .8rem; cursor: pointer; }
 .anzhiyuCustomPlayer-retry:hover { background: var(--anzhiyu-hover, #ff7242); }
 #anzhiyuCustomPlayer-audio-element { width: 100%; border-radius: 8px; display: block; accent-color: var(--anzhiyu-theme, #eabcbd); }

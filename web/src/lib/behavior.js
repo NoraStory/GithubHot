@@ -9,7 +9,7 @@
 //   - 上报：每 5 分钟或页面卸载（fetch keepalive）→ fp/report 仅携带 fp + 统计量。
 //   - 自动化检测：集成 behavior-collector 进行实时自动化模式检测。
 
-import { behaviorCollector } from './behavior-collector'
+import { behaviorCollector } from './behavior-collector.js'
 
 const MOUSE_WINDOW = 500
 const KEY_WINDOW = 100

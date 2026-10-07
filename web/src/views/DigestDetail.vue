@@ -25,9 +25,12 @@ const nextDate = computed(() => {
 // marked 配置：GFM 表格渲染。marked 不转义内嵌 HTML，XSS 防线在服务端 mdEscape（对外部抓取标题做 HTML 转义）
 marked.setOptions({ gfm: true, breaks: false })
 const renderer = {
-  // 表格包一层滚动容器，宽表不破版
-  table(header, body) {
-    return `<div class="table-wrap"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>`
+  // marked v18 的 renderer 接收 token；用 parser.parseInline 展开 cell.tokens，
+  // 否则对象会被插值成 [object Object]。
+  table(token) {
+    const head = `<thead>${token.header.map((cell) => `<th>${this.parser.parseInline(cell.tokens)}</th>`).join('')}</thead>`
+    const body = `<tbody>${token.rows.map((row) => `<tr>${row.map((cell) => `<td>${this.parser.parseInline(cell.tokens)}</td>`).join('')}</tr>`).join('')}</tbody>`
+    return `<div class="table-wrap"><table>${head}${body}</table></div>`
   }
 }
 marked.use({ renderer })
