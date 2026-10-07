@@ -111,21 +111,50 @@ jobs:
           PORT: ${{ secrets.DEPLOY_PORT || 22 }}
           DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
         run: |
+          set -e
+          # 跨网 SSH 链路慢且易静默断流（实测 30-50 分钟无输出后 connection refused /
+          # 半截文件）：二进制 gzip 压缩 + keepalive 快速判死 + 重试 + 远端完整性校验。
+          gzip -k9f githubhot
+
+          SCP_OPTS=(-i ~/.ssh/deploy -P "$PORT" -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes)
+          SSH_OPTS=(-i ~/.ssh/deploy -p "$PORT" -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes)
+          TARGET="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
+
+          upload() {
+            for i in 1 2 3; do
+              if timeout 1800 scp "${SCP_OPTS[@]}" "$1" "$TARGET:$2"; then return 0; fi
+              echo "上传 $1 第 $i 次失败，15s 后重试…"
+              sleep 15
+            done
+            echo "::error::上传 $1 三次均失败"; return 1
+          }
+
           # 二进制传临时名：运行中的文件被 scp 直接覆盖会 ETXTBSY（text file busy）
-          scp -i ~/.ssh/deploy -P $PORT githubhot \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$DIR/githubhot.new
-          scp -i ~/.ssh/deploy -P $PORT webdist.tar.gz \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$DIR/
-          ssh -i ~/.ssh/deploy -p $PORT ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
+          upload githubhot.gz "$DIR/githubhot.gz"
+          upload webdist.tar.gz "$DIR/webdist.tar.gz"
+
+          ssh "${SSH_OPTS[@]}" "$TARGET" "
             set -e
             cd $DIR
             tar xzf webdist.tar.gz
             rm -f webdist.tar.gz
+            gzip -t githubhot.gz   # 传输完整性校验，半截文件在此失败
+            gunzip -c githubhot.gz > githubhot.new
+            rm -f githubhot.gz
             chmod +x githubhot.new
+            test -s githubhot.new || { echo '::error::新二进制为空，中止'; exit 1; }
+            cp -f githubhot githubhot.bak 2>/dev/null || true
             mv -f githubhot.new githubhot
-            sudo systemctl restart githubhot
+            sudo systemctl restart githubhot || true
             sleep 2
-            curl -fsS http://127.0.0.1:8787/api/v1/healthz
+            if ! curl -fsS http://127.0.0.1:8787/api/v1/healthz; then
+              echo '健康检查失败，回滚旧版本'
+              sudo systemctl stop githubhot || true
+              mv -f githubhot.bak githubhot
+              sudo systemctl start githubhot
+              exit 1
+            fi
+            rm -f githubhot.bak
           "
 
       # P2-5/P3-3：部署后拉取 GeoIP 国家库 + JA4 映射表（幂等，已有则跳过；失败非致命自动降级）
@@ -135,7 +164,9 @@ jobs:
           PORT: ${{ secrets.DEPLOY_PORT || 22 }}
           DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
         run: |
-          ssh -i ~/.ssh/deploy -p $PORT ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "
             cd $DIR
             if [ ! -f data/geo.mmdb ]; then
               echo '[deploy] 下载 GeoIP 国家库...'
