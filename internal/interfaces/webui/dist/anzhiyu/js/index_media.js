@@ -3,8 +3,8 @@
  *
  * 与原版的差异（性能向）：
  * 1. 预热池随机选片：≤4 支已进浏览器缓存的池子内随机（排除上一支），后台把池外
- *    随机视频拉进缓存轮换补充——每次刷新随机换片且零缓冲；页面加载至多预热
- *    2 支（带宽上限），预热走 <video> 媒体管线（含 302/Range），不绕过服务端中间件
+ *    随机视频拉进缓存轮换补充——每次刷新随机换片且零缓冲；主视频完整缓冲后才
+ *    串行预热 1 支（并发预取抢公网上行是播放后变卡根因），不绕过服务端中间件
  * 2. 视差效果用 requestAnimationFrame 合帧：mousemove/touchmove 只记录坐标，
  *    每帧最多写一次 transform，避免高频 getBoundingClientRect + 样式写入造成主线程抖动
  * 3. 页面隐藏（切标签/锁屏）暂停视频，恢复可见再播——后台标签不再持续下载+解码
@@ -153,34 +153,48 @@
     var pool = warm.length ? warm : list
     return pool[Math.floor(Math.random() * pool.length)]
   }
-  // 后台预热：当前视频已充分缓冲且页面可见时，把一支池外随机视频拉进缓存。
-  // 每次页面加载至多 2 支（带宽上限）；预热走 <video preload=auto> 的媒体管线，
-  // 与真实播放同路（含 302 跟随/Range 处理），不会绕过任何服务端中间件。
+  // 后台预热（带宽优先版）：当前视频**完整缓冲后**才允许串行预热一支池外视频，
+  // 且每次页面加载至多 1 支——并发预取流会与播放抢服务器公网上行（轻量服务器
+  // 仅几 Mbps），这正是"播放一段时间后变卡"的主因。移动端/省流模式直接跳过。
   function startPrefetch(list, orientation) {
     if (reducedMotion()) return
-    var budget = 2
+    var budget = 1
+    var busy = false
     var timer = setInterval(function () {
-      if (budget <= 0 || document.visibilityState === 'hidden') return
-      if (!currentVideo || !currentVideo.isConnected || currentVideo.readyState < 3) return
+      if (budget <= 0 || busy || document.visibilityState === 'hidden') return
+      if (!currentVideo || !currentVideo.isConnected || currentVideo.readyState < 4) return
+      // 关键门控：主视频 buffered 覆盖全片（循环回放不再依赖网络）才允许预热
+      try {
+        var b = currentVideo.buffered
+        if (!(b.length > 0 && b.end(b.length - 1) >= (currentVideo.duration || 0) - 0.5)) return
+      } catch (e) { return }
+      try {
+        var conn = navigator.connection || {}
+        if (conn.saveData || /^2g/i.test(conn.effectiveType || '')) return
+      } catch (e) { }
       var warm = warmList(orientation)
       var candidates = list.filter(function (s) { return warm.indexOf(s) < 0 })
       if (!candidates.length) { clearInterval(timer); return }
       budget--
+      busy = true
       var src = candidates[Math.floor(Math.random() * candidates.length)]
       var pv = document.createElement('video')
       pv.preload = 'auto'
       pv.muted = true
       var done = false
-      pv.addEventListener('canplaythrough', function () {
+      var finish = function (ok) {
         if (done) return
         done = true
-        warmAdd(orientation, src)
+        if (ok) warmAdd(orientation, src)
         pv.removeAttribute('src')
         pv.load()
-      }, { once: true })
-      pv.addEventListener('error', function () { done = true }, { once: true })
+        busy = false
+      }
+      pv.addEventListener('canplaythrough', function () { finish(true) }, { once: true })
+      pv.addEventListener('error', function () { finish(false) }, { once: true })
+      setTimeout(function () { finish(false) }, 20000) // 慢源预热超时放弃，不再占带宽
       pv.src = src
-    }, 4000)
+    }, 6000)
   }
 
   function initResponsiveBackground() {
