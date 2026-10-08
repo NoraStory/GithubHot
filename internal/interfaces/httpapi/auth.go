@@ -261,8 +261,8 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 	// P4-3 管理端 PoW 纵深（M-2）：强制开启时，无有效解的登录请求直接拒绝，
 	// 且**不计入**爆破锁定次数——锁定只数密码错误，PoW 失败是廉价的自动拒绝。
 	// 攻击者要么烧 CPU 求解（无法规模化），要么被挡在密码验证之前。
-	if !s.checkAltchaForLogin(r, p.Fp, p.Altcha) {
-		writeErr(w, 401, errorString("需要有效的 ALTCHA 工作量证明"))
+	if ok, msg := s.checkAltchaForLogin(r, p.Fp, p.Altcha); !ok {
+		writeErr(w, 401, errorString(msg))
 		return
 	}
 	ok, err := adminauth.VerifyPassword(passwordHash, p.Password)

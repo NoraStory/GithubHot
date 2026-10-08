@@ -182,19 +182,23 @@ func (s *Server) checkAltchaForReport(w http.ResponseWriter, r *http.Request, ip
 // checkAltchaForLogin 管理端登录的 PoW 执行入口（M-2 纵深）：强制开启时，
 // 无有效解直接 401 且**不计入**爆破锁定次数（锁定只数密码错误）。
 // fp 与解都来自登录请求体（前端登录页用 deviceFp() 领挑战并求解）。
-func (s *Server) checkAltchaForLogin(r *http.Request, fp string, sol *altchaSolution) bool {
+// 返回 (ok, 拒绝文案)：重放与缺解文案可区分（契约测试断言）。
+func (s *Server) checkAltchaForLogin(r *http.Request, fp string, sol *altchaSolution) (bool, string) {
 	secret := altchaSecret()
 	if secret == "" || altchaDifficulty() <= 0 {
-		return true // 未启用：登录流程不变（本地开发无感）
+		return true, ""
 	}
 	var v altcha.Solution
 	if sol != nil {
 		v = altcha.Solution{Challenge: sol.Challenge, Nonce: sol.Nonce, Signature: sol.Signature}
 	}
 	if err := altcha.Verify(secret, time.Now(), v, fp, ghIDFromRequest(r)); err != nil {
-		return false
+		return false, "需要有效的 ALTCHA 工作量证明"
 	}
-	return altchaConsume(v.Challenge, v.Nonce)
+	if !altchaConsume(v.Challenge, v.Nonce) {
+		return false, "解已被使用，请重新领取挑战"
+	}
+	return true, ""
 }
 
 // ghIDFromRequest 读 gh_id cookie 值（ALTCHA 签名绑定的第二因子；未登录为空串）。
