@@ -32,8 +32,8 @@ for r in rows:
     print(f"  {r[4]}  {r[0]}  [{r[1]}] +{r[3]}  {str(r[2])[:80]}")
 PY
 
-echo "=== 解除全部封禁 ==="
-python3 - "$DB" <<'PY'
+echo "=== 解除全部封禁（DB 为 root 属主，DELETE 走 sudo）==="
+sudo python3 - "$DB" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 n = db.execute("DELETE FROM ip_bans").rowcount
