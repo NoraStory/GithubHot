@@ -1,0 +1,30 @@
+name: 契约测试-管理端登录 PoW 链路
+
+# 手动触发：服务器侧验证「挑战→求解→登录」完整契约（密码走 Secret，日志只打印状态码与响应片段）。
+# 脚本：仓库文件 scripts/remote-login-contract.py（stdin 喂 python3）。
+# 验证：1) 无 PoW 登录 → 401；2) 有效 PoW + 正确密码 → 200；3) 同解重放 → 401 已被使用。
+on:
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 登录契约三连测
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          B64PW=$(printf %s "$ADMIN_PASSWORD" | base64 -w0)
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "B64PW='$B64PW' python3 -" < scripts/remote-login-contract.py

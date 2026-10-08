@@ -17,9 +17,12 @@ function leadingZeroBits(buf) {
   return bits
 }
 
-// solveChallenge 对固定挑战串暴力求解（difficulty 12 ≈ 平均 4096 次哈希，毫秒级）。
-export async function solveChallenge(challenge, difficulty, deadlineMs = 3000) {
-  const deadline = Date.now() + deadlineMs
+// solveChallenge 对固定挑战串暴力求解。死线按难度自适应（3 秒是难度 12 影子模式
+// 的旧参数；难度 14 平均 1.6 万次异步哈希，慢设备会撞线超时 → 静默 null → 登录失败）。
+export async function solveChallenge(challenge, difficulty, deadlineMs = 0) {
+  const deadline = Date.now() + (deadlineMs > 0
+    ? deadlineMs
+    : Math.min(20000, 2000 + Math.pow(2, difficulty) * 3))
   for (let n = 0; n <= 1 << 22; n++) {
     if (leadingZeroBits(await sha256Buf(challenge + n)) >= difficulty) {
       return String(n)

@@ -18,13 +18,33 @@ export async function checkAdminSession() {
   }
 }
 
+// 登录用 fp：指纹采集是异步重型管线，直达登录页快速提交时可能尚未落盘 →
+// 等待最多 8s；仍无则用会话级随机 fp（登录 PoW 是防爆破成本，不依赖身份绑定）
+async function loginFp() {
+  const { deviceFp } = await import('./fingerprint')
+  let fp = deviceFp()
+  const t0 = Date.now()
+  while (!fp && Date.now() - t0 < 8000) {
+    await new Promise((r) => setTimeout(r, 300))
+    fp = deviceFp()
+  }
+  if (fp) return fp
+  try {
+    let fb = sessionStorage.getItem('gh_login_fp')
+    if (!fb) {
+      fb = 'login' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36)
+      sessionStorage.setItem('gh_login_fp', fb)
+    }
+    return fb
+  } catch { return 'login' + Date.now().toString(36) }
+}
+
 export async function adminLogin(password, remember) {
   // P4-3 管理端 PoW 纵深：服务端启用（难度>0）时带解登录；未启用时 solveAltcha
   // 返回 null → 不带 altcha/fp 字段，行为与之前完全一致
-  const { deviceFp } = await import('./fingerprint')
   const { solveAltcha } = await import('./altcha')
-  const fp = deviceFp()
-  const altcha = fp ? await solveAltcha(fp) : null
+  const fp = await loginFp()
+  const altcha = await solveAltcha(fp)
   const res = await fetch('/api/v1/admin/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
