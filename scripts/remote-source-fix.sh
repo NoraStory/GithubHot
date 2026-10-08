@@ -4,7 +4,7 @@
 set -e
 DB=/opt/githubhot/data/githubhot.db
 
-python3 - "$DB" <<'PY'
+sudo python3 - "$DB" <<'PY'
 import json
 import sqlite3
 import subprocess
