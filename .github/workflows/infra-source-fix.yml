@@ -1,0 +1,29 @@
+name: 基础设施-被墙信源换镜像
+
+# 手动触发：对被墙的境外信源测试候选镜像，能通的自动换 URL（写回 sources.config）。
+# 候选：hf-mirror（HuggingFace）、feedburner（TechCrunch/Google Research）、
+# RSSHub 公共实例（Import AI，可用性一般）。Mistral 无已知镜像。
+# 幂等：重复执行安全（已换的源复测通过即跳过）。
+on:
+  workflow_dispatch:
+
+jobs:
+  fix-sources:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 换镜像并复测
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'bash -s' < scripts/remote-source-fix.sh
