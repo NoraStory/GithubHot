@@ -1,0 +1,122 @@
+name: 基础设施-IP归因修复 + PoW 启用（渗透 M-1/M-2/M-3 收口）
+
+# 手动触发：渗透测试 M-1 的运维侧收口（须在 501e9b1+ 的代码部署之后执行）。
+# 1) nginx 透传 X-Real-IP/X-Forwarded-For/Proto + server_tokens off（备份 + nginx -t 失败自动回滚）
+# 2) 应用 .env：TRUSTED_PROXY=127.0.0.1/32、IP_GUARD_LOCAL=0、ALTCHA_SECRET（32B 随机不回显）+ DIFFICULTY=14
+# 3) 重启 + 服务器侧验证信任链（本机直连应用带 X-Real-IP 应被采信 = 公网归因链路打通）
+# 幂等：重复执行安全。
+on:
+  workflow_dispatch:
+
+jobs:
+  fix-ip-attribution:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: nginx 头透传 + 应用 .env + 重启验证
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
+            set -e
+            echo "--- 定位反代 8787 的 nginx 配置 ---"
+            NCONF=""
+            for f in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf; do
+              [ -f "$f" ] && grep -q "proxy_pass.*8787" "$f" 2>/dev/null && NCONF="$f" && break
+            done
+            if [ -z "$NCONF" ]; then
+              echo "::error::未找到 proxy_pass 8787 的 nginx 配置，请人工确认反代结构"; exit 1
+            fi
+            echo "配置文件: $NCONF"
+            sudo cp "$NCONF" "/tmp/nginx-backup-$(date +%s)"
+
+            echo "--- 补透传头（幂等）---"
+            if sudo grep -q "X-Real-IP" "$NCONF"; then
+              echo "X-Real-IP 已配置，跳过"
+            else
+              sudo sed -i "/proxy_pass.*8787/a\\
+                proxy_set_header X-Real-IP \$remote_addr;\\
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\\
+                proxy_set_header X-Forwarded-Proto \$scheme;" "$NCONF"
+              echo "已插入 proxy_set_header 三件套"
+            fi
+
+            echo "--- server_tokens off（幂等）---"
+            NMAIN=/etc/nginx/nginx.conf
+            if sudo grep -q "server_tokens off" "$NMAIN" 2>/dev/null; then
+              echo "已存在，跳过"
+            else
+              sudo sed -i "/^http {/a\\    server_tokens off;" "$NMAIN" 2>/dev/null || \
+                sudo sh -c "echo \"server_tokens off;\" >> /etc/nginx/conf.d/00-tokens.conf"
+              echo "server_tokens off 已写入"
+            fi
+
+            echo "--- nginx -t（失败自动回滚）---"
+            if ! sudo nginx -t 2>/tmp/nginx-test.err; then
+              echo "::error::nginx -t 失败，回滚："; cat /tmp/nginx-test.err
+              LATEST=$(ls -t /tmp/nginx-backup-* 2>/dev/null | head -1)
+              [ -n "$LATEST" ] && sudo cp "$LATEST" "$NCONF" && echo "已回滚 $NCONF"
+              exit 1
+            fi
+            sudo systemctl reload nginx
+            echo "nginx 已 reload"
+
+            echo "--- 应用 .env 接线（幂等）---"
+            cd '"$DIR"'
+            grep -q "^TRUSTED_PROXY=" .env 2>/dev/null || echo "TRUSTED_PROXY=127.0.0.1/32" >> .env
+            grep -q "^IP_GUARD_LOCAL=" .env 2>/dev/null || echo "IP_GUARD_LOCAL=0" >> .env
+            if ! grep -q "^ALTCHA_SECRET=" .env 2>/dev/null; then
+              ASEC=$(head -c 32 /dev/urandom | base64 | tr -dc "A-Za-z0-9" | head -c 43)
+              echo "ALTCHA_SECRET=$ASEC" >> .env
+              echo "ALTCHA_SECRET 已生成写入（不回显）"
+            fi
+            grep -q "^ALTCHA_DIFFICULTY=" .env 2>/dev/null || echo "ALTCHA_DIFFICULTY=14" >> .env
+            chmod 600 .env
+            grep -cE "^(TRUSTED_PROXY|IP_GUARD_LOCAL|ALTCHA_DIFFICULTY|ALTCHA_SECRET)=" .env
+
+            echo "--- 重启应用 ---"
+            sudo systemctl restart githubhot
+            ok=""
+            i=0
+            while [ $i -lt 20 ]; do
+              if curl -fsS http://127.0.0.1:8787/api/v1/healthz >/dev/null 2>&1; then ok=1; break; fi
+              sleep 3
+              i=$((i+1))
+            done
+            [ -n "$ok" ] || { echo "::error::重启后不健康"; sudo journalctl -u githubhot -n 30 --no-pager; exit 1; }
+
+            echo "--- 信任链验证 1：受信代理下 X-Real-IP 被采信（应返回 203.0.113.99）---"
+            curl -s --max-time 5 -H "X-Real-IP: 203.0.113.99" http://127.0.0.1:8787/api/v1/ip/check | head -c 200
+            echo ""
+            echo "--- 信任链验证 2：未配置受信代理的直连不受头影响（对照，应 127.0.0.1）---"
+            curl -s --max-time 5 http://127.0.0.1:8787/api/v1/ip/check | head -c 200
+            echo ""
+            echo "--- PoW 验证：挑战端点应下发难度 14 ---"
+            curl -s --max-time 5 "http://127.0.0.1:8787/api/v1/altcha/challenge?fp=fpfpfpfpfpfpfpfp" | head -c 200
+            echo ""
+            echo "--- PoW 验证：无解 fp/report 应 401 ---"
+            curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 -X POST -H "Content-Type: application/json" \
+              -d "{\"fp\":\"fpfpfpfpfpfpfpfp\"}" http://127.0.0.1:8787/api/v1/fp/report
+            echo "--- APP 豁免验证：带 X-App-Sign 的 fp/report 不被 PoW 拦（应非 401）---"
+            curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 -X POST -H "Content-Type: application/json" \
+              -H "X-App-Sign: probe" -d "{\"fp\":\"fpfpfpfpfpfpfpfp\"}" http://127.0.0.1:8787/api/v1/fp/report
+            '
+
+      - name: 公网视角验证（GitHub Actions 出口）
+        run: |
+          for i in 1 2 3; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 http://www.githubhot.online/api/v1/healthz || true)
+            echo "公网 http80 healthz: $CODE"
+            [ "$CODE" = "301" -o "$CODE" = "200" ] && break
+            sleep 10
+          done
+          echo "（https 公网受跨境 SNI 复位影响不可用为已知现象；服务器本机 443 域名访问 200 已在 diag 验证）"
