@@ -1,0 +1,28 @@
+name: 基础设施-解除误伤封禁 + 原因诊断
+
+# 手动触发：IP 防护首次通电后的误伤解除。
+# 流程：导出全部封禁与近 24h 事件（定位误伤原因）→ 清空封禁 → 服务自检。
+# 远端脚本为仓库文件 scripts/remote-unban.py（stdin 喂 python3）。可重复执行。
+on:
+  workflow_dispatch:
+
+jobs:
+  unban:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 导出诊断 + 解除封禁
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'bash -s' < scripts/remote-unban.sh
