@@ -128,7 +128,7 @@ type FingerprintRow struct {
 // stability >= 0 时落库整体稳定度（P2-4），compStabilityJSON 非空时落库各分量稳定度；
 // ja4 为 P3-2 TLS 客户端指纹（TLS 模式才有，非空覆盖）；
 // behaviorJSON / clockSkewPPM 为 P4-5/P4-6 行为与时钟信号（非空/非 nil 覆盖）。
-func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string, components map[string]string, flags []string, canvasPhash, minhashSig, ja4 string, stability float64, compStabilityJSON, behaviorJSON string, clockSkewPPM *float64) ([]string, error) {
+func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc []string, components map[string]string, flags []string, canvasPhash, minhashSig, ja4 string, stability float64, compStabilityJSON, behaviorJSON string, clockSkewPPM *float64, trusted bool) ([]string, error) {
 	// 输入验证：防止资源耗尽攻击
 	const (
 		maxWebRTCCandidates  = 20
@@ -225,9 +225,13 @@ func (db *DB) UpsertFingerprint(ctx context.Context, fp, ip, ua string, webrtc [
 	if err == nil {
 		_ = json.Unmarshal([]byte(oldCompJSON), &oldComponents)
 	}
-	for k, v := range components {
-		if v != "" {
-			oldComponents[k] = v
+	// 渗透修复（来源信任分级）：匿名更新不得覆写已有指纹的 components 基线——
+	// 否则任意人可 POST /fp/report 破坏换脸检测基线。首报（无行）照常建档。
+	if trusted || err == sql.ErrNoRows {
+		for k, v := range components {
+			if v != "" {
+				oldComponents[k] = v
+			}
 		}
 	}
 	// 限制 oldComponents 大小

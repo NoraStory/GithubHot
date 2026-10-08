@@ -228,8 +228,10 @@ func (g *loginGuard) succeed(ip string) {
 // ---------- 登录 / 退出 / 会话检查 ----------
 
 type loginPayload struct {
-	Password string `json:"password"`
-	Remember bool   `json:"remember"`
+	Password string          `json:"password"`
+	Remember bool            `json:"remember"`
+	Fp       string          `json:"fp"`    // PoW 挑战绑定的设备指纹（前端登录页 deviceFp()）
+	Altcha   *altchaSolution `json:"altcha"` // P4-3 PoW 解（ALTCHA_DIFFICULTY>0 时强制）
 }
 
 // adminLogin POST /api/v1/admin/login：验证密码 → 建会话 → 下发 Cookie。
@@ -252,8 +254,15 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p loginPayload
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&p); err != nil || p.Password == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&p); err != nil || p.Password == "" {
 		writeErr(w, 400, errorString("请求体需要 {\"password\": \"...\"}"))
+		return
+	}
+	// P4-3 管理端 PoW 纵深（M-2）：强制开启时，无有效解的登录请求直接拒绝，
+	// 且**不计入**爆破锁定次数——锁定只数密码错误，PoW 失败是廉价的自动拒绝。
+	// 攻击者要么烧 CPU 求解（无法规模化），要么被挡在密码验证之前。
+	if !s.checkAltchaForLogin(r, p.Fp, p.Altcha) {
+		writeErr(w, 401, errorString("需要有效的 ALTCHA 工作量证明"))
 		return
 	}
 	ok, err := adminauth.VerifyPassword(passwordHash, p.Password)

@@ -128,6 +128,11 @@ func Run(cfg *config.Config) error {
 
 // Serve 启动 API + 双榜页 + 内置定时调度。
 func Serve(cfg *config.Config) error {
+	// IP 守护密钥红线（渗透 L-6）：设置了但 <32B = 配置错误 → 拒绝启动。
+	// 未设置 = 开发模式（进程内随机密钥 + 警告），与既有行为一致。
+	if sec := os.Getenv("IP_GUARD_SECRET"); sec != "" && len(sec) < 32 {
+		return fmt.Errorf("IP_GUARD_SECRET 长度不足（%d < 32B）：至少 32 字节随机值（head -c 32 /dev/urandom | base64）", len(sec))
+	}
 	// 两级响应缓存装配：REDIS_ADDR 配置时启用 L2 Redis（宕机自动降级 L1），
 	// 未配置保持纯 L1。必须在 config.Load 之后（.env 已落进程环境）。
 	httpapi.InitCaches(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)

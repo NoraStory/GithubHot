@@ -31,7 +31,7 @@ func TestUpsertFingerprintConcurrent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			_, err := db.UpsertFingerprint(context.Background(), "fp-concurrent",
-				fmt.Sprintf("10.0.0.%d", i+1), "UA-test", nil, nil, nil, "", "", "", -1, "", "", nil)
+				fmt.Sprintf("10.0.0.%d", i+1), "UA-test", nil, nil, nil, "", "", "", -1, "", "", nil, true)
 			if err != nil {
 				errs <- err
 			}
@@ -57,7 +57,7 @@ func TestUpsertFingerprintIPsCapped(t *testing.T) {
 	db := openTestDB(t)
 	for i := 0; i < 70; i++ {
 		if _, err := db.UpsertFingerprint(context.Background(), "fp-cap",
-			fmt.Sprintf("10.1.%d.%d", i/250, i%250+1), "UA", nil, nil, nil, "", "", "", -1, "", "", nil); err != nil {
+			fmt.Sprintf("10.1.%d.%d", i/250, i%250+1), "UA", nil, nil, nil, "", "", "", -1, "", "", nil, true); err != nil {
 			t.Fatalf("第 %d 次上报: %v", i+1, err)
 		}
 	}

@@ -19,10 +19,16 @@ export async function checkAdminSession() {
 }
 
 export async function adminLogin(password, remember) {
+  // P4-3 管理端 PoW 纵深：服务端启用（难度>0）时带解登录；未启用时 solveAltcha
+  // 返回 null → 不带 altcha/fp 字段，行为与之前完全一致
+  const { deviceFp } = await import('./fingerprint')
+  const { solveAltcha } = await import('./altcha')
+  const fp = deviceFp()
+  const altcha = fp ? await solveAltcha(fp) : null
   const res = await fetch('/api/v1/admin/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password, remember: !!remember })
+    body: JSON.stringify({ password, remember: !!remember, fp: fp || undefined, altcha: altcha || undefined })
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || '登录失败')

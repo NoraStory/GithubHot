@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -16,27 +17,6 @@ import (
 )
 
 // realIP 从请求中提取真实IP地址
-// 注意：无条件信任 X-Real-IP/X-Forwarded-For，与 clientip.go 的 TRUSTED_PROXY
-// 受信代理体系不一致（评审 P2 遗留：公开端点可被栽赃任意 IP），待统一收口。
-func realIP(r *http.Request) string {
-	// 优先使用X-Real-IP
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
-	}
-	// 其次使用X-Forwarded-For的第一个IP
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if idx := strings.Index(xff, ","); idx > 0 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
-	}
-	// 最后使用RemoteAddr
-	if idx := strings.LastIndex(r.RemoteAddr, ":"); idx > 0 {
-		return r.RemoteAddr[:idx]
-	}
-	return r.RemoteAddr
-}
-
 // ---------- 指纹上报（公开端点，第二层入口） ----------
 
 type fpPayload struct {
@@ -264,7 +244,18 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 		flags = append(flags, "headless-ua")
 	}
 
+	// 来源信任分级：持有效 gh_id 会话 或 APP 已验签 → 允许覆写 components 基线；
+	// 匿名上报仅累积（首报建档不受限，防匿名覆写他人档案，见 sqlite 层实现）
+	trusted := r.Header.Get("X-App-Sign") != ""
+	if !trusted {
+		if c, err := r.Cookie(idCookieName); err == nil && c.Value != "" {
+			if valid, _, _, _ := s.Guard.verifyIDToken(c.Value, ip); valid {
+				trusted = true
+			}
+		}
+	}
 	meta := FingerprintMeta{
+		Trusted:      trusted,
 		Webrtc:       p.WebRTC,
 		Components:   sanitizeComponents(p.Components),
 		Flags:        flags,
@@ -535,9 +526,49 @@ func (s *Server) devtoolsDetectedAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip := realIP(r)
+	// 渗透修复（L-2/L-5）：IP 归应收口到受信代理解析（原 realIP 无条件信任
+	// X-Real-IP 可被栽赃）；fp 头必须带且限长（匿名灌事件表不可行）+ 1 次/分钟限频
+	fp := strings.TrimSpace(r.Header.Get(fpHeaderName))
+	if len(fp) < 16 || len(fp) > 128 {
+		writeErr(w, 400, errorString("需要合法的 X-Device-Fp"))
+		return
+	}
+	ip := clientIPFromRequest(r)
+	if !devtoolsAllow(ip, time.Now()) {
+		writeErr(w, 429, errorString("rate limited"))
+		return
+	}
 	// 记录事件，积分为 0（仅作为行为特征，不触发封禁）
 	s.Guard.Event(r.Context(), ip, "devtools-detected", "前端检测到开发者工具打开", 0, false)
 
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// devtoolsLimiter devtools 上报限频：每 IP 滑动窗口 1 次/分钟（防污染事件表）。
+var devtoolsLimiter = struct {
+	sync.Mutex
+	m map[string][]time.Time
+}{m: map[string][]time.Time{}}
+
+func devtoolsAllow(ip string, now time.Time) bool {
+	const window = time.Minute
+	devtoolsLimiter.Lock()
+	defer devtoolsLimiter.Unlock()
+	ts := devtoolsLimiter.m[ip]
+	cut := now.Add(-window)
+	keep := ts[:0]
+	for _, t := range ts {
+		if t.After(cut) {
+			keep = append(keep, t)
+		}
+	}
+	if len(keep) == 0 {
+		delete(devtoolsLimiter.m, ip)
+	}
+	if len(keep) >= 1 {
+		devtoolsLimiter.m[ip] = keep
+		return false
+	}
+	devtoolsLimiter.m[ip] = append(keep, now)
+	return true
 }

@@ -319,7 +319,7 @@ func (a *AppGuard) recordFingerprint(ctx context.Context, ip, fp, model, threat,
 	for k, v := range parseBrowserFp(browserFp) {
 		components[k] = v
 	}
-	if _, err := a.store.UpsertFingerprint(ctx, fp, ip, ua, FingerprintMeta{Components: components, Flags: flags}); err != nil {
+	if _, err := a.store.UpsertFingerprint(ctx, fp, ip, ua, FingerprintMeta{Components: components, Flags: flags, Trusted: true}); err != nil {
 		log.Printf("[appguard] 指纹归档失败 %s: %v", fp, err)
 	}
 }

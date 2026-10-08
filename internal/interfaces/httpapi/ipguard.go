@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -291,6 +293,7 @@ type FingerprintMeta struct {
 	JA4           string              // P3-2 TLS 客户端指纹（TLS 模式下由连接上下文注入）
 	Behavior      string              // P4-5 行为生物特征 JSON（客户端滑窗统计量，已清洗）
 	ClockSkewPPM  *float64            // P4-6 时钟偏移（ppm；nil=未采集）
+	Trusted       bool                // 渗透修复：来源可信（有效 gh_id 会话或已验签 APP）——不可信上报不得覆写已有指纹的 components 基线
 }
 
 // ja4CtxKey TLS 指纹的 context 键（连接级注入，请求级读取）。
@@ -589,12 +592,45 @@ func (g *IPGuard) periodicCleanup() {
 
 // ---------- 身份令牌（第三层·特殊标识） ----------
 //
-// 令牌格式：v2.<b64url(ip|fp|issued|exp)>.<b64url(HMAC-SHA256(key, payload))>
-// 载荷明文可解码（便于核验绑定关系），但任何篡改都会使签名比对失败；
+// 令牌格式（渗透测试 M-4 修复）：
+//   v3.<b64url(nonce ‖ AES-256-GCM 密文)>   —— 现行。载荷（ip|fp|issued|exp）AES-256-GCM
+//      加密：Cookie 被窃取者无法解码 fp，跨 IP 零分接管路径（换网络宽限需 fp 与令牌
+//      绑定一致）失去 fp 来源。密钥 = SHA-256(key ‖ "gh-id-aead-v3")，与验签密钥隔离。
+//   v2.<b64url(载荷)>.<b64url(HMAC)>          —— 旧版（明文+HMAC），签发已停用，
+//      核验保留兼容（存量会话平滑过渡，不把老访客打成封禁）。
+//
 // fp 为签发时绑定的设备指纹，空串表示页面导航类请求（尚未采集指纹）。
 
-// issueIDToken 签发身份令牌。
+// idAEADKey AEAD 子密钥：与 HMAC 验签密钥域隔离（域分隔符防跨用途重用）。
+func idAEADKey(key []byte) []byte {
+	sum := sha256.Sum256(append(append([]byte{}, key...), []byte("gh-id-aead-v3")...))
+	return sum[:]
+}
+
+// issueIDToken 签发身份令牌（v3，加密载荷）。
 func (g *IPGuard) issueIDToken(ip, fp string) (string, time.Time) {
+	issued := time.Now()
+	exp := issued.Add(idCookieLifetime)
+	payload := ip + "|" + fp + "|" + strconv.FormatInt(issued.Unix(), 10) + "|" + strconv.FormatInt(exp.Unix(), 10)
+	block, err := aes.NewCipher(idAEADKey(g.key))
+	if err != nil {
+		// 理论不可达（32B 密钥恒定）；降级 v2 保证签发不中断
+		return g.issueIDTokenV2(ip, fp)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return g.issueIDTokenV2(ip, fp)
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return g.issueIDTokenV2(ip, fp)
+	}
+	ct := aead.Seal(nil, nonce, []byte(payload), nil)
+	return "v3." + base64.RawURLEncoding.EncodeToString(append(nonce, ct...)), exp
+}
+
+// issueIDTokenV2 旧版签发（仅供 v3 加密初始化失败时的降级路径）。
+func (g *IPGuard) issueIDTokenV2(ip, fp string) (string, time.Time) {
 	issued := time.Now()
 	exp := issued.Add(idCookieLifetime)
 	payload := ip + "|" + fp + "|" + strconv.FormatInt(issued.Unix(), 10) + "|" + strconv.FormatInt(exp.Unix(), 10)
@@ -616,9 +652,12 @@ const (
 	tokenExpired                      // 签名有效但已过期 → 正常重签
 )
 
-// verifyIDTokenEx 核验令牌并给出三态结果。
+// verifyIDTokenEx 核验令牌并给出三态结果。v3（AEAD）优先，v2（HMAC）兼容过渡。
 func (g *IPGuard) verifyIDTokenEx(token, currentIP string) (tokenStatus, string, string, time.Time) {
 	parts := strings.Split(token, ".")
+	if len(parts) == 2 && parts[0] == "v3" {
+		return g.verifyIDTokenV3(parts[1])
+	}
 	if len(parts) != 3 || parts[0] != "v2" {
 		return tokenMalformed, "", "", time.Time{}
 	}
@@ -642,6 +681,41 @@ func (g *IPGuard) verifyIDTokenEx(token, currentIP string) (tokenStatus, string,
 	if !hmac.Equal(sig, mac.Sum(nil)) {
 		return tokenBadSig, "", "", time.Time{}
 	}
+	if time.Now().After(exp) {
+		return tokenExpired, f[1], f[0], exp
+	}
+	return tokenOK, f[1], f[0], exp
+}
+
+// verifyIDTokenV3 解密并核验 v3 令牌（载荷 = ip|fp|issued|exp 的 AES-256-GCM 密文）。
+func (g *IPGuard) verifyIDTokenV3(enc string) (tokenStatus, string, string, time.Time) {
+	raw, err := base64.RawURLEncoding.DecodeString(enc)
+	if err != nil || len(raw) < 12 {
+		return tokenMalformed, "", "", time.Time{}
+	}
+	block, err := aes.NewCipher(idAEADKey(g.key))
+	if err != nil {
+		return tokenMalformed, "", "", time.Time{}
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return tokenMalformed, "", "", time.Time{}
+	}
+	payload, err := aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], nil)
+	if err != nil {
+		// 认证失败：篡改或密钥轮换（老实例签发的 v3 密文用新密钥解不开）。
+		// 映射 tokenBadSig 而非 malformed——密钥轮换绝不能按伪造封禁（见 tokenStatus 注释）
+		return tokenBadSig, "", "", time.Time{}
+	}
+	f := strings.Split(string(payload), "|")
+	if len(f) != 4 {
+		return tokenMalformed, "", "", time.Time{}
+	}
+	expUnix, err := strconv.ParseInt(f[3], 10, 64)
+	if err != nil {
+		return tokenMalformed, "", "", time.Time{}
+	}
+	exp := time.Unix(expUnix, 0)
 	if time.Now().After(exp) {
 		return tokenExpired, f[1], f[0], exp
 	}
@@ -830,6 +904,9 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 		defer cancel()
 		ip := clientIPFromRequest(r)
 		fp := r.Header.Get(fpHeaderName)
+		if len(fp) > 128 {
+			fp = "" // L-5：超长指纹按未采集处理（防 Cookie/列膨胀，不截断防绑定错乱）
+		}
 
 		// 回环/内网白名单：只记录不封禁（开发环境防自锁）
 		local := g.localOK && isLocalIP(ip)

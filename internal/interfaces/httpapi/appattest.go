@@ -123,6 +123,9 @@ func (s *Server) appAttestVerifyAPI(w http.ResponseWriter, r *http.Request) {
 
 	// 结果写回指纹档案（attestation 列）；失败记弱证据（可与其余证据互证）
 	fp := strings.TrimSpace(r.Header.Get(fpHeaderName))
+	if len(fp) > 128 {
+		fp = "" // L-5：超长指纹按未采集处理
+	}
 	if s.Guard != nil && fp != "" {
 		verdictJSON, _ := json.Marshal(map[string]any{
 			"level": result.Level, "valid": result.Valid, "reason": result.Reason,

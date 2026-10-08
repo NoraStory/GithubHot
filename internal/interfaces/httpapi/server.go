@@ -58,6 +58,7 @@ func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(cors)
+	r.Use(securityHeadersMiddleware) // 渗透 L-1：全站安全基线头（含封禁/404 响应）
 	if s.TLSMode {
 		r.Use(hstsMiddleware) // P3-1：仅 TLS 模式启用 HSTS
 	}

@@ -192,3 +192,19 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 	}
 	return g.gz.Write(b)
 }
+
+// ---------- 安全响应头（渗透 L-1：全站基线，404/封禁响应也带头） ----------
+
+// securityHeadersMiddleware 无条件安全基线头。刻意不加 script-src 强 CSP：
+// index.html 引用第三方脚本（elemecdn/jinrishici），会弄坏站点；frame-ancestors
+// 单独成策略合法且零风险。HSTS 仅 TLS 模式（见 hstsMiddleware）。
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		next.ServeHTTP(w, r)
+	})
+}
