@@ -1,0 +1,31 @@
+name: 基础设施-APP 兼容修复（旧种子 GRACE + 去强制升级横幅）
+
+# 手动触发：APP 拉取失败/版本过时的收口。
+# 1) 实证：用握手时代旧种子完整复刻 APP 签名打真实请求（200=存量APP兼容）
+# 2) GRACE 列表补齐 gh-dev-seed-v1（过渡期 ≤14 天，APP 发版后清除）
+# 3) 清理过期封禁行
+# 4) 清空 APP_FORCE_UPGRADE_URL（常驻"版本过时"横幅的根因；新 APK 上线时可重新设置）
+# 5) 固化 IP_GUARD_SECRET（防重启随机化导致全站 id-token-stale 计分）
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: APP 兼容修复
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'bash -s' < scripts/remote-app-fix.sh
