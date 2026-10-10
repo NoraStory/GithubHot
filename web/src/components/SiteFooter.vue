@@ -83,7 +83,7 @@ onMounted(() => {
       <div class="footer-bar-links">
         <div class="footer-bar-left">
           <div id="footer-bar-tips">
-            <div class="copyright">&copy;2025 - 2026 By <a class="footer-bar-link" href="/" title="GithubHot">GithubHot</a></div>
+            <div class="copyright">&copy;2025 - 2026 By <a class="footer-bar-link" href="/" title="GithubHot">GithubHot</a><span class="icp-sep">｜</span><a class="footer-bar-link icp-link" target="_blank" rel="noopener" href="https://beian.miit.gov.cn/" title="工信部备案查询">陕ICP备2025082213号</a></div>
           </div>
           <div id="footer-type-tips"></div>
         </div>
@@ -118,4 +118,6 @@ onMounted(() => {
 .footer-bar-link { color: var(--anzhiyu-gray); margin: 0 6px; }
 .footer-bar-link:hover { color: var(--anzhiyu-hover); }
 #footer-type-tips { color: var(--anzhiyu-secondtext); font-size: .82rem; min-height: 1.2em; }
+.icp-sep { color: var(--anzhiyu-card-border); margin: 0 6px; }
+.icp-link { font-size: .84rem; }
 </style>
