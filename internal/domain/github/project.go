@@ -120,7 +120,14 @@ type HotnessInput struct {
 	Now       time.Time
 	// Window 增长统计窗口（日报 24h / 周报 7d / 月报 30d）。0 = 24h。
 	Window time.Duration
+	// Resonance 窗口内引用该项目的独立资讯事件数（多源共振，0 = 无）。
+	// 共振加成 H ×= 1 + 0.08×min(Resonance,5)：1 家 ×1.08 → 5+ 家封顶 ×1.4，
+	// 与故事侧融合加成（×1.25）同数量级——star 增量之外吸收"被多家媒体报道"的信号。
+	Resonance int
 }
+
+// resonanceStep 每个独立资讯事件的共振步长（封顶 5 家 → ×1.4）。
+const resonanceStep = 0.08
 
 // Hotness 计算项目热度（0-100 量级）：
 //
@@ -128,7 +135,8 @@ type HotnessInput struct {
 //	base   = 10 × log2(1 + gained)           —— 对数抑制头部碾压
 //	trend  = trending 排名加成（1-3 名 +6，4-10 +3，11-25 +1）
 //	novel  = 首次发现不足 24h 且有增长 +5     —— "新爆"信号
-//	H      = base + trend + novel
+//	reson  = 多源共振乘数（1 + 0.08×min(k,5)）
+//	H      = (base + trend + novel) × reson
 func Hotness(in HotnessInput) float64 {
 	if len(in.Snapshots) == 0 {
 		return 0
@@ -163,6 +171,12 @@ func Hotness(in HotnessInput) float64 {
 	}
 	if in.Now.Sub(firstSeen) < 24*time.Hour && gained > 0 {
 		h += 5
+	}
+	if k := in.Resonance; k > 0 {
+		if k > 5 {
+			k = 5
+		}
+		h *= 1 + resonanceStep*float64(k)
 	}
 	return math.Round(h*10) / 10
 }
