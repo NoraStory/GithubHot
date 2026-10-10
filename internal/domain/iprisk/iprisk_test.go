@@ -132,16 +132,16 @@ func TestDilutionOnlyAffectsWeakClasses(t *testing.T) {
 }
 
 func TestDilutionBoundaries(t *testing.T) {
-	if got := dilution(1); got != 1 {
+	if got := DefaultParams().dilution(1); got != 1 {
 		t.Fatalf("UA=1 不应稀释，得 %.2f", got)
 	}
-	if got := dilution(UADiversityFree); got != 1 {
+	if got := DefaultParams().dilution(UADiversityFree); got != 1 {
 		t.Fatalf("UA=%d 边界不应稀释，得 %.2f", UADiversityFree, got)
 	}
-	if got := dilution(6); got < 0.49 || got > 0.51 {
+	if got := DefaultParams().dilution(6); got < 0.49 || got > 0.51 {
 		t.Fatalf("UA=6 应为 3/6=0.5，得 %.2f", got)
 	}
-	if got := dilution(1000); got != DilutionFloor {
+	if got := DefaultParams().dilution(1000); got != DilutionFloor {
 		t.Fatalf("超大出口应取稀释下限，得 %.2f", got)
 	}
 }

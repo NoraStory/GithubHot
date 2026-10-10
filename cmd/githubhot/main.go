@@ -78,10 +78,17 @@ func main() {
 				if path == "" {
 					// 取第一个非 flag 参数
 					for _, a := range os.Args[3:] {
-						if !strings.HasPrefix(a, "--") && !strings.HasPrefix(a, "-") { path = a; break }
+						if !strings.HasPrefix(a, "--") && !strings.HasPrefix(a, "-") {
+							path = a
+							break
+						}
 					}
 				}
-				if path == "" { fmt.Fprintln(os.Stderr, "用法: githubhot ml import-gnn <file.json>"); os.Exit(2); return }
+				if path == "" {
+					fmt.Fprintln(os.Stderr, "用法: githubhot ml import-gnn <file.json>")
+					os.Exit(2)
+					return
+				}
 				if err := cli.MLImportGNN(cfg, path); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(1)
@@ -107,6 +114,23 @@ func main() {
 			return
 		}
 		fmt.Fprintln(os.Stderr, "用法: githubhot ja4 update")
+		os.Exit(2)
+	case "risk":
+		// 风控参数离线回放评估（算法改进 A 批）：risk replay [--sweep]
+		if len(os.Args) >= 3 && os.Args[2] == "replay" {
+			sweep := false
+			for _, a := range os.Args[3:] {
+				if a == "--sweep" {
+					sweep = true
+				}
+			}
+			if err := cli.IPRiskReplay(cfg, sweep); err != nil {
+				fmt.Fprintf(os.Stderr, "回放评估失败: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+		fmt.Fprintln(os.Stderr, "用法: githubhot risk replay [--sweep]")
 		os.Exit(2)
 	case "run":
 		if err := cli.Run(cfg); err != nil {
@@ -173,6 +197,7 @@ func usage() {
   githubhot geo      GeoIP 数据：geo download 下载 ip-location-db 国家/ASN 库（P2-5，CC BY 4.0）
   githubhot ja4      TLS 指纹数据：ja4 update 下载 FoxIO JA4→应用映射表（P3-3，BSD-3）
   githubhot ml       机器学习管道：ml export / export-graph / import-gnn / check（P5/P6）
+  githubhot risk     风控参数回放评估：risk replay [--sweep]（召回/误报对比，调参看数字）
   githubhot version  版本号
 
 配置: 见 .env.example（LLM_API_KEY 必选；GITHUB_TOKEN 建议配置）`)

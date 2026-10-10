@@ -47,6 +47,34 @@ const (
 	CapStrong = 70.0 // 强证据单类型贡献上限
 )
 
+// Params 决策参数组：线上行为 = DefaultParams()（与上面命名常量一一对应）。
+// 离线回放评估器（replay.go）用不同参数组重放同一份历史事件流做对比，
+// 生产路径始终使用默认组——参数实验不影响线上判定。
+type Params struct {
+	Threshold       float64
+	HalfLifeMin     float64
+	DecayWindowMin  float64
+	UADiversityFree int
+	DilutionFloor   float64
+	WeakSoloFactor  float64
+	CapWeak         float64
+	CapStrong       float64
+}
+
+// DefaultParams 线上现行参数（与命名常量同步）。
+func DefaultParams() Params {
+	return Params{
+		Threshold:       Threshold,
+		HalfLifeMin:     HalfLifeMin,
+		DecayWindowMin:  DecayWindowMin,
+		UADiversityFree: UADiversityFree,
+		DilutionFloor:   DilutionFloor,
+		WeakSoloFactor:  WeakSoloFactor,
+		CapWeak:         CapWeak,
+		CapStrong:       CapStrong,
+	}
+}
+
 // 证据大类
 const (
 	ClassRate     = "R" // 速率/流量：弱（NAT/CGNAT 聚合大量正常用户）
@@ -122,21 +150,27 @@ func ClassOf(kind string) string {
 // IsStrong 是否强证据类。
 func IsStrong(class string) bool { return strongClasses[class] }
 
-// dilution 共享出口稀释系数。
-func dilution(uaDiversity int) float64 {
-	if uaDiversity <= UADiversityFree {
+// dilution 共享出口稀释系数（参数化：弱证据按 UA 种类数折减，有下限）。
+func (p Params) dilution(uaDiversity int) float64 {
+	if uaDiversity <= p.UADiversityFree {
 		return 1
 	}
-	d := float64(UADiversityFree) / float64(uaDiversity)
-	if d < DilutionFloor {
-		return DilutionFloor
+	d := float64(p.UADiversityFree) / float64(uaDiversity)
+	if d < p.DilutionFloor {
+		return p.DilutionFloor
 	}
 	return d
 }
 
 // Evaluate 计算决策：给定该 IP 近期事件、当前时间与该 IP 的 UA 种类数。
+// 使用默认参数组（线上现行行为）。
 func Evaluate(events []Event, now time.Time, uaDiversity int) Decision {
-	dil := dilution(uaDiversity)
+	return EvaluateWith(DefaultParams(), events, now, uaDiversity)
+}
+
+// EvaluateWith 指定参数组的决策计算（回放评估用；生产路径走 Evaluate）。
+func EvaluateWith(p Params, events []Event, now time.Time, uaDiversity int) Decision {
+	dil := p.dilution(uaDiversity)
 	agg := map[string]*KindResult{}
 	order := make([]string, 0, len(events))
 
@@ -148,7 +182,7 @@ func Evaluate(events []Event, now time.Time, uaDiversity int) Decision {
 		if age < 0 {
 			age = 0
 		}
-		if age.Minutes() > DecayWindowMin {
+		if age.Minutes() > p.DecayWindowMin {
 			continue
 		}
 		class := ClassOf(e.Kind)
@@ -158,7 +192,7 @@ func Evaluate(events []Event, now time.Time, uaDiversity int) Decision {
 			agg[e.Kind] = r
 			order = append(order, e.Kind)
 		}
-		r.Raw += float64(e.Score) * math.Pow(0.5, age.Minutes()/HalfLifeMin)
+		r.Raw += float64(e.Score) * math.Pow(0.5, age.Minutes()/p.HalfLifeMin)
 		r.Count++
 	}
 
@@ -171,9 +205,9 @@ func Evaluate(events []Event, now time.Time, uaDiversity int) Decision {
 		if diluted[r.Class] {
 			adj *= dil
 		}
-		line := Threshold
+		line := p.Threshold
 		if !IsStrong(r.Class) {
-			line = Threshold * WeakSoloFactor
+			line = p.Threshold * p.WeakSoloFactor
 		}
 		if adj >= line {
 			r.Score = adj
@@ -195,9 +229,9 @@ func Evaluate(events []Event, now time.Time, uaDiversity int) Decision {
 		if diluted[r.Class] {
 			adj *= dil
 		}
-		cap := CapWeak
+		cap := p.CapWeak
 		if IsStrong(r.Class) {
-			cap = CapStrong
+			cap = p.CapStrong
 		}
 		if adj > cap {
 			adj = cap
@@ -212,7 +246,7 @@ func Evaluate(events []Event, now time.Time, uaDiversity int) Decision {
 		Effective: eff, Kinds: kinds, Dilution: dil,
 		UADiversity: uaDiversity, ByKind: sortedBy(order, agg),
 	}
-	if eff >= Threshold && kinds >= 2 {
+	if eff >= p.Threshold && kinds >= 2 {
 		d.Ban = true
 		d.Reason = fmt.Sprintf("多证据互证：有效分 %.0f（%d 种类型：%s）", eff, kinds, kindSummary(order, agg))
 	}
