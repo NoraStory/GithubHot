@@ -34,8 +34,11 @@ type altchaSolution struct {
 	Signature string `json:"signature"`
 }
 
-func altchaSecret() string    { return strings.TrimSpace(os.Getenv("ALTCHA_SECRET")) }
-func altchaDifficulty() int   { v, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("ALTCHA_DIFFICULTY"))); return v }
+func altchaSecret() string { return strings.TrimSpace(os.Getenv("ALTCHA_SECRET")) }
+func altchaDifficulty() int {
+	v, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("ALTCHA_DIFFICULTY")))
+	return v
+}
 func altchaMaxAge() time.Duration {
 	if v, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("ALTCHA_MAXAGE_SEC"))); v > 0 {
 		return time.Duration(v) * time.Second
@@ -77,10 +80,59 @@ func altchaConsume(challenge, nonce string) bool {
 	return true
 }
 
+// ---------- 挑战签发限流（渗透整改 P0-4） ----------
+
+// challenge 是免认证端点，此前可被无限刷（每刷一枚就白算一次 HMAC）。仿
+// devtoolsAllow 的每 IP 滑动窗口：1 分钟 / 默认 60 次，env ALTCHA_CHALLENGE_RPM
+// 可调（非法值回退默认；正常用户一次登录/上报只领 1-2 枚，60 绰绰有余）。
+var altchaChallengeLimiter = struct {
+	sync.Mutex
+	m map[string][]time.Time
+}{m: map[string][]time.Time{}}
+
+func altchaChallengeRPM() int {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("ALTCHA_CHALLENGE_RPM"))); err == nil && v > 0 {
+		return v
+	}
+	return 60
+}
+
+func altchaChallengeAllow(ip string, now time.Time, max int) bool {
+	const window = time.Minute
+	altchaChallengeLimiter.Lock()
+	defer altchaChallengeLimiter.Unlock()
+	ts := altchaChallengeLimiter.m[ip]
+	cut := now.Add(-window)
+	keep := ts[:0]
+	for _, t := range ts {
+		if t.After(cut) {
+			keep = append(keep, t)
+		}
+	}
+	if len(keep) == 0 {
+		delete(altchaChallengeLimiter.m, ip)
+	}
+	if len(keep) >= max {
+		altchaChallengeLimiter.m[ip] = keep
+		return false
+	}
+	altchaChallengeLimiter.m[ip] = append(keep, now)
+	return true
+}
+
 // altchaChallengeAPI GET /api/v1/altcha/challenge?fp=...：签发一枚 PoW 挑战。
 // 挑战与指纹在**签发时绑定**（服务端计算 signature，客户端无密钥不可自造），
 // 解好的 nonce 无法换一个指纹重放。
 func (s *Server) altchaChallengeAPI(w http.ResponseWriter, r *http.Request) {
+	ip := clientIPFromRequest(r)
+	if !altchaChallengeAllow(ip, time.Now(), altchaChallengeRPM()) {
+		// 0 分标记：只进面板/日志供观察，不参与 iprisk 决策（防共享出口误伤）
+		if s.Guard != nil {
+			s.Guard.Event(r.Context(), ip, "altcha-flood", "challenge 签发超限", 0, false)
+		}
+		writeJSON(w, 429, map[string]any{"error": "too many requests"})
+		return
+	}
 	secret := altchaSecret()
 	if secret == "" {
 		// 文案去敏（M-2）：对外不暴露配置状态，细节只进日志

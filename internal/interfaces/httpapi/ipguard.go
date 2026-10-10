@@ -68,7 +68,7 @@ const (
 	severeRatePerMin = 600
 	// 普通阈值
 	warnRatePerMin  = 150
-	adminRatePerMin = 120 // 渗透修复连带：控制台自身轮询 ~46 req/min，30 的阈值把合法管理员当探针计分（admin-probe +40 曾参与误封）
+	adminRatePerMin = 200 // 渗透整改 P0-3：控制台多端点并行轮询实测峰值 169 req/min（120 会把合法管理员计分），抬到 200 保留对真正枚举扫描的灵敏度
 	scannerMinReqs  = 50
 	scanner404Ratio = 0.4
 	// 指纹全生命周期关联 IP 数超此值记漂移观察（出差多年累积也难触及）
@@ -1768,8 +1768,10 @@ func (g *IPGuard) behaviorCheck(ctx context.Context, ip string, meta Fingerprint
 }
 
 // checkClusterCollusion 簇连坐（P4-4/P6-2）：fp 所在簇内有被封禁成员 →
-// 独立弱证据 cluster-linked 15 分（灰度 0 分）。规格原文 ×1.5 会在 fp-linked 70 分
-// 上越强类封顶——改用独立证据让 iprisk 多证互证（安全边界与 P2-1 一致）。
+// cluster-linked 记 **0 分标记**（渗透整改 P0-1）。簇成员关联本身不是证据：
+// 用户自有设备群、同型号手机、共享出口都会自然成簇——实测对管理员自查流量
+// 也能连坐计分。0 分事件 iprisk 不参与决策（iprisk.go 跳过 score<=0），
+// 仅作管理端面板可视化与后续人工研判入口。
 func (g *IPGuard) checkClusterCollusion(ctx context.Context, ip, fp string) {
 	if g.store == nil {
 		return
@@ -1792,7 +1794,7 @@ func (g *IPGuard) checkClusterCollusion(ctx context.Context, ip, fp string) {
 			}
 			if b, _ := g.store.FindBan(ctx, firstIP(g.ipsOf(ctx, m))); b != nil {
 				g.event(ctx, ip, "cluster-linked",
-					sprintf("簇 %d 成员 %s 已被封禁", c.ID, m[:min(8, len(m))]), 15, false)
+					sprintf("簇 %d 成员 %s 已被封禁", c.ID, m[:min(8, len(m))]), 0, false)
 				return
 			}
 		}

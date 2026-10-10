@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -349,11 +350,15 @@ func fmtF(b *strings.Builder, format string, args ...any) {
 // storyPage 事件详情页。
 
 // storyAPI 事件详情 JSON（APP 契约）。
+// 错误文案脱敏（渗透整改 P0-2）：BuildStoryDetail 的错误链含存储层原文
+// （"读取事件: " + 数据库驱动错误，可能暴露表结构/路径），只进服务端日志，
+// 对外统一通用文案。
 func (s *Server) storyAPI(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	v, err := application.BuildStoryDetail(r.Context(), s.Deps, id)
 	if err != nil {
-		writeErr(w, 404, err)
+		log.Printf("[story] 详情构建失败 id=%s: %v", sanitizeForLog(id), err)
+		writeErr(w, 404, errorString("内容不存在或暂时无法查看"))
 		return
 	}
 	writeJSON(w, 200, v)

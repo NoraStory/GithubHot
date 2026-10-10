@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -123,12 +124,20 @@ func TestSanitizeComponents(t *testing.T) {
 	}
 	long := make(map[string]string)
 	for i := 0; i < 20; i++ {
-		long[string(rune('a'+i))] = "v"
+		long[string(rune('a'+i))] = fmt.Sprintf("value-%02d", i)
 	}
 	if got := sanitizeComponents(long); len(got) != 16 {
 		t.Fatalf("键数应截断到 16，实际 %d", len(got))
 	}
-	in := map[string]string{"canvas": "abc", "": "no-key", "big": string(make([]byte, 200))}
+	in := map[string]string{
+		"canvas":   "a1b2c3d4e5f6",
+		"audio":    "0",        // 低熵占位：拒收
+		"webgl":    "error",    // 占位字典：拒收
+		"fonts":    "abc",      // trim 后 <6 字符：拒收
+		"blockedK": "BLOCKED ", // 占位（大小写/空白不敏感）：拒收
+		"":         "no-key",
+		"big":      string(make([]byte, 200)),
+	}
 	got := sanitizeComponents(in)
 	if _, ok := got[""]; ok {
 		t.Fatal("空键应被丢弃")
@@ -136,7 +145,12 @@ func TestSanitizeComponents(t *testing.T) {
 	if _, ok := got["big"]; ok {
 		t.Fatal("超长值应被丢弃")
 	}
-	if got["canvas"] != "abc" {
+	if got["canvas"] != "a1b2c3d4e5f6" {
 		t.Fatal("合法键值应保留")
+	}
+	for _, k := range []string{"audio", "webgl", "fonts", "blockedK"} {
+		if _, ok := got[k]; ok {
+			t.Fatalf("低熵/占位值 %s 应被拒收", k)
+		}
 	}
 }

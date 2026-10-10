@@ -103,8 +103,18 @@ func sanitizeTZ(s string) string {
 	return s
 }
 
+// lowEntropyValues 明显无区分度的分量值：伪造常量、报错占位、被浏览器策略
+// 拦截后的占位串。收进 components 基线只会把"所有拒绝采集的客户端"聚成一团
+// （污染基线 + 误成簇），一律丢弃——渗透整改 P0-5。
+var lowEntropyValues = map[string]bool{
+	"0": true, "null": true, "undefined": true, "none": true, "error": true,
+	"n/a": true, "na": true, "unknown": true, "not available": true,
+	"disabled": true, "blocked": true, "failed": true, "false": true,
+}
+
 // sanitizeComponents 清洗上报的分量明细：键值长度上限 + 键数上限，
-// 防止伪造超大/超多的 components 撑爆存储（键名 32 字节、值 128 字节、最多 16 项）。
+// 防止伪造超大/超多的 components 撑爆存储（键名 32 字节、值 128 字节、最多 16 项）；
+// 低熵值（trim 后 <6 字符或命中占位字典）拒收——伪造常量分量无法参与成簇/互证。
 func sanitizeComponents(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil
@@ -115,6 +125,10 @@ func sanitizeComponents(in map[string]string) map[string]string {
 			break
 		}
 		if k == "" || len(k) > 32 || len(v) > 128 {
+			continue
+		}
+		t := strings.ToLower(strings.TrimSpace(v))
+		if len(t) < 6 || lowEntropyValues[t] {
 			continue
 		}
 		out[k] = v
@@ -270,6 +284,23 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 		JA4:          JA4FromContext(ctx), // P3-2：TLS 模式下由连接上下文注入（纯 HTTP 为空）
 		Behavior:     sanitizeBehavior(string(p.Behavior)),
 		ClockSkewPPM: p.ClockSkewPPM,
+	}
+	// webrtc-mismatch 标记（渗透整改 P0-6）：WebRTC 泄露的 IP 均与连接 IP 不一致
+	// = 疑似代理/VPN 藏匿真实出口。仅 0 分观察记录——双栈用户的 v4/v6 错位会产生
+	// 噪声，且走代理本身合规，不作为证据参与 iprisk 决策，先看面板假阳性率。
+	// behaviorOnly 信标必带 WebRTC == nil，走到这里的全是全量上报。
+	if len(p.WebRTC) > 0 && s.Guard != nil {
+		matched := false
+		for _, wip := range p.WebRTC {
+			if wip == ip {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			s.Guard.Event(ctx, ip, "webrtc-mismatch",
+				sprintf("WebRTC 泄露 %d 个 IP 均与连接 IP 不一致", len(p.WebRTC)), 0, false)
+		}
 	}
 	out, _ := s.Guard.ReportFingerprint(ctx, ip, r.UserAgent(), p.Fingerprint, meta)
 	// P6-3b GNN sidecar 异步打分（fire-and-forget，不阻塞上报路径）
