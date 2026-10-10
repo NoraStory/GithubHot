@@ -193,21 +193,25 @@ func (s *Server) fpReportAPI(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r.Context())
 	defer cancel()
 	ip := clientIPFromRequest(r)
-	// P4-3 ALTCHA PoW：强制开启（ALTCHA_SECRET 在位且 ALTCHA_DIFFICULTY>0）时，
-	// 无有效解的裸上报 401 + 弱证据计分；未启用时行为与 PoW 之前完全一致。
-	if !s.checkAltchaForReport(w, r, ip, p.Fingerprint, p.Altcha) {
-		return
-	}
-
-	// ---- 第三层：服务端环境核验（不依赖客户端自觉上报）----
-	// P4-5 行为周期补充上报（payload 仅 {fp, behavior, clock_skew_ppm}）不参与核验：
-	// 它不带任何指纹分量/flags/coherent，若走下方"旧客户端补记"，每次页面隐藏与
-	// 每 5 分钟的行为上报都会被误记 ua-platform-mismatch +30（实测全部误报来源于此）。
-	// 环境核验已在该指纹的全量上报时完成，这里只收档行为/时钟信号。
+	// P4-5 行为周期信标判定（提前）：仅 {fp, behavior, clock_skew_ppm} 的轻量补充上报
+	// （每 5 分钟 + 页面隐藏各一次）。信标不携带任何指纹分量，无法用于建档投毒
+	// （components 基线另有信任分级保护），故**豁免 PoW**——周期信标若要求求解，
+	// 等于对真实用户持续征税（渗透修复回归：强制 PoW 后每 5 分钟误记 altcha-missing +10）。
 	behaviorOnly := p.Behavior != nil && p.Canvas == "" && p.WebGL == "" && p.Audio == "" &&
 		p.Fonts == "" && p.Renderer == "" && p.Screen == "" && p.CanvasPHash == "" &&
 		p.MinHashSig == "" && p.WebRTC == nil &&
 		len(p.Components) == 0 && len(p.Sets) == 0 && p.Flags == nil
+	// P4-3 ALTCHA PoW：仅对**全量上报**强制（建档/更新指纹档案需要证明成本）；
+	// 行为信标豁免；未启用时行为与 PoW 之前完全一致。
+	if !behaviorOnly && !s.checkAltchaForReport(w, r, ip, p.Fingerprint, p.Altcha) {
+		return
+	}
+
+	// ---- 第三层：服务端环境核验（不依赖客户端自觉上报）----
+	// 行为信标不参与下方环境核验：它不带任何指纹分量/flags/coherent，若走
+	// "旧客户端补记"，每次页面隐藏与每 5 分钟的行为上报都会被误记
+	// ua-platform-mismatch +30（实测全部误报来源于此）。
+	// 环境核验已在该指纹的全量上报时完成，这里只收档行为/时钟信号。
 	flags := p.Flags
 	hasFlag := func(k string) bool {
 		for _, f := range flags {
