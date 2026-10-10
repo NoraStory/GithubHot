@@ -155,6 +155,9 @@ type ProjectRow struct {
 	Hotness       float64  `json:"hotness"`
 	Badges        []string `json:"badges"`
 	StoryID       string   `json:"storyId"`
+	// AI 双信号分类判定（算法改进 B 批）：aiScore ≥ 0.5 即 AI 项目。
+	AI      bool    `json:"ai"`
+	AIScore float64 `json:"aiScore"`
 }
 
 // StoryRow AI 资讯榜单行。

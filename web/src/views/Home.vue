@@ -314,7 +314,10 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
               <img class="col-avatar" :src="repoAvatar(p.fullName)" :alt="p.fullName" @error="e => e.target.src = repoCover(p.fullName)">
               <span class="rank-num" :class="{ top: i < 3 }">{{ i + 1 }}</span>
               <div class="col-item-body">
-                <div class="col-item-title">{{ p.fullName }}</div>
+                <div class="col-item-title">
+                  {{ p.fullName }}
+                  <span v-if="p.ai" class="ai-chip" title="AI 项目（topics/描述双信号判定）">AI</span>
+                </div>
                 <div class="col-item-meta">
                   <span class="hot">+{{ p.starsGained }} ★</span>
                   <span class="desc">热度 {{ p.hotness.toFixed(1) }}</span>
@@ -492,4 +495,5 @@ onBeforeUnmount(() => { clearInterval(typeTimer); clearInterval(deleteTimer); cl
 .rank-item:nth-child(2) .rank-num.top { background: #ff7242; }
 .rank-item:nth-child(3) .rank-num.top { background: #fbbc4c; }
 .lang-chip { background: var(--anzhiyu-background); border-radius: 6px; padding: 0 7px; font-size: .72rem; }
+.ai-chip { display: inline-block; margin-left: 5px; padding: 0 6px; border-radius: 6px; font-size: .68rem; font-weight: 700; color: #fff; background: linear-gradient(135deg, #8b5cf6, #6366f1); vertical-align: 1px; line-height: 1.5; }
 </style>

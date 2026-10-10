@@ -10,6 +10,7 @@ const loading = ref(true)
 const q = ref('')
 const lang = ref('')
 const tag = ref('')
+const aiOnly = ref(false)
 const sort = ref('hot')
 const page = ref(1)
 const pageSize = ref(20)
@@ -31,6 +32,7 @@ const filtered = computed(() => {
   if (props.board === 'github') {
     let list = view.value.github
     if (lang.value) list = list.filter((p) => p.language === lang.value)
+    if (aiOnly.value) list = list.filter((p) => p.ai)
     if (kw) list = list.filter((p) => (p.fullName + ' ' + (p.descriptionZh || '') + ' ' + (p.description || '')).toLowerCase().includes(kw))
     return [...list].sort(sortGithub)
   }
@@ -121,8 +123,9 @@ onMounted(async () => {
         </div>
         <!-- 筛选 chips -->
         <div class="chips-row">
-          <span class="chip" :class="{ on: lang === '' && tag === '' }" @click="lang = ''; tag = ''; resetPage()">全部</span>
+          <span class="chip" :class="{ on: lang === '' && tag === '' && !aiOnly }" @click="lang = ''; tag = ''; aiOnly = false; resetPage()">全部</span>
           <template v-if="board === 'github'">
+            <span class="chip" :class="{ on: aiOnly }" @click="aiOnly = !aiOnly; resetPage()">🤖 AI 项目</span>
             <span v-for="l in langs" :key="l" class="chip" :class="{ on: lang === l }" @click="lang = lang === l ? '' : l; resetPage()">{{ l }}</span>
           </template>
           <template v-else>
@@ -146,7 +149,7 @@ onMounted(async () => {
               <div class="row-top">
                 <span class="row-rank">{{ (page - 1) * pageSize + i + 1 }}</span>
                 <router-link v-if="board === 'news' && p.storyId" class="row-title" :to="`/story/${p.storyId}`">{{ p.titleZh }}</router-link>
-                <a v-else class="row-title" :href="p.url" target="_blank" rel="noopener" :title="p.fullName || p.titleZh">{{ board === 'github' ? p.fullName : p.titleZh }}</a>
+                <a v-else class="row-title" :href="p.url" target="_blank" rel="noopener" :title="p.fullName || p.titleZh">{{ board === 'github' ? p.fullName : p.titleZh }}<span v-if="board === 'github' && p.ai" class="ai-chip" title="AI 项目（topics/描述双信号判定）">AI</span></a>
                 <span v-for="b in p.badges" :key="b" class="badge" :class="{ new: b === '新', rise: b === '上升', gh: b.startsWith('trending') || b === 'GitHub关联' }">{{ b }}</span>
               </div>
               <div class="row-meta">
@@ -218,6 +221,7 @@ onMounted(async () => {
 .row-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; font-size: .8rem; color: var(--anzhiyu-gray); }
 .row-meta .hot { color: var(--anzhiyu-hover); font-weight: 700; }
 .row-tag { background: var(--anzhiyu-theme-op); color: #a8766f; border-radius: 6px; padding: 0 7px; font-size: .72rem; }
+.ai-chip { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px; font-size: .68rem; font-weight: 700; color: #fff; background: linear-gradient(135deg, #8b5cf6, #6366f1); vertical-align: 1px; line-height: 1.5; }
 .lang-chip { background: var(--anzhiyu-background); border-radius: 6px; padding: 0 7px; font-size: .72rem; }
 .row-desc { margin-top: 6px; color: var(--anzhiyu-secondary); font-size: .88rem; line-height: 1.75; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .row-desc.secondary { color: var(--anzhiyu-gray); font-size: .8rem; -webkit-line-clamp: 1; margin-top: 3px; }

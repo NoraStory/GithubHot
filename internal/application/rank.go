@@ -70,10 +70,11 @@ type ProjectBoardRow struct {
 	Hotness float64
 }
 
-// ProjectBoard 计算项目榜单：全部项目按领域热度服务排序取前 limit。
+// ProjectBoard 计算项目榜单：全部项目按领域热度服务排序取前 limit（0 = 全量）。
 // window 决定增长口径（日报 24h、周报 7d、月报 30d）——快照在，随时可重放。
+// resonance 为 fullName → 窗口内引用该项目的独立资讯事件数（多源共振；nil = 无）。
 // 热度每次现算而非落库。
-func ProjectBoard(ctx context.Context, d Deps, window time.Duration, limit int) ([]ProjectBoardRow, error) {
+func ProjectBoard(ctx context.Context, d Deps, window time.Duration, limit int, resonance map[string]int) ([]ProjectBoardRow, error) {
 	all, err := d.Projects.All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("读取项目: %w", err)
@@ -90,7 +91,10 @@ func ProjectBoard(ctx context.Context, d Deps, window time.Duration, limit int) 
 		rows = append(rows, ProjectBoardRow{
 			Project: p,
 			Snaps:   snaps,
-			Hotness: github.Hotness(github.HotnessInput{Snapshots: snaps, Now: now, Window: window}),
+			Hotness: github.Hotness(github.HotnessInput{
+				Snapshots: snaps, Now: now, Window: window,
+				Resonance: resonance[p.FullName],
+			}),
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Hotness > rows[j].Hotness })

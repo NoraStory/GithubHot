@@ -16,24 +16,76 @@ const (
 	historyLookBack = 6 * time.Hour
 )
 
+// HotViewOptions BuildHotView 可选项（零值 = 现行行为）。
+type HotViewOptions struct {
+	// AIOnly 只保留 AI 判定为真的项目行（榜单规模不变；?ai=1 筛选用）。
+	AIOnly bool
+}
+
+// HotViewOption 函数式选项。
+type HotViewOption func(*HotViewOptions)
+
+// WithAIOnly AI-only 榜单。
+func WithAIOnly() HotViewOption { return func(o *HotViewOptions) { o.AIOnly = true } }
+
 // BuildHotView 构建双榜视图模型（API、网页、日报共用同一份事实来源）。
 // kind 决定窗口：日报 48h/24h，周报 7d，月报 30d。
 // 徽章规则："新"= 24h 内首次发现；"上升"= 比约 6h 前热度高 15%+。
-func BuildHotView(ctx context.Context, d Deps, kind digest.Kind) (HotView, error) {
+// 项目热度含多源共振：窗口内引用该项目的独立资讯事件数经 Resonance 加成
+// （见 github.HotnessInput）。
+func BuildHotView(ctx context.Context, d Deps, kind digest.Kind, opts ...HotViewOption) (HotView, error) {
+	var opt HotViewOptions
+	for _, o := range opts {
+		o(&opt)
+	}
 	spec := digestKindSpec(kind)
 	// 空切片而非 nil：JSON 输出 [] 而不是 null，APP 契约友好
 	view := HotView{Generated: d.Clock.Now(), GitHub: []ProjectRow{}, News: []StoryRow{}, Fusion: []FusionRow{}}
 	now := view.Generated
 
+	// ---------- 资讯事件（先载：共振映射与 AI 榜共用一份数据） ----------
+	stories, err := d.Stories.Active(ctx, now.Add(-spec.storyWindow))
+	if err != nil {
+		return view, err
+	}
+	sourceNames, err := loadSourceNames(ctx, d)
+	if err != nil {
+		return view, err
+	}
+	// 多源共振：fullName → 窗口内引用它的独立资讯事件数（算法改进 C 批）
+	resonance := map[string]int{}
+	var newsStories []*story.Story
+	for _, s := range stories {
+		if s.Kind != story.KindNews {
+			continue
+		}
+		newsStories = append(newsStories, s)
+		for _, fn := range s.Projects {
+			resonance[fn]++
+		}
+	}
+
 	// ---------- GitHub 项目榜 ----------
-	board, err := ProjectBoard(ctx, d, spec.projWindow, boardSize)
+	limit := boardSize
+	if opt.AIOnly {
+		limit = 0 // AI 筛选在热度排序之后做：先全量现算再过滤取前 20
+	}
+	board, err := ProjectBoard(ctx, d, spec.projWindow, limit, resonance)
 	if err != nil {
 		return view, fmt.Errorf("构建项目榜: %w", err)
 	}
-	for i, row := range board {
+	for _, row := range board {
+		aiScore := github.AIScore(row.Project.Topics, row.Project.Description)
+		isAI := aiScore >= github.AIThreshold
+		if opt.AIOnly && !isAI {
+			continue
+		}
+		if opt.AIOnly && len(view.GitHub) >= boardSize {
+			break
+		}
 		badges := projectBadges(row, now)
 		view.GitHub = append(view.GitHub, ProjectRow{
-			Rank:          i + 1,
+			Rank:          len(view.GitHub) + 1,
 			FullName:      row.Project.FullName,
 			URL:           row.Project.HTMLURL,
 			Description:   row.Project.Description,
@@ -45,24 +97,12 @@ func BuildHotView(ctx context.Context, d Deps, kind digest.Kind) (HotView, error
 			TrendingRank:  row.Project.TrendingRank,
 			Hotness:       row.Hotness,
 			Badges:        badges,
+			AI:            isAI,
+			AIScore:       aiScore,
 		})
 	}
 
 	// ---------- AI 资讯榜 ----------
-	stories, err := d.Stories.Active(ctx, now.Add(-spec.storyWindow))
-	if err != nil {
-		return view, err
-	}
-	sourceNames, err := loadSourceNames(ctx, d)
-	if err != nil {
-		return view, err
-	}
-	var newsStories []*story.Story
-	for _, s := range stories {
-		if s.Kind == story.KindNews {
-			newsStories = append(newsStories, s)
-		}
-	}
 	story.SortByHotness(newsStories)
 	if len(newsStories) > boardSize {
 		newsStories = newsStories[:boardSize]

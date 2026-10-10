@@ -86,6 +86,8 @@ func BuildStoryDetail(ctx context.Context, d Deps, id string) (*StoryDetailView,
 		}
 	}
 	now := d.Clock.Now()
+	// 详情页项目行热度保持纯快照口径（不接多源共振）：本事件自身就引用了这些
+	// 项目，共振恒 ≥1 无区分度；共振加权只作用于榜单排序（BuildHotView）。
 	snapAll, err := d.Projects.AllSnapshotsSince(ctx, now.Add(-7*24*time.Hour))
 	if err == nil {
 		for _, fn := range s.Projects {

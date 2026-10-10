@@ -119,8 +119,17 @@ func (s *Server) buildView(ctx context.Context) (application.HotView, error) {
 	return application.BuildHotView(ctx, s.Deps, digest.KindDaily)
 }
 
+// buildViewOpts 带选项的榜单视图（?ai=1 → AI-only 项目榜）。
+func (s *Server) buildViewOpts(r *http.Request) (application.HotView, error) {
+	opts := []application.HotViewOption{}
+	if r.URL.Query().Get("ai") == "1" {
+		opts = append(opts, application.WithAIOnly())
+	}
+	return application.BuildHotView(r.Context(), s.Deps, digest.KindDaily, opts...)
+}
+
 func (s *Server) hotGitHub(w http.ResponseWriter, r *http.Request) {
-	v, err := s.buildView(r.Context())
+	v, err := s.buildViewOpts(r)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -167,7 +176,7 @@ func (s *Server) hotFusion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hotAll(w http.ResponseWriter, r *http.Request) {
-	v, err := s.buildView(r.Context())
+	v, err := s.buildViewOpts(r)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
