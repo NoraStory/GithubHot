@@ -1,0 +1,28 @@
+name: 基础设施-强制升级门禁清除
+
+# 手动触发：清除 APP_FORCE_UPGRADE_URL 的真实定义（unit/override/.env 全位置，
+# 容引号格式，整行删除）→ 重启 → 验证 force 为空 + 旧种子签名实证。
+# 背景：该值非空时 appguard 对所有非握手请求 403 强制升级，是 APP 全挂的直接原因。
+on:
+  workflow_dispatch:
+
+jobs:
+  fix2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 清除强制升级门禁
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'bash -s' < scripts/remote-app-fix2.sh
