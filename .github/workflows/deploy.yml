@@ -173,12 +173,34 @@ jobs:
           PORT: ${{ secrets.DEPLOY_PORT || 22 }}
           DIR: ${{ vars.DEPLOY_DIR || '/opt/githubhot' }}
         run: |
-          curl -fsSL --max-time 300 -o geo.mmdb \
+          # 下载函数：主源失败自动切 jsdelivr 备源，共 3 轮重试（runner IP 常被
+          # GitHub release/raw 限速，实测 8MB 可慢至 16KB/s 甚至全超时）
+          fetch() { # $1=输出文件 $2=主源 $3=备源
+            for round in 1 2 3; do
+              for src in "$2" "$3"; do
+                [ -z "$src" ] && continue
+                if curl -fsSL --max-time 300 -o "$1" "$src"; then return 0; fi
+                echo "[warn] $1 第 $round 轮 $src 失败，切换下一个源"
+              done
+              sleep 10
+            done
+            return 1
+          }
+          if fetch geo.mmdb \
             https://github.com/sapics/ip-location-db/releases/download/latest/dbip-country.mmdb \
-            || echo '[warn] GeoIP 下载失败（非致命，核验自动降级）'
-          curl -fsSL --max-time 120 -o ja4-mapping.csv \
+            https://cdn.jsdelivr.net/gh/sapics/ip-location-db@latest/dbip-country.mmdb; then
+            # 完整性：MaxMind 库应 >1MB
+            [ "$(stat -c%s geo.mmdb)" -gt 1000000 ] || { echo "[warn] geo.mmdb 体积异常，丢弃"; rm -f geo.mmdb; }
+          else
+            echo '[warn] GeoIP 下载失败（非致命，核验自动降级）'
+          fi
+          if fetch ja4-mapping.csv \
             https://raw.githubusercontent.com/FoxIO-LLC/ja4/main/ja4plus-mapping.csv \
-            || echo '[warn] JA4 下载失败（非致命，核验自动降级）'
+            https://cdn.jsdelivr.net/gh/FoxIO-LLC/ja4@main/ja4plus-mapping.csv; then
+            grep -q "," ja4-mapping.csv || { echo "[warn] ja4-mapping.csv 内容异常，丢弃"; rm -f ja4-mapping.csv; }
+          else
+            echo '[warn] JA4 下载失败（非致命，核验自动降级）'
+          fi
 
           SCP_OPTS=(-i ~/.ssh/deploy -P "$PORT" -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6)
           TARGET="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
