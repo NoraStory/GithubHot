@@ -1,0 +1,40 @@
+name: 基础设施-清除指定 IP 计分污染
+
+# 手动触发：清理指定 IP 的违规事件与封禁（渗透自测残留 / 误伤修复）。
+# 参数化：target_ip 必填；kinds 可选（逗号分隔的事件类型，留空 = 该 IP 全部事件）。
+# 流程：先打印该 IP 现状（先诊断后动手）→ 删事件/封禁 → 重启服务（清内存
+# banCache/soft 账本）→ 健康自检。可重复执行。
+on:
+  workflow_dispatch:
+    inputs:
+      target_ip:
+        description: 要清除计分的 IP（必填）
+        required: true
+      kinds:
+        description: 事件类型过滤（逗号分隔，留空清除全部类型）
+        required: false
+        default: ''
+
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 诊断 + 清除计分 + 重启自检
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          TARGET_IP: ${{ inputs.target_ip }}
+          KINDS: ${{ inputs.kinds }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "GH_TARGET_IP='$TARGET_IP' GH_KINDS='$KINDS' bash -s" < scripts/remote-clear-scores.sh
