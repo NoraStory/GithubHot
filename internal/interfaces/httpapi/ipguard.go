@@ -68,7 +68,7 @@ const (
 	severeRatePerMin = 600
 	// 普通阈值
 	warnRatePerMin  = 150
-	adminRatePerMin = 30
+	adminRatePerMin = 120 // 渗透修复连带：控制台自身轮询 ~46 req/min，30 的阈值把合法管理员当探针计分（admin-probe +40 曾参与误封）
 	scannerMinReqs  = 50
 	scanner404Ratio = 0.4
 	// 指纹全生命周期关联 IP 数超此值记漂移观察（出差多年累积也难触及）
@@ -1170,7 +1170,7 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 		case tokenBadSig:
 			// 结构合法但签名失效：绝大多数是服务重启 / IP_GUARD_SECRET 轮换后的老令牌。
 			// 按低分观察处理并重签，避免"重启即封光老访客"（旧实现的灾难路径）。
-			g.event(ctx, ip, "id-token-stale", "身份令牌签名失效（疑密钥轮换）", 15, false)
+			g.event(ctx, ip, "id-token-stale", "身份令牌签名失效（疑密钥轮换）", 0, false) // 渗透修复：重启/轮换的宿命事件只观察不积分（配合 IP_GUARD_SECRET 固化）
 			g.issue(w, r, ip, fp)
 		default: // tokenExpired
 			g.issue(w, r, ip, fp) // 过期属正常，重新签发
