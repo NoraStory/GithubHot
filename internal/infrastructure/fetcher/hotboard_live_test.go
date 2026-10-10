@@ -52,3 +52,18 @@ func TestTencentHotFetch(t *testing.T) {
 		t.Logf("rank=%s title=%s url=%s", it.Meta["rank"], it.Title, it.URL)
 	}
 }
+
+// TestBilibiliHotFetch 实测 bilibili 全站排行解析（免登录 API + 视频页链接）。
+func TestBilibiliHotFetch(t *testing.T) {
+	requireLive(t)
+	items, err := fetchBilibiliHot(context.Background(), 15)
+	if err != nil {
+		t.Fatalf("fetchBilibiliHot: %v", err)
+	}
+	if len(items) == 0 {
+		t.Fatal("无条目")
+	}
+	for _, it := range items[:3] {
+		t.Logf("rank=%s heat=%s title=%s url=%s", it.Meta["rank"], it.Meta["heat"], it.Title, it.URL)
+	}
+}

@@ -59,10 +59,12 @@ func (HotBoard) Fetch(ctx context.Context, s source.Source, now time.Time) ([]ap
 		return fetchNeteaseHot(ctx, limit)
 	case "tencent":
 		return fetchTencentHot(ctx, limit)
+	case "bilibili":
+		return fetchBilibiliHot(ctx, limit)
 	case "rss":
 		return fetchHotRSS(ctx, s, limit)
 	default:
-		return nil, fmt.Errorf("信源 %s 缺少有效 board 配置（baidu/weibo/netease/tencent/rss）", s.ID)
+		return nil, fmt.Errorf("信源 %s 缺少有效 board 配置（baidu/weibo/netease/tencent/bilibili/rss）", s.ID)
 	}
 }
 
@@ -182,9 +184,9 @@ func fetchWeiboHot(ctx context.Context, limit int) ([]application.FetchedItem, e
 				Word string `json:"word"`
 			} `json:"hotgov"`
 			Realtime []struct {
-				Word  string `json:"word"`
+				Word  string       `json:"word"`
 				IsAd  flexibleBool `json:"is_ad"`
-				Label string `json:"label"`
+				Label string       `json:"label"`
 			} `json:"realtime"`
 		} `json:"data"`
 	}
@@ -332,7 +334,7 @@ func fetchTencentHot(ctx context.Context, limit int) ([]application.FetchedItem,
 		return nil, err
 	}
 	var root struct {
-		Ret     int `json:"ret"`
+		Ret    int `json:"ret"`
 		IDList []struct {
 			NewsList []struct {
 				ID          string `json:"id"`
@@ -382,6 +384,72 @@ func fetchTencentHot(ctx context.Context, limit int) ([]application.FetchedItem,
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("腾讯热点榜解析不到条目（结构可能已变更）")
+	}
+	return out, nil
+}
+
+// ---------- bilibili 热门榜 ----------
+
+// fetchBilibiliHot 抓取 bilibili 全站排行榜（ranking/v2，免登录，国内直连）。
+// 视频页 https://www.bilibili.com/video/{bvid} 浏览器直接可看，无登录墙——
+// 满足"点击后跳转不需要登录"的信源红线（知乎/抖音类一律不接）。
+func fetchBilibiliHot(ctx context.Context, limit int) ([]application.FetchedItem, error) {
+	const api = "https://api.bilibili.com/x/web-interface/ranking/v2"
+	body, _, err := safehttp.Fetch(ctx, api, hotHeaders("https://www.bilibili.com/"))
+	if err != nil {
+		return nil, err
+	}
+	items, err := parseBilibiliList(body)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+// parseBilibiliList 解析排行榜 JSON（纯函数便于单测）：code=0 + data.list[]，
+// 条目取 bvid/title/owner.name/stat.view。不用 b23.tv 短链（多一跳且常被风控），
+// 直接给完整视频页链接。
+func parseBilibiliList(body []byte) ([]application.FetchedItem, error) {
+	var root struct {
+		Code int `json:"code"`
+		Data struct {
+			List []struct {
+				BVID  string `json:"bvid"`
+				Title string `json:"title"`
+				Owner struct {
+					Name string `json:"name"`
+				} `json:"owner"`
+				Stat struct {
+					View int64 `json:"view"`
+				} `json:"stat"`
+			} `json:"list"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return nil, fmt.Errorf("解析 bilibili 排行响应: %w", err)
+	}
+	if root.Code != 0 || len(root.Data.List) == 0 {
+		return nil, fmt.Errorf("bilibili 排行接口返回 code=%d list=%d（结构可能已变更）", root.Code, len(root.Data.List))
+	}
+	out := make([]application.FetchedItem, 0, len(root.Data.List))
+	for _, v := range root.Data.List {
+		if v.BVID == "" || v.Title == "" {
+			continue
+		}
+		out = append(out, application.FetchedItem{
+			URL:   "https://www.bilibili.com/video/" + v.BVID,
+			Title: v.Title,
+			Meta: map[string]string{
+				"rank": strconv.Itoa(len(out) + 1),
+				"heat": strconv.FormatInt(v.Stat.View, 10),
+			},
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("bilibili 排行解析不到条目（结构可能已变更）")
 	}
 	return out, nil
 }

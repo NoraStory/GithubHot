@@ -114,8 +114,8 @@ func DefaultSources(now time.Time) []source.Source {
 			Name: name,
 			Kind: source.KindHotBoard,
 			Config: map[string]string{
-				"board":      board,
-				"max_items":  "30",
+				"board":     board,
+				"max_items": "30",
 			},
 			Tier:            source.TierMedia,
 			Tags:            []string{"国内", "热榜", "轻管道"},
@@ -135,11 +135,21 @@ func DefaultSources(now time.Time) []source.Source {
 		mkHot("hot-weibo-search", "微博热搜", "weibo", 15),
 		mkHot("hot-netease-rank", "网易新闻榜", "netease", 15),
 		mkHot("hot-tencent-rank", "腾讯新闻榜", "tencent", 15),
+		mkHot("hot-bilibili-rank", "bilibili 热门榜", "bilibili", 30),
 		mkHotRSS("hot-ithome", "IT之家", "https://www.ithome.com/rss/", 30),
 		mkHotRSS("hot-tmtpost", "钛媒体", "https://www.tmtpost.com/rss.xml", 30),
 		mkHotRSS("hot-ifanr", "爱范儿", "https://www.ifanr.com/feed", 30),
 		mkHotRSS("hot-geekpark", "极客公园", "https://www.geekpark.net/rss", 60),
 		mkHotRSS("hot-iplaysoft", "异次元软件", "https://feed.iplaysoft.com/", 60),
+		// 第三批（2026-10 第二轮扩充）：逐个 curl 实测——feed 200 且文章页免登录
+		// （点击跳转无登录墙，知乎/抖音类登录墙源一律不接；V2EX 国内被墙不接；
+		// 机器之心/36氪/虎嗅/cnBeta 的官方 feed 已停，不接失效源）。
+		mkHotRSS("hot-solidot", "Solidot", "https://www.solidot.org/index.rss", 60),
+		mkHotRSS("hot-oschina", "开源中国资讯", "https://www.oschina.net/news/rss", 60),
+		mkHotRSS("hot-appinn", "小众软件", "https://www.appinn.com/feed/", 120),
+		mkHotRSS("hot-leiphone", "雷峰网", "https://www.leiphone.com/feed", 90),
+		// 阮一峰博客服务器偏慢（文章页实测 200 但 >25s），放长抓取间隔防超时
+		mkHotRSS("hot-ruanyifeng", "阮一峰科技爱好者周刊", "https://www.ruanyifeng.com/blog/atom.xml", 240),
 	}
 
 	return append(append(rss, hn, ghSearch, ghTrend, scriptPush), domestic...)
