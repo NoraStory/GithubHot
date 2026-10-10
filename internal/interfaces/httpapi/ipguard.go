@@ -69,6 +69,21 @@ const (
 	// 普通阈值
 	warnRatePerMin  = 150
 	adminRatePerMin = 200 // 渗透整改 P0-3：控制台多端点并行轮询实测峰值 169 req/min（120 会把合法管理员计分），抬到 200 保留对真正枚举扫描的灵敏度
+
+	// 软封锁（渗透整改 P1-7）：有效分达封禁阈值 0.6（=60）→ /api/v1 全量 429。
+	// 与 decideBan 的观察日志同一判定线，给"封/不封"两态之间加一档软处置。
+	softBlockFactor = 0.6
+	softBlockTTL    = 40 * time.Minute // = iprisk.DecayWindowMin，之后账本条目必过期
+
+	// fp-flood 新身份频率（渗透整改 P1-8）：同 IP 10 分钟 ≥8 个不同指纹。
+	fpFloodWindow    = 10 * time.Minute
+	fpFloodThreshold = 8
+
+	// 反规避元组（渗透整改 P1-9）：recent 保留 24h / 冻结 7 天 / 全局上限。
+	tupleRecentTTL  = 24 * time.Hour
+	tupleFrozenTTL  = 7 * 24 * time.Hour
+	tupleFrozenCap  = 4096
+	tuplePerIPCap   = 8
 	scannerMinReqs  = 50
 	scanner404Ratio = 0.4
 	// 指纹全生命周期关联 IP 数超此值记漂移观察（出差多年累积也难触及）
@@ -405,16 +420,63 @@ type IPGuard struct {
 	// fpColl 指纹碰撞检测（同型号设备指纹重合 → 豁免连坐）
 	fpColl *fpCollision
 
+	// soft 软封锁账本（渗透整改 P1-7）：ip → 最近一次多证据决策的有效分与时间。
+	// 有效分 ≥ 0.6×封禁阈值时 /api/v1 请求全部 429（封与不封之间的软处置档）。
+	soft map[string]softEntry
+	// fpSeen 新身份频率账本（渗透整改 P1-8）：ip → fp → 最近上报时间（10 分钟窗）。
+	fpSeen map[string]map[string]time.Time
+	// recentTuples / frozenTuples 反规避（渗透整改 P1-9）：全量上报记录该 IP 稳定
+	// 三元组（canvas pHash/audio/webgl）；封禁时冻结近 24h 元组 7 天，后续上报
+	// 命中（≥2 项相等）→ ban-evasion 强类证据。
+	recentTuples   map[string][]tupleEntry
+	frozenTuples   []tupleEntry
+	lastTupleClean time.Time
+
 	// 清理时间戳（防止内存泄漏）
 	lastDedupeClean    time.Time
 	lastFpReportClean  time.Time
 	lastWhitelistClean time.Time
+	lastFpSeenClean    time.Time
 }
 
 type banCacheEntry struct {
 	banned  bool
 	expires time.Time
 	at      time.Time
+}
+
+// softEntry 软封锁账本条目：决策时刻的有效分与时间（衰减在判定时重算）。
+type softEntry struct {
+	eff float64
+	at  time.Time
+}
+
+// tupleEntry 反规避稳定三元组：canvas pHash / audio / webgl。ip 仅冻结侧使用
+// （命中时日志溯源）；at 为记录/冻结时间。
+type tupleEntry struct {
+	ip     string
+	canvas string
+	audio  string
+	webgl  string
+	at     time.Time
+}
+
+func (t tupleEntry) hasAny() bool { return t.canvas != "" || t.audio != "" || t.webgl != "" }
+
+// tupleMatch 两个三元组是否同源：≥2 个非空字段同时相等。webgl renderer 单项
+// 永不成立——同型号手机 renderer 相同但 canvas pHash 互异，防无辜误伤。
+func tupleMatch(a, b tupleEntry) bool {
+	matched := 0
+	if a.canvas != "" && a.canvas == b.canvas {
+		matched++
+	}
+	if a.audio != "" && a.audio == b.audio {
+		matched++
+	}
+	if a.webgl != "" && a.webgl == b.webgl {
+		matched++
+	}
+	return matched >= 2
 }
 
 // NewIPGuard 构建引擎；secret 为空时进程内随机生成（重启后旧令牌失效）。
@@ -461,10 +523,15 @@ func NewIPGuard(store GuardStore) *IPGuard {
 		fpReport:           map[string][]time.Time{},
 		whitelist:          map[string]time.Time{},
 		fpColl:             newFPCollision(),
+		soft:               map[string]softEntry{},
+		fpSeen:             map[string]map[string]time.Time{},
+		recentTuples:       map[string][]tupleEntry{},
 		mlEngine:           mlEngine,
 		lastDedupeClean:    now,
 		lastFpReportClean:  now,
 		lastWhitelistClean: now,
+		lastFpSeenClean:    now,
+		lastTupleClean:     now,
 	}
 
 	// 启动后台任务
@@ -574,6 +641,57 @@ func (g *IPGuard) periodicCleanup() {
 			if cleaned > 0 {
 				log.Printf("[ipguard] 清理老化封禁缓存: %d 条", cleaned)
 			}
+		}
+
+		// 6. 清理闲置软封锁账本（softBlockTTL 后必过期；账本小，每轮直接扫）
+		for ip, e := range g.soft {
+			if now.Sub(e.at) > softBlockTTL {
+				delete(g.soft, ip)
+			}
+		}
+
+		// 7. 清理闲置 fpSeen（fp-flood 窗口外无活动）
+		if len(g.fpSeen) > 5000 || now.Sub(g.lastFpSeenClean) > 10*time.Minute {
+			for ip, fps := range g.fpSeen {
+				idle := true
+				for _, t := range fps {
+					if now.Sub(t) <= fpFloodWindow {
+						idle = false
+						break
+					}
+				}
+				if idle {
+					delete(g.fpSeen, ip)
+				}
+			}
+			g.lastFpSeenClean = now
+		}
+
+		// 8. 清理反规避元组账本：recent 24h / frozen 7 天
+		if now.Sub(g.lastTupleClean) > time.Hour {
+			recentCut := now.Add(-tupleRecentTTL)
+			for ip, lst := range g.recentTuples {
+				keep := lst[:0]
+				for _, t := range lst {
+					if t.at.After(recentCut) {
+						keep = append(keep, t)
+					}
+				}
+				if len(keep) == 0 {
+					delete(g.recentTuples, ip)
+				} else {
+					g.recentTuples[ip] = keep
+				}
+			}
+			frozenCut := now.Add(-tupleFrozenTTL)
+			keep := g.frozenTuples[:0]
+			for _, t := range g.frozenTuples {
+				if t.at.After(frozenCut) {
+					keep = append(keep, t)
+				}
+			}
+			g.frozenTuples = keep
+			g.lastTupleClean = now
 		}
 
 		g.mu.Unlock()
@@ -816,6 +934,7 @@ func (g *IPGuard) ban(ctx context.Context, ip, reason string, severe bool) {
 		log.Printf("[ipguard] 封禁写入失败 %s: %v", ip, err)
 		return
 	}
+	g.freezeTuples(ip)
 	g.mu.Lock()
 	g.banCache[ip] = banCacheEntry{banned: true, expires: time.Now().Add(dur), at: time.Now()}
 	g.mu.Unlock()
@@ -844,13 +963,23 @@ func (g *IPGuard) event(ctx context.Context, ip, kind, detail string, score int,
 		log.Printf("[ipguard] 事件写入失败: %v", err)
 		return
 	}
-	g.decideBan(ctx, ip, kind)
+	if d := g.decideBan(ctx, ip, kind); d.Effective >= iprisk.Threshold*softBlockFactor {
+		// 软封锁记账（渗透整改 P1-7）：有效分达 0.6×阈值，Middleware 对该 IP 的
+		// /api/v1 请求 429。封禁（d.Ban）时账本无所谓——封禁检查在软封锁之前。
+		g.mu.Lock()
+		if g.soft == nil {
+			g.soft = map[string]softEntry{}
+		}
+		g.soft[ip] = softEntry{eff: d.Effective, at: time.Now()}
+		g.mu.Unlock()
+	}
 }
 
 // decideBan 取该 IP 近期事件做多证据决策（算法见 internal/domain/iprisk）：
 // 单信号（速率/环境核验/爬虫 UA/管理端探测）在结构上无法单独致封，
 // 必须"不同违规类型 ≥2 互证"或"单类型持续越线"才封。
-func (g *IPGuard) decideBan(ctx context.Context, ip, trigger string) {
+// 返回决策供调用方使用（软封锁记账取 Effective）。
+func (g *IPGuard) decideBan(ctx context.Context, ip, trigger string) iprisk.Decision {
 	events, err := g.store.ListIPEventsByIP(ctx, ip, 80)
 	if err != nil {
 		// 取不到明细时回退粗口径，并把门槛抬到 1.5×（宁可放过，不可误封）
@@ -858,7 +987,7 @@ func (g *IPGuard) decideBan(ctx context.Context, ip, trigger string) {
 			total >= int(iprisk.Threshold*1.5) {
 			g.ban(ctx, ip, "累计积分 "+strconv.Itoa(total)+"（回退口径）", false)
 		}
-		return
+		return iprisk.Decision{}
 	}
 	evs := make([]iprisk.Event, 0, len(events))
 	for _, e := range events {
@@ -867,13 +996,14 @@ func (g *IPGuard) decideBan(ctx context.Context, ip, trigger string) {
 	d := iprisk.Evaluate(evs, time.Now(), g.uaDiversity(ip))
 	if d.Ban {
 		g.ban(ctx, ip, d.Reason, false)
-		return
+		return d
 	}
 	// 接近阈值时打观察日志，便于评估算法（不改判定）
 	if d.Effective >= iprisk.Threshold*0.6 {
 		log.Printf("[ipguard] 观察 %s（触发 %s）：有效分 %.0f，%d 种类型，稀释 %.2f，UA 种类 %d",
 			ip, trigger, d.Effective, d.Kinds, d.Dilution, d.UADiversity)
 	}
+	return d
 }
 
 // uaDiversity 该 IP 窗口内不同 UA 数（共享出口识别，iprisk 稀释依据）。
@@ -929,6 +1059,18 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// ①.5 软封锁（渗透整改 P1-7）：多证据有效分 ≥ 0.6×封禁阈值 → /api/v1 全量
+		// 429（封与不封之间的软处置档）。只封 API 不封页面——共享出口上的无关用户
+		// 仍能打开站点；豁免整个管理端前缀：管理员的测试残留积分不能把管理端锁死
+		// （管理端自有 adminAuth + PoW + 会话网段绑定 + 爆破锁定护着）。
+		if !local && !g.isWhitelisted(ip) &&
+			strings.HasPrefix(r.URL.Path, "/api/v1") && !softBlockExempt(r) &&
+			g.softBlocked(ip, time.Now()) && !g.softTrusted(r, ip) {
+			w.Header().Set("Retry-After", "60")
+			writeJSON(w, 429, map[string]any{"error": "too many requests"})
+			return
+		}
+
 		// ② 握手通道专用限流（/api/v1/site/config 免签 + 触发指纹归档写库）。
 		// 走独立计数窗口：与全站速率互不干扰，也不因"通用阈值很高"被绕过。
 		if !local && r.URL.Path == handshakePath {
@@ -964,6 +1106,40 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 			g.mu.Unlock()
 		}
 	})
+}
+
+// softBlockExempt 软封锁豁免路径：自救/重登通道必须始终可达（与封禁检查同款
+// 清单），否则有效分残留会把管理员锁在门外。整个 /api/v1/admin/ 前缀豁免。
+func softBlockExempt(r *http.Request) bool {
+	p := r.URL.Path
+	return p == "/healthz" || p == "/api/v1/ip/check" ||
+		strings.HasPrefix(p, "/api/v1/admin/")
+}
+
+// softBlocked 软封锁判定：账本有效分按 iprisk 半衰期（10min 减半）衰减后仍 ≥ 0.6×阈值。
+func (g *IPGuard) softBlocked(ip string, now time.Time) bool {
+	g.mu.Lock()
+	e, ok := g.soft[ip]
+	g.mu.Unlock()
+	if !ok || now.Sub(e.at) > softBlockTTL {
+		return false
+	}
+	eff := e.eff * math.Pow(0.5, now.Sub(e.at).Minutes()/iprisk.HalfLifeMin)
+	return eff >= iprisk.Threshold*softBlockFactor
+}
+
+// softTrusted 请求方可信（APP 已验签 或 持有效 gh_id 会话）→ 软封锁豁免。
+// APP 通道的签名由 AppGuard 上游强制校验（伪造签名 403 到不了业务端点）。
+func (g *IPGuard) softTrusted(r *http.Request, ip string) bool {
+	if r.Header.Get(appSignHeader) != "" {
+		return true
+	}
+	if c, err := r.Cookie(idCookieName); err == nil && c.Value != "" {
+		if valid, _, _, _ := g.verifyIDToken(c.Value, ip); valid {
+			return true
+		}
+	}
+	return false
 }
 
 // handshakeAllow 握手通道滑动窗口（60s）判定：放行 true；超限 false 并计分。
@@ -1267,7 +1443,37 @@ func (g *IPGuard) ReportFingerprint(ctx context.Context, ip, ua, fp string, meta
 		return out, false
 	}
 	g.fpReport[ip] = append(keep, now)
+	// fp-flood（渗透整改 P1-8）：同 IP 10 分钟内上报大量不同指纹 = 新身份农场特征。
+	// 弱类（ClassRate，随出口稀释）：农场单 UA 不稀释、可与他类证据互证；
+	// 办公/校园共享出口多 UA 被稀释到 ≤16 分，不误伤。5 分钟事件去重兜底频次。
+	fps := g.fpSeen[ip]
+	if fps == nil {
+		fps = map[string]time.Time{}
+		g.fpSeen[ip] = fps
+	}
+	for f, t := range fps {
+		if now.Sub(t) > fpFloodWindow {
+			delete(fps, f)
+		}
+	}
+	fps[fp] = now
+	flood := len(fps) >= fpFloodThreshold
 	g.mu.Unlock()
+	if flood {
+		g.event(ctx, ip, "fp-flood", sprintf("10 分钟内上报 %d 个不同指纹", len(fps)), 30, false)
+	}
+
+	// ban-evasion 检测（渗透整改 P1-9）：稳定三元组命中 7 天内冻结的封禁设备签名
+	// → 强类证据（+70，不设 severe——同型号设备极端重合的误伤交给多证据互证兜底）。
+	// 行为信标不带分量，三元组全空不会命中。随后记录本 IP 元组供未来封禁时冻结。
+	tuple := stableTupleOf(meta)
+	if tuple.hasAny() {
+		if src := g.frozenMatchSource(tuple); src != "" {
+			g.event(ctx, ip, "ban-evasion",
+				sprintf("稳定分量命中封禁设备签名（冻结来源 %s）", sanitizeForLog(src)), 70, false)
+		}
+	}
+	g.recordRecentTuple(ip, tuple)
 
 	knownIPs, err := g.store.UpsertFingerprint(ctx, fp, ip, ua, meta)
 	if err != nil {
@@ -1765,6 +1971,61 @@ func (g *IPGuard) behaviorCheck(ctx context.Context, ip string, meta Fingerprint
 	}
 	g.event(ctx, ip, "env-flag:behavior_machine",
 		sprintf("行为机器特征 %s（鼠标 %d 事件 / 击键 %d 事件）", strings.Join(signals, ","), f.Mouse.Events, f.Keys.Events), score, false)
+}
+
+// stableTupleOf 提取反规避稳定三元组（渗透整改 P1-9）：canvas pHash、audio、
+// webgl（来自 components）。任意一项缺失即为空串；匹配要求 ≥2 项同时相等。
+func stableTupleOf(meta FingerprintMeta) tupleEntry {
+	t := tupleEntry{canvas: meta.CanvasPHash, at: time.Now()}
+	if meta.Components != nil {
+		t.audio = meta.Components["audio"]
+		t.webgl = meta.Components["webgl"]
+	}
+	return t
+}
+
+// frozenMatchSource 元组是否命中冻结签名：命中返回冻结来源 IP，否则空串。
+func (g *IPGuard) frozenMatchSource(t tupleEntry) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, f := range g.frozenTuples {
+		if tupleMatch(t, f) {
+			return f.ip
+		}
+	}
+	return ""
+}
+
+// recordRecentTuple 记录该 IP 最近上报的稳定元组（供封禁时冻结；每 IP 上限 8 条）。
+func (g *IPGuard) recordRecentTuple(ip string, t tupleEntry) {
+	if !t.hasAny() {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	t.ip = ip
+	lst := append(g.recentTuples[ip], t)
+	if len(lst) > tuplePerIPCap {
+		lst = lst[len(lst)-tuplePerIPCap:]
+	}
+	g.recentTuples[ip] = lst
+}
+
+// freezeTuples 封禁落库后冻结该 IP 近 24h 上报过的稳定元组（7 天有效，全局上限）。
+// 规避者换 IP 重报时，上报路径的 frozenMatchSource 会命中并记 ban-evasion。
+func (g *IPGuard) freezeTuples(ip string) {
+	now := time.Now()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	cut := now.Add(-tupleRecentTTL)
+	for _, t := range g.recentTuples[ip] {
+		if t.at.After(cut) {
+			g.frozenTuples = append(g.frozenTuples, t)
+		}
+	}
+	if len(g.frozenTuples) > tupleFrozenCap {
+		g.frozenTuples = g.frozenTuples[len(g.frozenTuples)-tupleFrozenCap:]
+	}
 }
 
 // checkClusterCollusion 簇连坐（P4-4/P6-2）：fp 所在簇内有被封禁成员 →

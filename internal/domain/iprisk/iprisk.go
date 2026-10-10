@@ -81,19 +81,21 @@ type KindResult struct {
 
 // Decision 决策结果。
 type Decision struct {
-	Ban          bool         `json:"ban"`
-	Effective    float64      `json:"effective"`
-	Kinds        int          `json:"kinds"`  // 不同违规类型数（互证依据）
-	Dilution     float64      `json:"dilution"`
-	UADiversity  int          `json:"ua_diversity"`
-	ByKind       []KindResult `json:"by_kind"`
-	Reason       string       `json:"reason"`
+	Ban         bool         `json:"ban"`
+	Effective   float64      `json:"effective"`
+	Kinds       int          `json:"kinds"` // 不同违规类型数（互证依据）
+	Dilution    float64      `json:"dilution"`
+	UADiversity int          `json:"ua_diversity"`
+	ByKind      []KindResult `json:"by_kind"`
+	Reason      string       `json:"reason"`
 }
 
 // ClassOf 违规类型 → 证据大类。未知类型归入最弱类（无法单独致封）。
 func ClassOf(kind string) string {
 	switch kind {
-	case "rate", "traffic-attack":
+	case "rate", "traffic-attack", "fp-flood":
+		// fp-flood（新身份农场）：归速率弱类，随共享出口 UA 稀释——办公/校园
+		// 多 UA 场景不误伤，农场单 UA 不稀释可与他类互证。
 		return ClassRate
 	case "scanner", "bot-ua", "admin-probe":
 		return ClassProtocol
@@ -102,7 +104,8 @@ func ClassOf(kind string) string {
 	case "id-forgery", "id-token-stale", "id-ip-drift", "device-mismatch", "admin-brute",
 		"admin-session-ip-mismatch":
 		return ClassIdentity
-	case "fp-linked", "fp-linked-watch", "fp-churn":
+	case "fp-linked", "fp-linked-watch", "fp-churn", "ban-evasion":
+		// ban-evasion（封禁设备签名命中）：强类设备劣迹。
 		return ClassDevice
 	}
 	if strings.HasPrefix(kind, "app-") {
