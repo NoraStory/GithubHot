@@ -113,8 +113,8 @@ func TestAdminSessionCrossSubnetRevoked(t *testing.T) {
 	if kind == "" {
 		t.Fatalf("应记 admin-session-ip-mismatch，实际 %v", store.kindsOf("198.51.100.7"))
 	}
-	if score != 80 {
-		t.Fatalf("跨网段证据应计 80 分（低于单类即时封禁线 100），实际 %d", score)
+	if score != 0 {
+		t.Fatalf("跨网段应为 0 分标记（防御靠会话注销，计分会惩罚轮换 IP 的管理员），实际 %d", score)
 	}
 	if ban := store.banOf("198.51.100.7"); ban != nil {
 		t.Fatalf("单次不符不应立即封禁（管理员换网段会自锁）：%s", ban.Reason)
@@ -184,9 +184,11 @@ func TestAdminSessionMismatchDedupWithinWindow(t *testing.T) {
 	}
 }
 
-// TestAdminSessionSustainedMismatchEscalates 持续跨网段使用（去重窗口外的同类事件）
-// 越强证据单类门槛（100）→ 升级封禁，判定能力保留。
-func TestAdminSessionSustainedMismatchEscalates(t *testing.T) {
+// TestAdminSessionSustainedMismatchNoBan 持续跨网段使用（去重窗口外的同类事件）
+// 也**不升级封禁**：防御 = 每次会话就地注销（攻击者拿到的会话全是作废的），
+// 计分升级只会把换宽带/切基站的管理员挡在门外（实测家宽轮换 IP 自伤案例）。
+// 真正的凭证攻击由 admin-brute（爆破锁定）与 PoW 登录把守，与 IP 无关。
+func TestAdminSessionSustainedMismatchNoBan(t *testing.T) {
 	t.Setenv("ADMIN_SESSION_IP_STRICT", "")
 	t.Setenv("IP_GUARD_ENABLED", "1")
 	store := newFakeStore()
@@ -195,16 +197,22 @@ func TestAdminSessionSustainedMismatchEscalates(t *testing.T) {
 	ctx := context.Background()
 
 	const attackerIP = "198.51.100.7"
-	// 6 分钟前已发生一次（去重窗口外，衰减后 80×0.5^0.6 ≈ 53），本次再加 80 → 越线
-	store.seedEvent(attackerIP, "admin-session-ip-mismatch", 80, 6)
-	if err := sessions.CreateAdminSession(ctx, "sid-c", "203.0.113.7", time.Hour); err != nil {
-		t.Fatal(err)
+	store.seedEvent(attackerIP, "admin-session-ip-mismatch", 0, 6)
+	for _, sid := range []string{"sid-c", "sid-d"} {
+		if err := sessions.CreateAdminSession(ctx, sid, "203.0.113.7", time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		if s.checkAdminSession(httptest.NewRecorder(), adminReq(sid, attackerIP)) {
+			t.Fatalf("跨网段应拒绝")
+		}
 	}
-	if s.checkAdminSession(httptest.NewRecorder(), adminReq("sid-c", attackerIP)) {
-		t.Fatalf("跨网段应拒绝")
+	if ban := store.banOf(attackerIP); ban != nil {
+		t.Fatalf("持续跨网段不应升级封禁（会话已逐次注销）：%s", ban.Reason)
 	}
-	if ban := store.banOf(attackerIP); ban == nil {
-		t.Fatalf("持续跨网段使用管理会话应升级封禁")
+	// 种子事件在 5 分钟去重窗口外 → 窗外 1 条 + 新 1 条 = 2 条（去重本身由
+	// TestAdminSessionMismatchDedupWithinWindow 覆盖）
+	if n := store.kindsOf(attackerIP)["admin-session-ip-mismatch"]; n != 2 {
+		t.Fatalf("窗外种子 + 新事件应为 2 条，实际 %d", n)
 	}
 }
 

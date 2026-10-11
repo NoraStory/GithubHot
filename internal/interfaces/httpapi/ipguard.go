@@ -1356,12 +1356,14 @@ func (g *IPGuard) verifyIdentity(ctx context.Context, w http.ResponseWriter, r *
 	// 令牌有效，继续后续逻辑
 	// 令牌绑定的 IP 与当前不符：Cookie 被搬到别的网络。
 	// 出差宽限：设备指纹与令牌绑定一致 = 同一台设备换了网络，只记录不计分；
-	// 无指纹或指纹不符（Cookie 被盗搬到别的设备/网络）才按高危计分。
+	// 无指纹或指纹不符按 30 分计（Cookie 被盗的防御主力是 v3 加密 + 指纹绑定，
+	// 这里只保留强类互证证据；60 分曾与 rate 30 叠加触发软封锁，误伤家宽
+	// 轮换 IP 的正常用户——管理端豁免软封锁但公开 API 会 429 十来分钟）。
 	if tokIP != ip {
 		if fp != "" && fp == tokFp {
 			g.event(ctx, ip, "id-ip-drift", sprintf("同一设备换网络 %s → %s（宽限）", tokIP, ip), 0, false)
 		} else {
-			g.event(ctx, ip, "id-ip-drift", sprintf("令牌绑定 %s，当前 %s", tokIP, ip), 60, false)
+			g.event(ctx, ip, "id-ip-drift", sprintf("令牌绑定 %s，当前 %s", tokIP, ip), 30, false)
 		}
 		g.issue(w, r, ip, fp)
 		return

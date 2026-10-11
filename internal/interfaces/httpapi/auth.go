@@ -57,10 +57,10 @@ func CheckAdminAuthConfig(tlsEnabled bool) error {
 		return nil
 	}
 	if tlsEnabled {
-		return fmt.Errorf("管理端鉴权未配置（ADMIN_PASSWORD_HASH / ADMIN_TOKEN 均为空）：TLS 公网部署下管理端完全开放，拒绝启动；"+
+		return fmt.Errorf("管理端鉴权未配置（ADMIN_PASSWORD_HASH / ADMIN_TOKEN 均为空）：TLS 公网部署下管理端完全开放，拒绝启动；" +
 			"请执行 `githubhot admin hash 你的密码` 生成哈希并写入 .env 的 ADMIN_PASSWORD_HASH")
 	}
-	log.Printf("[CRITICAL] 管理端完全开放（ADMIN_PASSWORD_HASH / ADMIN_TOKEN 均未配置）：所有 /api/v1/admin/* 端点无需鉴权；"+
+	log.Printf("[CRITICAL] 管理端完全开放（ADMIN_PASSWORD_HASH / ADMIN_TOKEN 均未配置）：所有 /api/v1/admin/* 端点无需鉴权；" +
 		"仅限本机开发使用，任何非回环部署必须配置其一")
 	return nil
 }
@@ -118,12 +118,12 @@ func (s *Server) checkAdminSession(w http.ResponseWriter, r *http.Request) bool 
 		ctx2, cancel2 := contextWithTimeout(r.Context())
 		_ = s.Admin.DeleteAdminSession(ctx2, cookie.Value)
 		if s.Guard != nil {
-			// 强证据（身份类）但**不**给到单类即时封禁线（100）：会话已就地注销，
-			// 安全效果已达成；而管理员换宽带 / 手机切基站会落到别的网段，
-			// 一上来就封会把他自己挡在登录页外（被封 IP 连 /admin/login 都是 404）。
-			// 80 分：重复跨网段（多次会话）或与其它证据互证才封。
+			// 0 分标记（轮换 IP 自伤修复）：防御效果由"会话就地注销"达成——被盗/
+			// 异地使用的会话当场作废，攻击者拿到的只是 401；对 IP 计强证据只会
+			// 惩罚自己换宽带/手机切基站的管理员（家宽重拨跨 /24 → 每次登录都
+			// 计分 → 多证据封禁把管理员自己挡在门外，实测发生过）。
 			s.Guard.Event(ctx2, curIP, "admin-session-ip-mismatch",
-				"管理会话跨网段使用（签发 "+sessIP+"，当前 "+curIP+"）", 80, false)
+				"管理会话跨网段使用（签发 "+sessIP+"，当前 "+curIP+"）", 0, false)
 		}
 		cancel2()
 		// 只记前 8 位：会话 ID 本身就是可用凭证，不该整条落到日志里
@@ -177,7 +177,7 @@ func clientIP(remoteAddr string) string {
 // loginRateLimiter（内存计数器，单机部署足够）
 
 type loginGuard struct {
-	mu      sync.Mutex
+	mu       sync.Mutex
 	attempts map[string]*ipAttempts
 }
 
@@ -230,7 +230,7 @@ func (g *loginGuard) succeed(ip string) {
 type loginPayload struct {
 	Password string          `json:"password"`
 	Remember bool            `json:"remember"`
-	Fp       string          `json:"fp"`    // PoW 挑战绑定的设备指纹（前端登录页 deviceFp()）
+	Fp       string          `json:"fp"`     // PoW 挑战绑定的设备指纹（前端登录页 deviceFp()）
 	Altcha   *altchaSolution `json:"altcha"` // P4-3 PoW 解（ALTCHA_DIFFICULTY>0 时强制）
 }
 
