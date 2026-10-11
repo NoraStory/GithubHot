@@ -724,11 +724,13 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
   </div>
 
   <!-- AI 热点快讯弹幕（参考站 .comment-barrage 同构，数据来自资讯榜；最多 3 条轮播，9 秒淡出；管理端不弹） -->
+  <!-- 底部基线 124px：抬过收起态音乐播放器（right 22 / bottom 22 / 高 ~80px，顶缘 ~102px），
+       否则首条快讯（300×80-150px，z-index 999）会压住播放器控制按钮（z-index 95） -->
   <div class="comment-barrage" v-if="barrageOn && !isAdminRoute">
     <div
       v-for="(b, i) in barrageItems" :key="b.id" :id="'barrage-item-' + b.id"
       class="comment-barrage-item"
-      :style="{ right: '70px', bottom: (24 + (barrageItems.length - 1 - i) * 172) + 'px' }"
+      :style="{ right: '70px', bottom: (124 + (barrageItems.length - 1 - i) * 172) + 'px' }"
     >
       <div class="barrageHead">
         <span class="barrageTitle">快讯</span>
