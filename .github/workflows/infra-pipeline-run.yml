@@ -1,0 +1,29 @@
+name: 基础设施-立即运行一轮流水线
+
+# 手动触发：等不及 HOT_CRON（默认每日 07:30）时手动跑一轮完整流水线——
+# 新增信源立即入库（SeedSources 导入缺失 ID）+ 全源抓取 + LLM 精选 + 日报更新。
+# 注意会消耗一次 LLM 管线预算（守卫在位）；与定时调度互不冲突（SQLite WAL）。
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 运行流水线
+        env:
+          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+        run: |
+          ssh -i ~/.ssh/deploy -p $PORT \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'bash -s' < scripts/remote-pipeline-run.sh
