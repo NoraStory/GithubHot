@@ -86,6 +86,20 @@ func CollectSources(ctx context.Context, d Deps, workers int) (CollectStats, err
 	return stats, nil
 }
 
+// blogFulltextTimeout 单篇博客正文抓取超时。
+const blogFulltextTimeout = 20 * time.Second
+
+// blogFulltext 抓单篇博客正文（经 Fulltext 端口，实现内含全进程请求节流）；
+// 端口未装配或抓取失败返回空串（条目保持无正文，详情页兜底展示摘要）。
+func blogFulltext(ctx context.Context, d Deps, pageURL string) string {
+	if d.Fulltext == nil {
+		return ""
+	}
+	ftctx, cancel := context.WithTimeout(ctx, blogFulltextTimeout)
+	defer cancel()
+	return d.Fulltext.FetchFulltextMD(ftctx, pageURL)
+}
+
 // collectOne 抓取单个信源并入库。
 func collectOne(ctx context.Context, d Deps, s source.Source, now time.Time) (inserted, dupes int, err error) {
 	fetcher, ferr := d.Fetchers.Fetcher(s.Kind)
@@ -129,11 +143,23 @@ func collectOne(ctx context.Context, d Deps, s source.Source, now time.Time) (in
 		if uerr != nil {
 			continue
 		}
-		// 博客正文回填自愈：Upsert 不覆盖已存在行，若旧行当年全文抓取失败
-		// （content 为空），本轮抓到了正文就补写回去
-		if !ok && s.Kind == source.KindBlog && strings.TrimSpace(r.Content) != "" {
-			if uerr := d.Items.UpdateContent(ctx, it.ID, r.Content); uerr != nil {
-				log.Printf("[collect] 博客正文回填失败 %s: %v", it.ID, uerr)
+		// 博客 lane：正文抓取发生在判重之后——只抓新入库条目与缺正文的旧条目
+		//（稳态零请求；每轮全量重抓会触发目标站 WAF，实测 CSDN 连续第二篇即 JS 挑战）。
+		// 抓到正文即回写：新行补全文，旧行自愈当年抓取失败留下的空正文。
+		if s.Kind == source.KindBlog {
+			need := ok
+			if !ok {
+				if old, oerr := d.Items.FindByIDs(ctx, []string{it.ID}); oerr == nil && len(old) == 1 &&
+					strings.TrimSpace(old[0].Content) == "" {
+					need = true
+				}
+			}
+			if need {
+				if md := blogFulltext(ctx, d, r.URL); md != "" {
+					if uerr := d.Items.UpdateContent(ctx, it.ID, md); uerr != nil {
+						log.Printf("[collect] 博客正文回填失败 %s: %v", it.ID, uerr)
+					}
+				}
 			}
 		}
 		if ok {

@@ -634,6 +634,26 @@ type memSettings struct {
 	m  map[string]string
 }
 
+// fakeFulltext 博客正文抓取 fake：按 URL 映射返回 Markdown 并记录调用。
+type fakeFulltext struct {
+	mu    sync.Mutex
+	calls []string
+	m     map[string]string
+}
+
+func (f *fakeFulltext) FetchFulltextMD(_ context.Context, pageURL string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, pageURL)
+	return f.m[pageURL]
+}
+
+func (f *fakeFulltext) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
 func newMemSettings() *memSettings { return &memSettings{m: map[string]string{}} }
 
 func (s *memSettings) Get(_ context.Context, key string) (string, error) {

@@ -21,6 +21,9 @@ const blogFetchUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
 // defaultContentSelector 正文容器候选选择器：CSDN 优先，其余为常见博客平台回退链。
 const defaultContentSelector = "#content_views, article, .article-content, .entry-content, main"
 
+// fulltextMDMaxChars 博客正文落库字符上限（超出按段落边界截断并留原文指引）。
+const fulltextMDMaxChars = 20000
+
 // dropTags 转换时整体丢弃的元素（脚本/嵌入/交互件，安全与降噪双重目的）。
 var dropTags = map[string]bool{
 	"script": true, "style": true, "iframe": true, "object": true, "embed": true,

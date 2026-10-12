@@ -5,6 +5,7 @@ package fetcher
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"regexp"
 	"strings"
 	"sync"
@@ -76,25 +77,6 @@ func (RSS) Fetch(ctx context.Context, s source.Source, _ time.Time) ([]applicati
 			}
 		}
 	}
-	// 全文抓取 + Markdown 化（博客站内阅读管道）：fulltext_md=1 时逐条抓原文页，
-	// 提取正文容器并转成纯 Markdown（安全模型见 markdown.go）。
-	if s.ConfigValue("fulltext_md", "") == "1" {
-		maxItems := s.ConfigInt("fulltext_items", 8)
-		maxChars := s.ConfigInt("fulltext_chars", 20000)
-		selector := s.ConfigValue("content_selector", defaultContentSelector)
-		limit := maxItems
-		if len(out) < limit {
-			limit = len(out)
-		}
-		for i := 0; i < limit; i++ {
-			ftctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-			text := fetchFulltextMD(ftctx, out[i].URL, selector, maxChars)
-			cancel()
-			if text != "" {
-				out[i].Content = text
-			}
-		}
-	}
 	return out, nil
 }
 
@@ -127,17 +109,57 @@ func fetchFulltext(ctx context.Context, pageURL string, maxChars int) string {
 	return text
 }
 
+// FulltextMD 博客正文抓取端口实现（application.BlogFulltextFetcher）：
+// 从 collect 层按需调用——只抓新入库/缺正文的条目，稳态零请求。
+type FulltextMD struct{}
+
+// FetchFulltextMD 抓取文章页并提取正文容器 → 纯 Markdown；失败返回空串。
+func (FulltextMD) FetchFulltextMD(ctx context.Context, pageURL string) string {
+	return fetchFulltextMD(ctx, pageURL, defaultContentSelector, fulltextMDMaxChars)
+}
+
 // fetchFulltextMD 抓取文章页并提取正文容器 → Markdown（博客站内阅读用）。
 // 抓取失败/容器缺失返回空串，由调用方保持条目无正文（详情页兜底展示摘要）。
 func fetchFulltextMD(ctx context.Context, pageURL, selector string, maxChars int) string {
+	blogFulltextThrottle(ctx)
 	body, status, err := safehttp.Fetch(ctx, pageURL, map[string]string{
-		"Accept":     "text/html",
-		"User-Agent": blogFetchUA,
+		"Accept":          "text/html",
+		"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+		"User-Agent":      blogFetchUA,
 	})
 	if err != nil || status != 200 {
 		return ""
 	}
 	return extractMarkdown(body, selector, maxChars)
+}
+
+// blogThrottleMinInterval 文章页请求最小间隔：CSDN 等站点的 WAF 对连续请求
+// 弹 JS 挑战（实测第二篇即 521），节流是正文抓取成功的前提。
+const blogThrottleMinInterval = 3 * time.Second
+
+var (
+	blogThrottleMu   sync.Mutex
+	blogThrottleLast time.Time
+)
+
+// blogFulltextThrottle 全进程文章页请求节流（跨信源共享，间隔加随机抖动）。
+func blogFulltextThrottle(ctx context.Context) {
+	blogThrottleMu.Lock()
+	wait := time.Duration(0)
+	if !blogThrottleLast.IsZero() {
+		next := blogThrottleLast.Add(blogThrottleMinInterval + time.Duration(rand.Int63n(int64(2*time.Second))))
+		if d := time.Until(next); d > 0 {
+			wait = d
+		}
+	}
+	blogThrottleLast = time.Now().Add(wait)
+	blogThrottleMu.Unlock()
+	if wait > 0 {
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+		}
+	}
 }
 
 // extractMarkdown 从页面 HTML 提取正文容器并转为纯 Markdown（无网络，测试友好）。

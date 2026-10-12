@@ -70,6 +70,14 @@ type GitHubGateway interface {
 	ListUserRepos(ctx context.Context, owner string, perPage int) ([]GitHubRepo, error)
 }
 
+// BlogFulltextFetcher 博客正文抓取端口（站内阅读管道专用）：抓文章页转 Markdown。
+// 与 SourceFetcher 分离的原因：全文抓取必须发生在判重之后（只抓新入库/缺正文的
+// 条目），抓取器本身不掌握入库状态——节流与重试策略集中在实现里。
+type BlogFulltextFetcher interface {
+	// FetchFulltextMD 抓文章页并转纯 Markdown；失败返回空串（条目保持无正文）。
+	FetchFulltextMD(ctx context.Context, pageURL string) string
+}
+
 // LLMGateway 大模型端口（OpenAI 兼容）。LLM 必选：没有可用网关时精选流程拒绝运行。
 type LLMGateway interface {
 	// ChatJSON 发起一次要求 JSON 输出的对话，返回原始 JSON 文本。
@@ -232,6 +240,7 @@ type Deps struct {
 	// GitHubOwner 我的仓库版块的 GitHub 用户名（GITHUB_OWNER，空 = 不启用刷新）。
 	GitHubOwner    string
 	Fetchers       FetcherRegistry
+	Fulltext       BlogFulltextFetcher
 	Notifier       Notifier
 	DigestRenderer DigestRenderer
 	Settings       SettingsRepo

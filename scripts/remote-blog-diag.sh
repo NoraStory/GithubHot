@@ -33,6 +33,12 @@ echo "===== 5. DNS 解析对比 ====="
 python3 -c "import socket; print('blog.csdn.net ->', sorted({a[4][0] for a in socket.getaddrinfo('blog.csdn.net', 443)}))" 2>/dev/null || getent hosts blog.csdn.net
 python3 -c "import socket; print('rss.csdn.net ->', sorted({a[4][0] for a in socket.getaddrinfo('rss.csdn.net', 443)}))" 2>/dev/null || getent hosts rss.csdn.net
 
+echo "===== 5.5 GitHub API 连通性（我的仓库快照依赖 api.github.com） ====="
+curl -s -o /dev/null -w "api.github.com 直连: HTTP %{http_code} time %{time_total}s\n" --max-time 15 \
+  "https://api.github.com/users/NoraStory/repos?per_page=1" || echo "api.github.com 直连失败（超时/重置）"
+curl -s -o /dev/null -w "gh-proxy.com 镜像: HTTP %{http_code} time %{time_total}s\n" --max-time 15 \
+  "https://gh-proxy.com/https://api.github.com/users/NoraStory/repos?per_page=1" || echo "gh-proxy.com 镜像失败"
+
 echo "===== 6. 服务日志中的 collect 记录（近 200 行筛 csdn/blog） ====="
 sudo journalctl -u githubhot -n 400 --no-pager 2>/dev/null | grep -iE "csdn|blog|collect" | tail -20 || true
 rm -f /tmp/diag_rss.xml /tmp/diag_art.html

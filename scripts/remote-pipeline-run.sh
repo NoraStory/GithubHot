@@ -13,10 +13,12 @@ if [ ! -x "$BIN" ]; then
   echo "错误：未找到 $BIN"; exit 1
 fi
 
-# 合并环境：systemd 单元的 Environment="K=V" 行 + EnvironmentFile + 目录 .env
+# 合并环境：systemd 单元的 Environment= 行（带引号/不带引号两种写法都要兼容——
+# 实测服务器单元是无引号写法，旧的 grep '^Environment="' 会整段漏掉导致 LLM 环境丢失）
+# + EnvironmentFile + 目录 .env
 TMPENV=$(mktemp)
 trap 'rm -f "$TMPENV"' EXIT
-systemctl cat githubhot 2>/dev/null | grep -E '^Environment="' | sed 's/^Environment="//; s/"$//' >> "$TMPENV" || true
+systemctl cat githubhot 2>/dev/null | grep -E '^Environment=' | sed 's/^Environment=//' >> "$TMPENV" || true
 EF=$(systemctl cat githubhot 2>/dev/null | grep -oE '^EnvironmentFile=-?\S+' | head -1 | sed 's/^EnvironmentFile=-*//')
 [ -n "$EF" ] && [ -f "$EF" ] && cat "$EF" >> "$TMPENV"
 [ -f "$DIR/.env" ] && cat "$DIR/.env" >> "$TMPENV"
@@ -27,7 +29,7 @@ else
 fi
 
 echo "=== 触发完整流水线（导入新信源 + 全源抓取 + LLM 精选 + 日报）==="
-sudo bash -c "set -a; . '$TMPENV'; cd '$DIR'; exec ./githubhot run" 2>&1 | tail -40
+sudo bash -c "set -a; . '$TMPENV'; cd '$DIR'; exec ./githubhot run" 2>&1 | tail -80
 
 echo "=== 服务自检 ==="
 curl -s -o /dev/null -w "healthz: %{http_code}\n" --max-time 5 http://127.0.0.1:8787/healthz

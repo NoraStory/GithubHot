@@ -106,17 +106,14 @@ func DefaultSources(now time.Time) []source.Source {
 		CreatedAt:       now,
 	}
 
-	// 作者博客（blog 抓取器 = RSS 复用 + fulltext_md 正文 Markdown 化）：
-	// 站内原生阅读（/blog/:id 详情页渲染 Markdown），不进 LLM 管道也不进国内榜。
+	// 作者博客（blog 抓取器 = RSS 复用；正文由 collect 层判重后按需抓取并转
+	// Markdown，全进程 3s+ 节流防 WAF）：站内原生阅读（/blog/:id 详情页渲染
+	// Markdown），不进 LLM 管道也不进国内榜。
 	blog := source.Source{
-		ID:   "csdn-blog",
-		Name: "作者博客（CSDN）",
-		Kind: source.KindBlog,
-		Config: map[string]string{
-			"url":            "https://rss.csdn.net/storyseekee/rss/map",
-			"fulltext_md":    "1",
-			"fulltext_items": "30",
-		},
+		ID:              "csdn-blog",
+		Name:            "作者博客（CSDN）",
+		Kind:            source.KindBlog,
+		Config:          map[string]string{"url": "https://rss.csdn.net/storyseekee/rss/map"},
 		Tier:            source.TierFirstParty,
 		Tags:            []string{"作者", "站内阅读"},
 		IntervalMinutes: 240,

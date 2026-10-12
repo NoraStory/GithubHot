@@ -60,45 +60,96 @@ func TestCollectBlogStageAssignment(t *testing.T) {
 	}
 }
 
-// 内容回填自愈：旧行当年全文抓取失败（content 空），下一轮抓到正文自动补齐。
+// 内容回填自愈：旧行当年全文抓取失败（content 空），下一轮经 Fulltext 端口补齐；
+// 已有正文的旧行不再触发抓取（稳态零请求，防 WAF）。
 func TestCollectBlogContentBackfill(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
-	items := newMemItems()
-	url := "https://blog.csdn.net/storyseekee/article/details/csdn-blog" // 与 blogFetcher 产出（base+信源ID）一致
-	key, err := shared.DedupeKey(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stored, err := item.New(key, "csdn-blog", "T1", url, "旧文章", now.Add(-48*time.Hour), now.Add(-24*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	stored.Selection.Stage = item.StageBlog
-	if _, err := items.Upsert(ctx, *stored); err != nil {
-		t.Fatal(err)
-	}
+	for _, tc := range []struct {
+		name       string
+		storedHas  string // 预置旧条目的正文（空 = 模拟当年抓取失败）
+		wantCalls  int
+		wantOutput string
+	}{
+		{name: "旧行缺正文→回填", storedHas: "", wantCalls: 1, wantOutput: "## 回填的正文"},
+		{name: "旧行已有正文→不重抓", storedHas: "## 原有正文", wantCalls: 0, wantOutput: "## 原有正文"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			items := newMemItems()
+			url := "https://blog.csdn.net/storyseekee/article/details/csdn-blog"
+			key, err := shared.DedupeKey(url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := item.New(key, "csdn-blog", "T1", url, "旧文章", now.Add(-48*time.Hour), now.Add(-24*time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored.Selection.Stage = item.StageBlog
+			stored.Content = tc.storedHas
+			if _, err := items.Upsert(ctx, *stored); err != nil {
+				t.Fatal(err)
+			}
 
+			ft := &fakeFulltext{m: map[string]string{url: "## 回填的正文"}}
+			d := Deps{
+				Items:    items,
+				Sources:  newMemSources(),
+				Fetchers: fakeRegistry{f: blogFetcher{content: ""}},
+				Fulltext: ft,
+				Clock:    fixedClock{t: now},
+			}
+			blogSrc := source.Source{ID: "csdn-blog", Kind: source.KindBlog, Config: map[string]string{"url": "x"}, IntervalMinutes: 60}
+			inserted, dupes, err := collectOne(ctx, d, blogSrc, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inserted != 0 || dupes != 1 {
+				t.Fatalf("预期判重（inserted=0, dupes=1），得到 inserted=%d dupes=%d", inserted, dupes)
+			}
+			if ft.callCount() != tc.wantCalls {
+				t.Fatalf("全文抓取调用次数 = %d，期望 %d", ft.callCount(), tc.wantCalls)
+			}
+			got, err := items.FindByIDs(ctx, []string{key})
+			if err != nil || len(got) != 1 {
+				t.Fatalf("取回条目失败: %v", err)
+			}
+			if got[0].Content != tc.wantOutput {
+				t.Errorf("正文 = %q，期望 %q", got[0].Content, tc.wantOutput)
+			}
+		})
+	}
+}
+
+// 新入库条目抓全文：Upsert 先落空正文行，Fulltext 端口成功后回写。
+func TestCollectBlogFulltextNew(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	items := newMemItems()
+	url := "https://blog.csdn.net/storyseekee/article/details/new-post"
+	key, _ := shared.DedupeKey(url)
+	ft := &fakeFulltext{m: map[string]string{url: "## 新文章正文"}}
 	d := Deps{
 		Items:    items,
 		Sources:  newMemSources(),
-		Fetchers: fakeRegistry{f: blogFetcher{content: "## 正文标题"}},
+		Fetchers: fakeRegistry{f: blogFetcher{content: ""}},
+		Fulltext: ft,
 		Clock:    fixedClock{t: now},
 	}
-	blogSrc := source.Source{ID: "csdn-blog", Kind: source.KindBlog, Config: map[string]string{"url": "x"}, IntervalMinutes: 60}
-	inserted, dupes, err := collectOne(ctx, d, blogSrc, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inserted != 0 || dupes != 1 {
-		t.Fatalf("预期判重（inserted=0, dupes=1），得到 inserted=%d dupes=%d", inserted, dupes)
+	blogSrc := source.Source{ID: "new-post", Kind: source.KindBlog, Config: map[string]string{"url": "x"}, IntervalMinutes: 60}
+	inserted, _, err := collectOne(ctx, d, blogSrc, now)
+	if err != nil || inserted != 1 {
+		t.Fatalf("新条目应插入 1 条: inserted=%d err=%v", inserted, err)
 	}
 	got, err := items.FindByIDs(ctx, []string{key})
 	if err != nil || len(got) != 1 {
-		t.Fatalf("取回条目失败: %v", err)
+		t.Fatal(err)
 	}
-	if got[0].Content != "## 正文标题" {
-		t.Errorf("正文未回填，得到 %q", got[0].Content)
+	if got[0].Content != "## 新文章正文" {
+		t.Errorf("新条目正文未写入: %q", got[0].Content)
+	}
+	if got[0].Selection.Stage != item.StageBlog {
+		t.Errorf("阶段应为 blog: %s", got[0].Selection.Stage)
 	}
 }
 
