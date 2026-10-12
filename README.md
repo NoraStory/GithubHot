@@ -24,9 +24,9 @@ GithubHot 是一个自己找热点、自己写日报的网站框架（Go 实现�
   按快照差分计算真实增长——300 star 的新项目比静态 30 万 star 的老项目更"热"；
 - **AI 线**：RSS / Hacker News / 通用 JSON 接口 / 网页列表等完整信源框架，
   LLM 预筛 → 同一标准独立两次评分 → 过门槛才入选，写中文标题和摘要；
-- **国内线**：`hot_board` 信源直连抓取国内热榜（百度 / 微博 / 网易新闻榜 / 腾讯新闻榜）
-  与榜单型 RSS（IT之家 / 钛媒体 / 爱范儿 / 极客公园 / 异次元软件等），
-  多源共振轻管道聚合热度——这条线不走 LLM 打分，LLM 只负责每天一篇中文综述
+- **国内线**：`hot_board` 信源直连抓取国内热榜（百度 / 微博 / 网易新闻榜 / 腾讯新闻榜 / bilibili 热门榜）
+  与榜单型 RSS（IT之家 / 钛媒体 / 爱范儿 / 极客公园 / 异次元软件 / Solidot / 开源中国 / 小众软件 / 雷峰网 / 阮一峰周刊等，
+  全部逐个实测文章页免登录），多源共振轻管道聚合热度——这条线不走 LLM 打分，LLM 只负责每天一篇中文综述
   （`/api/v1/hot/domestic`，可用设置项 `domestic_summary_enabled` 关闭）；
 - **融合**：LLM 判断哪些资讯在报道哪些项目，互相印证的事件获得热度加成——
   这是"双重热点"真正的交汇点；
@@ -37,7 +37,7 @@ GithubHot 是一个自己找热点、自己写日报的网站框架（Go 实现�
 
 ## 快速开始
 
-需要 Go 1.22+、Node 18+（构建 Vue3 前端）和任意 OpenAI 兼容的模型 API Key（DeepSeek / 智谱 / 通义 / OpenAI 均可）。
+需要 Go 1.26+、Node 18+（构建 Vue3 前端）和任意 OpenAI 兼容的模型 API Key（DeepSeek / 智谱 / 通义 / OpenAI 均可）。
 
 ```bash
 git clone https://github.com/NoraStory/GithubHot.git
@@ -82,17 +82,18 @@ go build -o githubhot ./cmd/githubhot
 | `GITHUB_TOKEN` | 建议 | 无 token 限 60 次/小时；配置后 5000 次/小时 |
 | `GITHUB_PROXY` | 国内服务器 | 直连 github.com 失败时的镜像前缀（如 `https://gh-proxy.com`），采集请求自动重试（5xx/429/网络错误，最多 3 次） |
 | `HTTPS_PROXY` | 国内服务器 | 系统代理；采集与 LLM 请求均遵循 |
-| `IP_GUARD_ENABLED` | | 三层 IP 防护总开关（默认开启，`0` 关闭） |
+| `IP_GUARD_ENABLED` | | 三层 IP 防护总开关（默认开启，`0` 关闭）。违规计分走多证据模型（见 `docs/ip-guard-scoring.md`）：有效分 ≥60 → `/api/v1` 软封锁 429（管理端/有效会话/APP 签名豁免）；≥100 且 ≥2 类 → 封禁；`githubhot risk replay --sweep` 可对历史数据回放调参 |
 | `TRUSTED_PROXY` | 反代部署 | 受信代理 CIDR（逗号分隔）。为空 = 不信任任何代理头（用 TCP 对端地址）；配了才采信 `X-Forwarded-For`/`X-Real-IP` 并取最右非受信地址。直连部署留空 |
 | `IP_GUARD_LOCAL` | | 回环/内网白名单（默认开启便于本机调试；公网部署务必设为 `0`） |
 | `IP_GUARD_SECRET` | | 防护身份令牌 HMAC 密钥；不设置则每次启动随机生成（重启后旧令牌失效） |
 | `HANDSHAKE_RATE_PER_MIN` | | 握手通道 `/api/v1/site/config` 单 IP 每分钟上限（默认 30）：该端点免签且会触发指纹归档写库，超限 429 并记分 |
-| `ADMIN_SESSION_IP_STRICT` | | `1` = 管理会话必须来源 IP 完全一致；默认 `0` 放宽到 IPv4 `/24`、IPv6 `/64`（会话被跨网段使用即注销 + 记 80 分） |
+| `ADMIN_SESSION_IP_STRICT` | | `1` = 管理会话必须来源 IP 完全一致；默认 `0` 放宽到 IPv4 `/24`、IPv6 `/64`（会话被跨网段使用即就地注销 + 0 分标记——防御靠会话作废，计分会惩罚轮换 IP 的管理员） |
 | `FP_SCORE_SHADOW` | | 新增检测 flag 灰度开关，默认 `1` = 只记录不计分（`fpb_*` / `botd_*` 先在管理端「检测命中统计」观察假阳性率，达标后置 `0` 才计分） |
 | `GEOIP_DB_PATH` | GeoIP | 国家库路径（默认 `data/geo.mmdb`，`githubhot geo download` 拉取 ip-location-db，CC BY 4.0，部署说明需保留致谢）。文件缺失时地理核验整体降级：时区↔IP 归属国跨洲矛盾（`fpb_tz_geo_mismatch`）不判定 |
 | `GEOIP_ASN_DB_PATH` | GeoIP | ASN 库路径（默认 `data/geo-asn.mmdb`）：机房出口识别（`ip_profiles.asn_type=hosting`）+ 移动端 UA 组合核验（`fpb_hosting_mobile_ua`）；两项灰度默认 0 分 |
 | `ENTROPY_CRON` | 熵值加权 | 分量熵权每日刷新调度（cron 五段式，默认 `30 4 * * *`）。熵权 = 各分量值出现频率的信息量之和；三层违规分 × `min(1, bits/40)` 作为封禁触发系数——大众配置只计分不硬封，罕见组合足额计分 |
 | `ALTCHA_SECRET` / `ALTCHA_DIFFICULTY` | ALTCHA PoW | `ALTCHA_SECRET` 配置后 `/api/v1/altcha/challenge` 可用；`ALTCHA_DIFFICULTY>0`（推荐 `12`，≈4096 次哈希毫秒级）时 fp/report **强制**携带有效 PoW——裸请求 401 + 弱证据计分；`0`（默认）= 仅挑战端点可用、行为不变。签名由服务端签发时绑定 fp，跨指纹重放无效 |
+| `ALTCHA_CHALLENGE_RPM` | ALTCHA PoW | 挑战签发限流（免认证端点）：单 IP 每分钟上限，默认 `60`，超限 429 + 0 分 `altcha-flood` 标记（面板可见不决策） |
 | `PLAY_INTEGRITY_PACKAGE` / `PLAY_INTEGRITY_SA_JSON` | Play Integrity | APP 包名 + GCP service account JSON 路径（scope playintegrity）。齐备 → `/api/v1/app/attest/verify` 走 Google 主路径；缺失 → 自动支持降级路径（APP 上报签名证书 SHA-256 + ThreatDetect，银标准） |
 | `APP_EXPECTED_CERT_SHA256` / `ATTEST_REQUIRED` | Play Integrity | 期望的 APK 签名证书指纹（逗号分隔，主/降级路径都校验）；`ATTEST_REQUIRED=1` 时无效设备进入只读降级模式（响应携带标志，APP 侧行为）。判定结果存 `ip_fingerprints.attestation` |
 | `TLS_CERT` / `TLS_KEY` | TLS/JA4 | 证书与私钥路径，同时配置 → TLS 模式：HSTS、`gh_id` Secure cookie、**JA4 TLS 指纹捕获**（握手期 ClientHello）。与 `ACME_DOMAIN` 二选一；两者都无 → 纯 HTTP（JA4 核验自动关闭） |
@@ -181,11 +182,12 @@ T1（官方一手）权重 1.0、T2（媒体个人）0.6；与 GitHub 项目互�
 **GitHub 项目**（按增长算、不按存量算）：
 
 ```
-H = 10 × log2(1 + 24h新增star) + trending排名加成 + 新爆加成
+H = (10 × log2(1 + 24h新增star) + trending排名加成 + 新爆加成) × 多源共振乘数
 ```
 
 热度来自快照差分，重复抓取不虚增；trending 1-3 名 +6、4-10 名 +3、11-25 名 +1；
-首次发现 24h 内且有增长 +5。
+首次发现 24h 内且有增长 +5；被窗口内资讯事件独立引用 k 次 → ×(1 + 0.08×min(k,5))，
+5 家封顶 ×1.4（与故事侧融合加成同数量级）。
 
 **国内热榜**（多源共振轻管道）：同一话题被百度/微博/网易/腾讯多个榜单与 RSS 源
 同时报道才抬升热度，报道源越多、越新鲜排名越高——不走 LLM 打分，纯信号聚合；
@@ -245,8 +247,8 @@ MCP 接入说明也可在前端工具库 `/tools` 页面就地展开查看。
 ## 换成你的行业
 
 - **换信源**：往 `sources` 表里加你的信源（RSS/JSON/网页列表/HN 关键词均可配置）；
-- **换国内榜**：`hot_board` 信源的 `board` 配置支持 `baidu` / `weibo` / `netease` / `tencent`
-  四个网页榜单及榜单型 RSS（配 RSS 地址即可），国内直连无需代理；
+- **换国内榜**：`hot_board` 信源的 `board` 配置支持 `baidu` / `weibo` / `netease` / `tencent` / `bilibili`
+  五个榜单及榜单型 RSS（配 RSS 地址即可），国内直连无需代理；
 - **换精选标准**：改 `internal/domain/prompts/prompts.go`，评分门槛在 `source.Tier.ScoreThreshold()`；
 - **换热度口径**：两个公式分别在 `internal/domain/story/hotness.go` 与 `internal/domain/github/project.go`，参数是命名常量。
 
