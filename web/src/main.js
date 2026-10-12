@@ -6,6 +6,9 @@ import Home from './views/Home.vue'
 import Board from './views/Board.vue'
 import Domestic from './views/Domestic.vue'
 import Fusion from './views/Fusion.vue'
+import Blogs from './views/Blogs.vue'
+import BlogDetail from './views/BlogDetail.vue'
+import MyRepos from './views/MyRepos.vue'
 import StoryDetail from './views/StoryDetail.vue'
 import SearchPage from './views/SearchPage.vue'
 import Digests from './views/Digests.vue'
@@ -44,6 +47,9 @@ const router = createRouter({
     { path: '/news', component: Board, props: { board: 'news' } },
     { path: '/domestic', component: Domestic },
     { path: '/fusion', component: Fusion },
+    { path: '/blogs', component: Blogs },
+    { path: '/blog/:id', component: BlogDetail },
+    { path: '/my-repos', component: MyRepos },
     { path: '/story/:id', component: StoryDetail },
     { path: '/search', component: SearchPage },
     { path: '/digests', component: Digests },

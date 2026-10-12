@@ -55,6 +55,7 @@ func build(cfg *config.Config) (application.Deps, *sqlite.DB, error) {
 		Usage:          usageRepo,
 		Budget:         budget,
 		GitHub:         githubapi.New(cfg.GitHubToken, cfg.GitHubProxy),
+		GitHubOwner:    cfg.GitHubOwner,
 		Fetchers:       fetcher.NewRegistry(),
 		DigestRenderer: render.NewMarkdown(),
 		Notifier:       notify.Webhook{URL: cfg.NotifyWebhookURL, Format: cfg.NotifyWebhookFormat},

@@ -30,6 +30,7 @@ func NewRegistry() *Registry {
 		source.KindWebList:    WebList{},
 		source.KindJSONAPI:    JSONAPI{},
 		source.KindHotBoard:   HotBoard{},
+		source.KindBlog:       RSS{}, // 博客复用 RSS 抓取器（fulltext_md 抓正文转 Markdown）
 	}}
 }
 

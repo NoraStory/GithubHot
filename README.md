@@ -30,6 +30,9 @@ GithubHot 是一个自己找热点、自己写日报的网站框架（Go 实现�
   （`/api/v1/hot/domestic`，可用设置项 `domestic_summary_enabled` 关闭）；
 - **融合**：LLM 判断哪些资讯在报道哪些项目，互相印证的事件获得热度加成——
   这是"双重热点"真正的交汇点；
+- **作者内容**：博客（CSDN 文章站内 Markdown 原生阅读，正文服务端转纯 Markdown、
+  与期刊页同一渲染审美，`/blogs`）与我的仓库（GitHub 公开仓库快照，原创在前，`/my-repos`）——
+  两条支线均不走精选管道，只做个人展示；
 - **日报**：每天自动产出 Markdown 日报与三榜网页，服务器常驻、GitHub Actions 定时、手动跑均可。
 
 灵感与示范信源来自 [KKKKhazix/AIHOT](https://github.com/KKKKhazix/AIHOT)（MIT），致谢。
@@ -81,6 +84,7 @@ go build -o githubhot ./cmd/githubhot
 | `ADMIN_TOKEN` | 管理端备选 | 备选鉴权方式：管理接口需带 `X-Admin-Token` 头 |
 | `GITHUB_TOKEN` | 建议 | 无 token 限 60 次/小时；配置后 5000 次/小时 |
 | `GITHUB_PROXY` | 国内服务器 | 直连 github.com 失败时的镜像前缀（如 `https://gh-proxy.com`），采集请求自动重试（5xx/429/网络错误，最多 3 次） |
+| `GITHUB_OWNER` | 可选 | 「我的仓库」版块归属的 GitHub 用户名（默认 `NoraStory`），每轮流水线刷新一次公开仓库快照；设为空关闭刷新 |
 | `HTTPS_PROXY` | 国内服务器 | 系统代理；采集与 LLM 请求均遵循 |
 | `IP_GUARD_ENABLED` | | 三层 IP 防护总开关（默认开启，`0` 关闭）。违规计分走多证据模型（见 `docs/ip-guard-scoring.md`）：速率三档线只统计价值请求（导航/API/视频流），静态资源与管理端轮询分流独立窗口；有效分 ≥60 → `/api/v1` 软封锁 429（管理端/有效会话/APP 签名豁免）；≥100 且 ≥2 类 → 封禁；`githubhot risk replay --sweep` 可对历史数据回放调参 |
 | `TRUSTED_PROXY` | 反代部署 | 受信代理 CIDR（逗号分隔）。为空 = 不信任任何代理头（用 TCP 对端地址）；配了才采信 `X-Forwarded-For`/`X-Real-IP` 并取最右非受信地址。直连部署留空 |
@@ -129,6 +133,7 @@ go build -o githubhot ./cmd/githubhot
 
 - 用户端：首页（全屏背景视频轮播 + 一言打字机 + 搜索 + 国内热点两栏区）、GitHub 榜、
   AI 榜、国内热榜（`/domestic`）、融合观察、事件详情（综述/成员/关联项目/热度走势）、
+  博客列表与阅读页（`/blogs`、`/blog/:id`，Markdown 站内阅读）、我的仓库（`/my-repos`）、
   搜索、期刊列表与详情、归档（全量分页加载）、音乐馆（`/music`，meting-js + APlayer，
   歌单经后端代理）、工具库（`/tools`，MCP 接入说明就地展开）、
   统计/相册/标签云/分类/友链/空调等 AnZhiYu 复刻页、关于；
@@ -146,8 +151,8 @@ go build -o githubhot ./cmd/githubhot
 ```
 cmd/githubhot            组合根：装配一切
 internal/domain          领域层（纯业务，零 IO 依赖）
-  ├─ source              信源上下文：十类信源（rss / json_api / web_list / hacker_news /
-  │                      github_search / github_trending / script / hot_board，
+  ├─ source              信源上下文：十一类信源（rss / json_api / web_list / hacker_news /
+  │                      github_search / github_trending / script / hot_board / blog，
   │                      预留 x_account / wechat_oa）、分级、抓取间隔
   ├─ item                原始资料上下文：判重、精选状态机（预筛→双评分→写作）
   ├─ github              项目热点上下文：项目实体、快照、增长热度领域服务
@@ -211,6 +216,9 @@ REST API 即契约（`/api/v1/*`，JSON，CORS 白名单可配）：
 | `GET /api/v1/hot/domestic` | 国内热榜（15 条 + LLM 每日综述，`domestic_summary_enabled` 控制） |
 | `GET /api/v1/hot/fusion` | 融合观察 |
 | `GET /api/v1/hot` | 三榜合一 |
+| `GET /api/v1/blogs` | 博客文章列表（站内阅读版块） |
+| `GET /api/v1/blog/{id}` | 博客文章详情（Markdown 正文，前端渲染） |
+| `GET /api/v1/my/repos` | 我的仓库（GitHub 用户仓库快照） |
 | `GET /api/v1/digest/latest` | 最新日报（`?format=raw` 取 Markdown） |
 | `GET /api/v1/digest/{date}` | 指定日期日报 |
 | `GET /api/v1/sources` | 信源清单与适配器状态 |

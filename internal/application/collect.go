@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -116,6 +117,10 @@ func collectOne(ctx context.Context, d Deps, s source.Source, now time.Time) (in
 		it.Content = r.Content
 		it.Author = r.Author
 		it.Meta = r.Meta
+		// 博客条目走站内阅读专用阶段：不进 LLM 双评分，也不进国内榜
+		if s.Kind == source.KindBlog {
+			it.Selection.Stage = item.StageBlog
+		}
 		// 热榜条目（带 rank 元数据）走轻管道：标 hotboard 阶段，不进入 LLM 双评分。
 		if r.Meta != nil && r.Meta["rank"] != "" {
 			it.Selection.Stage = item.StageHotBoard
@@ -123,6 +128,13 @@ func collectOne(ctx context.Context, d Deps, s source.Source, now time.Time) (in
 		ok, uerr := d.Items.Upsert(ctx, *it)
 		if uerr != nil {
 			continue
+		}
+		// 博客正文回填自愈：Upsert 不覆盖已存在行，若旧行当年全文抓取失败
+		// （content 为空），本轮抓到了正文就补写回去
+		if !ok && s.Kind == source.KindBlog && strings.TrimSpace(r.Content) != "" {
+			if uerr := d.Items.UpdateContent(ctx, it.ID, r.Content); uerr != nil {
+				log.Printf("[collect] 博客正文回填失败 %s: %v", it.ID, uerr)
+			}
 		}
 		if ok {
 			inserted++

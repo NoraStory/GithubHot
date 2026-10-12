@@ -31,6 +31,7 @@ type Config struct {
 	MusicPlaylist       string  // 背景音乐歌单 JSON（前端播放器）
 	GitHubToken         string
 	GitHubProxy         string // GitHub 镜像前缀（国内服务器直连失败时用，如 https://gh-proxy.com）
+	GitHubOwner         string // 我的仓库版块归属用户（GITHUB_OWNER，空 = 版块不出数据）
 	CronSpec            string // serve 模式内置调度（cron 表达式，本地时区）
 	ProbeIntervalHours  int    // 探针轮询间隔小时数（信源与端点健康探测，默认 6）
 	AppSignSeed         string   // APP 请求签名种子（APP_SIGN_SEED）；serve 模式强制非默认
@@ -142,6 +143,7 @@ func Load() (*Config, error) {
 		MusicPlaylist:       getEnv("MUSIC_PLAYLIST", ""),
 		GitHubToken:         getEnv("GITHUB_TOKEN", ""),
 		GitHubProxy:         getEnv("GITHUB_PROXY", ""),
+		GitHubOwner:         getEnv("GITHUB_OWNER", "NoraStory"),
 		CronSpec:            getEnv("HOT_CRON", "30 7 * * *"),
 		ProbeIntervalHours:  getEnvInt("PROBE_INTERVAL_HOURS", 6),
 		AppSignSeed:         AppSignSeedFromEnv(),

@@ -2,8 +2,8 @@
 // 日报详情：嵌入 Markdown 查看器（marked，完整 GFM 表格/列表/引用/代码）+ 上下篇导航
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { marked } from 'marked'
 import { api } from '../lib/api'
+import { renderMarkdown } from '../lib/md'
 
 const route = useRoute()
 const props = defineProps({ latest: { type: Boolean, default: false } })
@@ -22,20 +22,7 @@ const nextDate = computed(() => {
   return i >= 0 && i < allDates.value.length - 1 ? allDates.value[i + 1] : null
 })
 
-// marked 配置：GFM 表格渲染。marked 不转义内嵌 HTML，XSS 防线在服务端 mdEscape（对外部抓取标题做 HTML 转义）
-marked.setOptions({ gfm: true, breaks: false })
-const renderer = {
-  // marked v18 的 renderer 接收 token；用 parser.parseInline 展开 cell.tokens，
-  // 否则对象会被插值成 [object Object]。
-  table(token) {
-    const head = `<thead>${token.header.map((cell) => `<th>${this.parser.parseInline(cell.tokens)}</th>`).join('')}</thead>`
-    const body = `<tbody>${token.rows.map((row) => `<tr>${row.map((cell) => `<td>${this.parser.parseInline(cell.tokens)}</td>`).join('')}</tr>`).join('')}</tbody>`
-    return `<div class="table-wrap"><table>${head}${body}</table></div>`
-  }
-}
-marked.use({ renderer })
-
-const rendered = computed(() => marked.parse(md.value))
+const rendered = computed(() => renderMarkdown(md.value))
 const wordCount = computed(() => md.value.replace(/\s/g, '').length)
 const readMinutes = computed(() => Math.max(1, Math.round(wordCount.value / 400)))
 

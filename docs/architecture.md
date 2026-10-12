@@ -17,7 +17,7 @@ graph LR
         UC[用例集 + 流水线]
     end
     subgraph infrastructure 基础设施层
-        AD[SQLite 仓储 / RSS·HN·网页列表·国内热榜抓取器 / GitHub 双轨 / LLM 网关 / safehttp / 渲染]
+        AD[SQLite 仓储 / RSS·HN·网页列表·国内热榜抓取器 / GitHub 双轨与用户仓库 / LLM 网关 / safehttp / 渲染]
     end
     UC --> domain
     AD -.实现端口.-> UC
@@ -58,6 +58,22 @@ KnowHow，改标准不改代码（与 AIHOT 的 `industry/prompts/` 同等地位
 `GET /api/v1/hot/domestic`。LLM 在这条线上只做一件事：每天一篇中文综述
 （`domestic_summary_enabled` 可关，按数据新鲜度自动重刷）。
 单个榜单源失效按指数退避自动降频，不影响其余源。
+
+## 2.6 作者内容版块（博客 + 我的仓库，不走精选管道）
+
+两条独立的个人内容支线，与聚合管道隔离：
+
+- **博客**（`blog` 信源，复用 RSS 抓取器 + `fulltext_md` 正文抓取）：CSDN RSS 定时采集，
+  文章页正文经 `fetcher/markdown.go` 的 HTML→Markdown 转换器存入 items
+  `blog` 阶段——转换器只产 Markdown 语法、永不透传 HTML 标签（script/style 丢弃、
+  文本 `<` 实体转义），因此落库内容可安全交给前端 marked 渲染。正文抓取失败时
+  下一轮自动回填（`UpdateContent` 自愈）。站内阅读页 `/blog/:id` 与期刊页共用
+  同一份 marked 配置与 `.md-viewer` 排版，审美同源；CSDN 原文只作辅助外链。
+- **我的仓库**（`GITHUB_OWNER`，默认站点作者）：每轮流水线拉取一次用户公开仓库
+  （`ListUserRepos`），以 JSON 快照写入 settings 表（键 `my_repos_v1`）——刻意不走
+  projects 表（作者仓库多为 0-1 星，进榜单域会拖脏快照差分），也不在请求路径上
+  依赖 GitHub API（页面只读快照，拉取失败沿用旧快照）。展示页 `/my-repos`
+  原创在前、fork 带徽章，按最近 push 排序。
 
 ## 3. 两个热度公式
 

@@ -106,6 +106,24 @@ func DefaultSources(now time.Time) []source.Source {
 		CreatedAt:       now,
 	}
 
+	// 作者博客（blog 抓取器 = RSS 复用 + fulltext_md 正文 Markdown 化）：
+	// 站内原生阅读（/blog/:id 详情页渲染 Markdown），不进 LLM 管道也不进国内榜。
+	blog := source.Source{
+		ID:   "csdn-blog",
+		Name: "作者博客（CSDN）",
+		Kind: source.KindBlog,
+		Config: map[string]string{
+			"url":            "https://rss.csdn.net/storyseekee/rss/map",
+			"fulltext_md":    "1",
+			"fulltext_items": "30",
+		},
+		Tier:            source.TierFirstParty,
+		Tags:            []string{"作者", "站内阅读"},
+		IntervalMinutes: 240,
+		Enabled:         true,
+		CreatedAt:       now,
+	}
+
 	// 国内热榜（hot_board 抓取器，国内直连无需代理）：百度/微博/网易/腾讯四源冗余，
 	// rank/heat 元数据随条目入库，供多源共振热度算法使用。
 	mkHot := func(id, name, board string, minutes int) source.Source {
@@ -152,7 +170,7 @@ func DefaultSources(now time.Time) []source.Source {
 		mkHotRSS("hot-ruanyifeng", "阮一峰科技爱好者周刊", "https://www.ruanyifeng.com/blog/atom.xml", 240),
 	}
 
-	return append(append(rss, hn, ghSearch, ghTrend, scriptPush), domestic...)
+	return append(append(rss, hn, ghSearch, ghTrend, scriptPush, blog), domestic...)
 }
 
 // SeedSources 首次运行时把默认信源导入仓储；已存在的 ID 不覆盖（用户改过就尊重用户）。

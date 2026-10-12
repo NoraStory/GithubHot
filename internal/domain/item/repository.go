@@ -27,4 +27,7 @@ type Repository interface {
 	PendingContentZh(ctx context.Context, limit int) ([]Item, error)
 	// SaveContentZh 写入正文/摘要的中文译文（本地存档，幂等可重复调用）。
 	SaveContentZh(ctx context.Context, id string, zh string) error
+	// UpdateContent 回写正文（仅覆盖非空新值）：博客等站内阅读条目
+	// 首次采集时全文抓取失败后，后续轮次自动补齐，站内阅读不长期缺内容。
+	UpdateContent(ctx context.Context, id string, content string) error
 }

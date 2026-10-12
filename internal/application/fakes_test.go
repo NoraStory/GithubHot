@@ -83,8 +83,22 @@ func (m *memItems) Upsert(_ context.Context, it item.Item) (bool, error) {
 	return true, nil
 }
 
-func (m *memItems) CountSince(_ context.Context, since time.Time) (int, error) {
+func (m *memItems) UpdateContent(_ context.Context, id string, content string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+	it, ok := m.m[id]
+	if !ok {
+		return nil
+	}
+	it.Content = content
+	m.m[id] = it
+	return nil
+}
+
+func (m *memItems) CountSince(_ context.Context, since time.Time) (int, error) {	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := 0
 	for _, it := range m.m {
@@ -603,6 +617,43 @@ func (fakeGitHub) FetchTrending(_ context.Context) ([]GitHubRepo, error) {
 		{FullName: "newbie/tiny-db", HTMLURL: "https://github.com/newbie/tiny-db", Description: "tiny vector db", Language: "Rust", Stars: 300, TrendingRank: 2},
 	}, nil
 }
+
+func (fakeGitHub) ListUserRepos(_ context.Context, owner string, perPage int) ([]GitHubRepo, error) {
+	if owner == "" {
+		return nil, fmt.Errorf("owner 为空")
+	}
+	return []GitHubRepo{
+		{FullName: owner + "/my-site", HTMLURL: "https://github.com/" + owner + "/my-site", Description: "个人网站", Language: "Go", Stars: 3, PushedAt: time.Now().Add(-24 * time.Hour)},
+		{FullName: owner + "/forked-lib", HTMLURL: "https://github.com/" + owner + "/forked-lib", Language: "Rust", IsFork: true, PushedAt: time.Now().Add(-2 * time.Hour)},
+	}, nil
+}
+
+// memSettings settings 表内存版（我的仓库快照测试用）。
+type memSettings struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+func newMemSettings() *memSettings { return &memSettings{m: map[string]string{}} }
+
+func (s *memSettings) Get(_ context.Context, key string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.m[key], nil
+}
+
+func (s *memSettings) Set(_ context.Context, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[key] = value
+	return nil
+}
+
+func (s *memSettings) DomesticSummary(_ context.Context, _ string) (string, time.Time, error) {
+	return "", time.Time{}, nil
+}
+
+func (s *memSettings) SaveDomesticSummary(_ context.Context, _, _ string) error { return nil }
 
 // fakeFetcher 固定产出三条资料：两条相关（聚簇应合并）、一条广告（预筛淘汰）。
 type fakeFetcher struct{ now time.Time }

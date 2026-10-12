@@ -70,6 +70,14 @@ onMounted(() => {
           </div>
         </div>
         <div class="footer-group">
+          <div class="footer-title">我的</div>
+          <div class="footer-links">
+            <a class="footer-item" href="/blogs">博客</a>
+            <a class="footer-item" href="/my-repos">我的仓库</a>
+            <a class="footer-item" href="/tools">工具库</a>
+          </div>
+        </div>
+        <div class="footer-group">
           <div class="footer-title">本站协议</div>
           <div class="footer-links">
             <a class="footer-item" title="隐私协议" href="/privacy">隐私协议</a>

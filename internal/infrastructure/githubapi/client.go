@@ -209,6 +209,62 @@ func (c *Client) fetchRepo(ctx context.Context, fullName string) (*application.G
 	return out, nil
 }
 
+// ListUserRepos 拉取某用户的公开仓库（最近 push 排序）——我的仓库版块数据源。
+func (c *Client) ListUserRepos(ctx context.Context, owner string, perPage int) ([]application.GitHubRepo, error) {
+	if strings.TrimSpace(owner) == "" {
+		return nil, fmt.Errorf("owner 为空")
+	}
+	if perPage <= 0 || perPage > 100 {
+		perPage = 100
+	}
+	url := fmt.Sprintf("https://api.github.com/users/%s/repos?sort=pushed&per_page=%d", urlQueryEscape(owner), perPage)
+	body, status, err := c.fetchGet(ctx, url, c.headers())
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("GitHub 用户仓库 API 返回 %d: %s", status, truncateBody(body))
+	}
+	return parseUserReposJSON(body)
+}
+
+// parseUserReposJSON 解析 /users/{owner}/repos 响应（纯函数，测试友好）。
+func parseUserReposJSON(body []byte) ([]application.GitHubRepo, error) {
+	var list []struct {
+		FullName    string   `json:"full_name"`
+		HTMLURL     string   `json:"html_url"`
+		Description *string  `json:"description"`
+		Language    *string  `json:"language"`
+		Topics      []string `json:"topics"`
+		Homepage    string   `json:"homepage"`
+		Stars       int      `json:"stargazers_count"`
+		Forks       int      `json:"forks_count"`
+		Fork        bool     `json:"fork"`
+		PushedAt    string   `json:"pushed_at"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, fmt.Errorf("解析用户仓库响应: %w", err)
+	}
+	out := make([]application.GitHubRepo, 0, len(list))
+	for _, it := range list {
+		repo := application.GitHubRepo{
+			FullName: it.FullName, HTMLURL: it.HTMLURL, Topics: it.Topics,
+			Homepage: it.Homepage, Stars: it.Stars, Forks: it.Forks, IsFork: it.Fork,
+		}
+		if it.Description != nil {
+			repo.Description = *it.Description
+		}
+		if it.Language != nil {
+			repo.Language = *it.Language
+		}
+		if t, perr := time.Parse(time.RFC3339, it.PushedAt); perr == nil {
+			repo.PushedAt = t
+		}
+		out = append(out, repo)
+	}
+	return out, nil
+}
+
 func truncateBody(b []byte) string {
 	s := string(b)
 	if len(s) > 200 {

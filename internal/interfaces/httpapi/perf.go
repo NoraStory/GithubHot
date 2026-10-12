@@ -62,7 +62,8 @@ func cacheTTLFor(path string) time.Duration {
 		return 120 * time.Second
 	case strings.HasPrefix(path, "/api/v1/search"):
 		return 60 * time.Second
-	case strings.HasPrefix(path, "/api/v1/site/config"), strings.HasPrefix(path, "/api/v1/music/"), strings.HasPrefix(path, "/api/v1/sources"):
+	case strings.HasPrefix(path, "/api/v1/site/config"), strings.HasPrefix(path, "/api/v1/music/"), strings.HasPrefix(path, "/api/v1/sources"),
+		strings.HasPrefix(path, "/api/v1/blogs"), strings.HasPrefix(path, "/api/v1/blog/"), strings.HasPrefix(path, "/api/v1/my/"):
 		return 300 * time.Second
 	case strings.HasPrefix(path, "/feed/"):
 		return 120 * time.Second

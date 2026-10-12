@@ -159,6 +159,18 @@ func (r *ItemRepo) SaveContentZh(ctx context.Context, id string, zh string) erro
 	return err
 }
 
+// UpdateContent 回写正文（仅覆盖非空新值）：博客条目全文抓取失败后的自愈通道。
+func (r *ItemRepo) UpdateContent(ctx context.Context, id string, content string) error {
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, "UPDATE items SET content = ? WHERE id = ?", content, id)
+	if err != nil {
+		return fmt.Errorf("回写条目正文 %s: %w", id, err)
+	}
+	return nil
+}
+
 const itemCols = "id, source_id, source_tier, url, title, summary, content, content_zh, author, published_at, fetched_at, state, accepted, reason, score_a, score_b, title_zh, summary_zh, reason_zh, tags, meta"
 
 func scanItems(rows *sql.Rows) ([]item.Item, error) {

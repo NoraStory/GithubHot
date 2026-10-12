@@ -476,6 +476,14 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
               </div>
             </div>
             <div class="back-menu-list-group">
+              <div class="back-menu-list-title">我的</div>
+              <div class="back-menu-list">
+                <a class="back-menu-item" href="/blogs"><span class="back-menu-item-text">博客</span></a>
+                <a class="back-menu-item" href="/my-repos"><span class="back-menu-item-text">我的仓库</span></a>
+                <a class="back-menu-item" href="/tools"><span class="back-menu-item-text">工具库</span></a>
+              </div>
+            </div>
+            <div class="back-menu-list-group">
               <div class="back-menu-list-title">站点</div>
               <div class="back-menu-list">
                 <a class="back-menu-item" href="/music"><span class="back-menu-item-text">音乐馆</span></a>
@@ -520,6 +528,8 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
         <div class="menus_item">
           <a class="site-page" href="javascript:void(0);"><span> 我的</span></a>
           <ul class="menus_item_child">
+            <li><router-link class="site-page child faa-parent animated-hover" to="/blogs"><i class="fa-solid fa-pen-nib faa-tada" style="font-size: 0.9em;"></i><span> 博客</span></router-link></li>
+            <li><router-link class="site-page child faa-parent animated-hover" to="/my-repos"><i class="fa-brands fa-github faa-tada" style="font-size: 0.9em;"></i><span> 我的仓库</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/tools"><i class="anzhiyufont anzhiyu-icon-tools faa-tada" style="font-size: 0.9em;"></i><span> 工具库</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/album"><i class="anzhiyufont anzhiyu-icon-images faa-tada" style="font-size: 0.9em;"></i><span> 相册集</span></router-link></li>
             <li><router-link class="site-page child faa-parent animated-hover" to="/music"><i class="anzhiyufont anzhiyu-icon-music faa-tada" style="font-size: 0.9em;"></i><span> 音乐馆</span></router-link></li>
@@ -809,6 +819,9 @@ router.afterEach(() => { menuOpen.value = false; searchMask.value = false; conso
         <router-link class="site-page child" to="/tags"><span> 标签</span></router-link>
         <router-link class="site-page child" to="/charts"><span> 统计</span></router-link>
         <router-link class="site-page child" to="/link"><span> 资源</span></router-link>
+        <div class="group-title">我的</div>
+        <router-link class="site-page child" to="/blogs"><span> 博客</span></router-link>
+        <router-link class="site-page child" to="/my-repos"><span> 我的仓库</span></router-link>
         <router-link class="site-page child" to="/music"><span> 音乐馆</span></router-link>
         <router-link class="site-page child" to="/about"><span> 关于</span></router-link>
         <router-link v-if="adminAuthed" class="site-page child" to="/admin/usage"><span> 管理端</span></router-link>

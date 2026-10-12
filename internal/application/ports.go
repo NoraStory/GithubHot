@@ -53,14 +53,21 @@ type GitHubRepo struct {
 	Forks        int
 	TrendingRank int
 	SearchRank   int
+	// 以下字段仅 ListUserRepos（我的仓库版块）填充，双轨发现不使用。
+	Homepage string
+	IsFork   bool
+	PushedAt time.Time
 }
 
-// GitHubGateway GitHub 数据端口：官方 Search API 与 trending 页双轨。
+// GitHubGateway GitHub 数据端口：官方 Search API 与 trending 页双轨，
+// 以及作者仓库列表（我的仓库版块）。
 type GitHubGateway interface {
 	// SearchNewRising 搜索近 N 天创建、star 超过阈值、按 star 排序的新项目。
 	SearchNewRising(ctx context.Context, sinceDays, minStars, perPage int) ([]GitHubRepo, error)
 	// FetchTrending 抓取 trending 每日榜。失败返回错误，由调用方决定降级。
 	FetchTrending(ctx context.Context) ([]GitHubRepo, error)
+	// ListUserRepos 拉取某用户的公开仓库（最近 push 排序）。
+	ListUserRepos(ctx context.Context, owner string, perPage int) ([]GitHubRepo, error)
 }
 
 // LLMGateway 大模型端口（OpenAI 兼容）。LLM 必选：没有可用网关时精选流程拒绝运行。
@@ -213,15 +220,17 @@ type SettingsRepo interface {
 
 // Deps 应用层依赖的最小端口集合（全部在领域层或上方声明，基础设施层实现）。
 type Deps struct {
-	Sources        source.Repository
-	Items          item.Repository
-	Projects       github.Repository
-	Stories        story.Repository
-	Digests        digest.Repository
-	Usage          UsageRepo
-	Budget         BudgetConfig
-	LLM            LLMGateway
-	GitHub         GitHubGateway
+	Sources  source.Repository
+	Items    item.Repository
+	Projects github.Repository
+	Stories  story.Repository
+	Digests  digest.Repository
+	Usage    UsageRepo
+	Budget   BudgetConfig
+	LLM      LLMGateway
+	GitHub   GitHubGateway
+	// GitHubOwner 我的仓库版块的 GitHub 用户名（GITHUB_OWNER，空 = 不启用刷新）。
+	GitHubOwner    string
 	Fetchers       FetcherRegistry
 	Notifier       Notifier
 	DigestRenderer DigestRenderer

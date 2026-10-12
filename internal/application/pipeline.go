@@ -68,6 +68,11 @@ func RunPipeline(ctx context.Context, d Deps) (*PipelineResult, error) {
 	}
 	res.Discover = ds
 
+	// 我的仓库快照（我的 GitHub 版块）：无 LLM 依赖，失败不阻断流水线
+	if err := RefreshMyRepos(ctx, d); err != nil {
+		fmt.Printf("[pipeline] 我的仓库刷新失败（跳过，继续用旧快照）: %v\n", err)
+	}
+
 	if d.LLM != nil && !budgetHit("描述翻译") {
 		setPhase("translate")
 		if n, err := TranslateProjectDescriptions(ctx, d); err != nil && !errors.Is(err, ErrBudgetExceeded) {

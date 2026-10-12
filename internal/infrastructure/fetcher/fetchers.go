@@ -76,6 +76,25 @@ func (RSS) Fetch(ctx context.Context, s source.Source, _ time.Time) ([]applicati
 			}
 		}
 	}
+	// 全文抓取 + Markdown 化（博客站内阅读管道）：fulltext_md=1 时逐条抓原文页，
+	// 提取正文容器并转成纯 Markdown（安全模型见 markdown.go）。
+	if s.ConfigValue("fulltext_md", "") == "1" {
+		maxItems := s.ConfigInt("fulltext_items", 8)
+		maxChars := s.ConfigInt("fulltext_chars", 20000)
+		selector := s.ConfigValue("content_selector", defaultContentSelector)
+		limit := maxItems
+		if len(out) < limit {
+			limit = len(out)
+		}
+		for i := 0; i < limit; i++ {
+			ftctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			text := fetchFulltextMD(ftctx, out[i].URL, selector, maxChars)
+			cancel()
+			if text != "" {
+				out[i].Content = text
+			}
+		}
+	}
 	return out, nil
 }
 
@@ -106,6 +125,36 @@ func fetchFulltext(ctx context.Context, pageURL string, maxChars int) string {
 		text = string(r[:maxChars])
 	}
 	return text
+}
+
+// fetchFulltextMD 抓取文章页并提取正文容器 → Markdown（博客站内阅读用）。
+// 抓取失败/容器缺失返回空串，由调用方保持条目无正文（详情页兜底展示摘要）。
+func fetchFulltextMD(ctx context.Context, pageURL, selector string, maxChars int) string {
+	body, status, err := safehttp.Fetch(ctx, pageURL, map[string]string{
+		"Accept":     "text/html",
+		"User-Agent": blogFetchUA,
+	})
+	if err != nil || status != 200 {
+		return ""
+	}
+	return extractMarkdown(body, selector, maxChars)
+}
+
+// extractMarkdown 从页面 HTML 提取正文容器并转为纯 Markdown（无网络，测试友好）。
+func extractMarkdown(body []byte, selector string, maxChars int) string {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return ""
+	}
+	container := doc.Find(selector).First()
+	if container.Length() == 0 {
+		return ""
+	}
+	md := htmlToMarkdown(container)
+	if md == "" {
+		return ""
+	}
+	return truncateMarkdown(md, maxChars)
 }
 
 func parseFeedTime(ts ...*time.Time) time.Time {

@@ -25,6 +25,9 @@ const (
 	// StageHotBoard 国内热榜条目：带 rank 元数据，走轻管道（多源共振热度算法），
 	// 不进入 LLM 双评分管道（SelectAndWrite 只捞 StageNew，天然分流）。
 	StageHotBoard Stage = "hotboard"
+	// StageBlog 作者博客文章：站内原生阅读（Markdown 正文），
+	// 不进 LLM 管道也不进国内榜，仅通过 /api/v1/blog 暴露。
+	StageBlog Stage = "blog"
 )
 
 // Selection 精选结果值对象。不可变，只能整体替换。

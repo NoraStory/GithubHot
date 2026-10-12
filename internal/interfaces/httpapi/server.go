@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -99,6 +100,10 @@ func (s *Server) Router() http.Handler {
 		r.Get("/hot/domestic", s.hotDomestic)
 		r.Get("/hot/fusion", s.hotFusion)
 		r.Get("/hot", s.hotAll)
+		// 博客（站内阅读）与我的仓库：个人内容版块
+		r.Get("/blogs", s.blogsAPI)
+		r.Get("/blog/{id}", s.blogDetailAPI)
+		r.Get("/my/repos", s.myReposAPI)
 		r.Get("/digest/latest", s.digestLatest)
 		r.Get("/digest/{date}", s.digestByDate)
 		r.Get("/sources", s.sources)
@@ -177,6 +182,40 @@ func (s *Server) hotFusion(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) hotAll(w http.ResponseWriter, r *http.Request) {
 	v, err := s.buildViewOpts(r)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, v)
+}
+
+// blogsAPI 博客列表（不含正文；站内阅读页按 id 拉详情）。
+func (s *Server) blogsAPI(w http.ResponseWriter, r *http.Request) {
+	v, err := application.BuildBlogView(r.Context(), s.Deps, 0)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, v)
+}
+
+// blogDetailAPI 单篇博客文章（Content 为站内加工的纯 Markdown，前端 marked 渲染）。
+func (s *Server) blogDetailAPI(w http.ResponseWriter, r *http.Request) {
+	det, err := application.BuildBlogDetail(r.Context(), s.Deps, chi.URLParam(r, "id"))
+	if err != nil {
+		if errors.Is(err, application.ErrBlogNotFound) {
+			writeErr(w, 404, err)
+			return
+		}
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, det)
+}
+
+// myReposAPI 我的仓库（快照视图，拉取发生在流水线而非请求路径）。
+func (s *Server) myReposAPI(w http.ResponseWriter, r *http.Request) {
+	v, err := application.BuildMyReposView(r.Context(), s.Deps)
 	if err != nil {
 		writeErr(w, 500, err)
 		return

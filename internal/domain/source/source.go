@@ -20,6 +20,7 @@ const (
 	KindGitHubTrending Kind = "github_trending"
 	KindScript         Kind = "script"
 	KindHotBoard       Kind = "hot_board" // 国内热榜（百度/微博/网易/腾讯，国内直连无需代理）
+	KindBlog           Kind = "blog"      // 作者博客：复用 RSS 抓取器，条目进专用 blog 阶段（站内阅读，不进 LLM 管道）
 	KindXAccount       Kind = "x_account"
 	KindWechatOA       Kind = "wechat_oa"
 )
@@ -27,7 +28,7 @@ const (
 // Implemented 报告某信源种类是否随仓库附带适配器。
 func (k Kind) Implemented() bool {
 	switch k {
-	case KindRSS, KindJSONAPI, KindWebList, KindHackerNews, KindGitHubSearch, KindGitHubTrending, KindScript, KindHotBoard:
+	case KindRSS, KindJSONAPI, KindWebList, KindHackerNews, KindGitHubSearch, KindGitHubTrending, KindScript, KindHotBoard, KindBlog:
 		return true
 	default:
 		return false
