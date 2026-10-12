@@ -76,6 +76,7 @@
 | `cluster-linked` | P 弱 | 0 | 簇成员被封禁的关联标记（面板可视化）。簇关联本身不是证据——自有设备群/同型号/共享出口都会成簇；0 分事件 iprisk 不参与决策 |
 | `webrtc-mismatch` | P 弱 | 0 | WebRTC 泄露 IP 与连接 IP 不一致（疑代理/VPN）。仅观察：双栈错位噪声大且走代理合规 |
 | `altcha-flood` | P 弱 | 0 | challenge 签发超限（`ALTCHA_CHALLENGE_RPM` 默认 60/min）→ 429 + 标记 |
+| `asset-flood` | P 弱 | 30 | 静态资源 ≥600/min 的 L7 洪水绊线（刷新误封修复，2026-10-11）：速率三档线只看主窗口（导航/API/视频流，`classifyRate` 三分类），静态资源（/anzhiyu/**、/img/**、/assets/**）不参与 150/600 线——此前 `no-store` 主题文件使连续 F5 产生上百请求/min 而误封正常用户；管理端 API 亦独立成窗（admin-probe 专用），控制台 2 秒轮询不再计分 |
 | `fp-flood` | R 弱 | 30 | 同 IP 10 分钟上报 ≥8 个不同指纹（新身份农场）。弱类随出口稀释：农场单 UA 可互证，办公/校园多 UA 稀释到 ≤16 不误伤 |
 | `ban-evasion` | **F 强** | 70 | 稳定三元组（canvas pHash/audio/webgl，≥2 项相等）命中 7 天内冻结的封禁设备签名——换 IP 重报的规避者。不设 severe：同型号极端重合的误伤交多证据互证兜底 |
 

@@ -86,6 +86,9 @@ const (
 	tuplePerIPCap   = 8
 	scannerMinReqs  = 50
 	scanner404Ratio = 0.4
+	// asset-flood 绊线（刷新误封修复）：静态资源不计入 150/600 速率线后的 L7 洪水
+	// 兜底——正常页面刷新（主题文件 1h 缓存后仅首次加载几十个）远低于此线
+	staticFloodPerMin = 600
 	// 指纹全生命周期关联 IP 数超此值记漂移观察（出差多年累积也难触及）
 	fpChurnMaxIPs = 12
 	// 连坐/漂移判定"设备劣迹"的时间窗与抽查 IP 数
@@ -374,14 +377,18 @@ func banDuration(strikes int) time.Duration {
 }
 
 // ipWindow 单 IP 的内存滑动档案（第一层）。
+// 三个窗口按请求类别分流（classifyRate）：价值请求/静态资源/管理端——
+// 静态资源（刷新风暴的大头）与管理端轮询不再污染 150/600 速率线。
 type ipWindow struct {
-	times     []time.Time // 最近 5 分钟请求时间
-	notFound  int         // 窗口内 404 数
-	reqs      int         // 本小时累计
-	uaSet     map[string]bool
-	lastFlush time.Time
-	dirty     bool
-	hsTimes   []time.Time // 握手通道请求时间（独立 60s 窗口，见 handshakeAllow）
+	times       []time.Time // 主窗口：最近 5 分钟价值请求（导航/API/视频流）
+	staticTimes []time.Time // 静态资源窗口（asset-flood 绊线用）
+	adminTimes  []time.Time // 管理端 API 窗口（admin-probe 判定用）
+	notFound    int         // 窗口内 404 数（全类别）
+	reqs        int         // 本小时累计（全类别，面板统计用）
+	uaSet       map[string]bool
+	lastFlush   time.Time
+	dirty       bool
+	hsTimes     []time.Time // 握手通道请求时间（独立 60s 窗口，见 handshakeAllow）
 }
 
 // GeoProvider P2-5 地理数据源（geoip.Service 实现；测试可注入 stub）。
@@ -615,7 +622,7 @@ func (g *IPGuard) periodicCleanup() {
 			cutoff := now.Add(-30 * time.Minute)
 			cleaned := 0
 			for ip, w := range g.windows {
-				if len(w.times) == 0 && w.lastFlush.Before(cutoff) {
+				if len(w.times) == 0 && len(w.staticTimes) == 0 && len(w.adminTimes) == 0 && w.lastFlush.Before(cutoff) {
 					delete(g.windows, ip)
 					cleaned++
 					if cleaned >= 5000 {
@@ -1080,10 +1087,10 @@ func (g *IPGuard) Middleware(next http.Handler) http.Handler {
 			}
 		}
 
-		// ③ 第一层：滑动窗口记录（healthz 不计）
+		// ③ 第一层：滑动窗口记录（按类别分流：价值请求/静态资源/管理端）
 		rec := &statusWriter{ResponseWriter: w, status: 200}
-		win := g.record(ip, r.UserAgent())
 		path := r.URL.Path
+		win := g.record(ip, r.UserAgent(), path)
 
 		// ④ 第三层：身份令牌核验（API/带指纹请求）
 		if !local {
@@ -1202,7 +1209,7 @@ func (s *statusWriter) WriteHeader(code int) {
 }
 
 // record 第一层记录：滑动窗口 + 小时计数 + 定期落库档案。
-func (g *IPGuard) record(ip, ua string) *ipWindow {
+func (g *IPGuard) record(ip, ua, urlPath string) *ipWindow {
 	now := time.Now()
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -1217,13 +1224,23 @@ func (g *IPGuard) record(ip, ua string) *ipWindow {
 		g.windows[ip] = w
 	}
 	cutoff := now.Add(-windowSize)
-	keep := w.times[:0]
-	for _, t := range w.times {
-		if t.After(cutoff) {
-			keep = append(keep, t)
+	prune := func(ts []time.Time) []time.Time {
+		keep := ts[:0]
+		for _, t := range ts {
+			if t.After(cutoff) {
+				keep = append(keep, t)
+			}
 		}
+		return keep
 	}
-	w.times = append(keep, now)
+	switch classifyRate(urlPath) {
+	case rateClassStatic:
+		w.staticTimes = append(prune(w.staticTimes), now)
+	case rateClassAdmin:
+		w.adminTimes = append(prune(w.adminTimes), now)
+	default:
+		w.times = append(prune(w.times), now)
+	}
 	w.reqs++
 	if ua != "" {
 		w.uaSet[ua] = true
@@ -1248,7 +1265,7 @@ func (g *IPGuard) record(ip, ua string) *ipWindow {
 		cutoff := now.Add(-2 * windowSize)
 		cleaned := 0
 		for k, x := range g.windows {
-			if len(x.times) == 0 && x.lastFlush.Before(cutoff) {
+			if len(x.times) == 0 && len(x.staticTimes) == 0 && len(x.adminTimes) == 0 && x.lastFlush.Before(cutoff) {
 				delete(g.windows, k)
 				cleaned++
 				if cleaned >= 100 {
@@ -1276,26 +1293,38 @@ func isMachineUA(ua string) bool {
 }
 
 // evaluate 第一层/第三层违规判定（速率、爬虫、扫描器）。
+// 速率三档线只看主窗口（导航/API/视频流，classifyRate 分流）——静态资源刷新
+// 风暴与管理端轮询分别走 asset-flood / admin-probe 独立口径。
 // 优化版：快速拷贝数据后在锁外计算，减少锁持有时间。
 func (g *IPGuard) evaluate(ctx context.Context, ip, path, ua string, w *ipWindow) {
 	// 快速拷贝副本，在锁外计算
 	g.mu.Lock()
 	times := make([]time.Time, len(w.times))
 	copy(times, w.times)
+	staticTimes := make([]time.Time, len(w.staticTimes))
+	copy(staticTimes, w.staticTimes)
+	adminTimes := make([]time.Time, len(w.adminTimes))
+	copy(adminTimes, w.adminTimes)
 	nf := w.notFound
 	g.mu.Unlock()
 
 	now := time.Now()
 	cutoff := now.Add(-time.Minute)
-	rate1m := 0
-	for _, t := range times {
-		if t.After(cutoff) {
-			rate1m++
+	countRecent := func(ts []time.Time) int {
+		n := 0
+		for _, t := range ts {
+			if t.After(cutoff) {
+				n++
+			}
 		}
+		return n
 	}
-	total := len(times)
+	rate1m := countRecent(times)
+	static1m := countRecent(staticTimes)
+	admin1m := countRecent(adminTimes)
+	totalAll := len(times) + len(staticTimes) + len(adminTimes)
 
-	// 严重：流量攻击
+	// 严重：流量攻击（仅价值请求口径）
 	if rate1m >= severeRatePerMin {
 		g.event(ctx, ip, "traffic-attack", sprintf("%d req/min", rate1m), 100, true)
 		return
@@ -1309,21 +1338,26 @@ func (g *IPGuard) evaluate(ctx context.Context, ip, path, ua string, w *ipWindow
 		}
 		g.event(ctx, ip, "rate", sprintf("%d req/min", rate1m), score, false)
 	}
-	// 管理端探测
-	if strings.HasPrefix(path, "/api/v1/admin") && rate1m >= adminRatePerMin {
-		g.event(ctx, ip, "admin-probe", sprintf("admin API %d req/min", rate1m), 50, false)
+	// 静态资源洪水绊线：远高于正常刷新量，弱类单条不封（面板可见可互证）
+	if static1m >= staticFloodPerMin {
+		g.event(ctx, ip, "asset-flood", sprintf("静态资源 %d req/min", static1m), 30, false)
 	}
-	// 扫描器：高请求量 + 高 404 率
-	if total >= scannerMinReqs && float64(nf)/float64(total) >= scanner404Ratio {
-		g.event(ctx, ip, "scanner", sprintf("404 率 %.0f%%（%d/%d）", float64(nf)/float64(total)*100, nf, total), 40, false)
+	// 管理端探测（独立窗口：控制台正常轮询 30/min 远低于线，枚举扫描才触发）
+	if admin1m >= adminRatePerMin {
+		g.event(ctx, ip, "admin-probe", sprintf("admin API %d req/min", admin1m), 50, false)
 	}
-	// 爬虫 UA
-	lowUA := strings.ToLower(ua)
-	if (ua == "" || strings.Contains(lowUA, "curl") || strings.Contains(lowUA, "wget") ||
-		strings.Contains(lowUA, "python") || strings.Contains(lowUA, "scrapy") ||
-		strings.Contains(lowUA, "httpclient") || strings.Contains(lowUA, "bot") && !strings.Contains(lowUA, "mozilla")) &&
-		!strings.HasPrefix(path, "/assets/") {
-		g.event(ctx, ip, "bot-ua", ua, 25, false)
+	// 扫描器：高请求量 + 高 404 率（全类别口径——404 可能来自任何路径）
+	if totalAll >= scannerMinReqs && float64(nf)/float64(totalAll) >= scanner404Ratio {
+		g.event(ctx, ip, "scanner", sprintf("404 率 %.0f%%（%d/%d）", float64(nf)/float64(totalAll)*100, nf, totalAll), 40, false)
+	}
+	// 爬虫 UA：仅主窗口请求计分（爬虫抓静态主题文件不是威胁信号）
+	if classifyRate(path) == rateClassMain {
+		lowUA := strings.ToLower(ua)
+		if ua == "" || strings.Contains(lowUA, "curl") || strings.Contains(lowUA, "wget") ||
+			strings.Contains(lowUA, "python") || strings.Contains(lowUA, "scrapy") ||
+			strings.Contains(lowUA, "httpclient") || strings.Contains(lowUA, "bot") && !strings.Contains(lowUA, "mozilla") {
+			g.event(ctx, ip, "bot-ua", ua, 25, false)
+		}
 	}
 }
 

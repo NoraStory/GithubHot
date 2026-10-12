@@ -82,7 +82,7 @@ go build -o githubhot ./cmd/githubhot
 | `GITHUB_TOKEN` | 建议 | 无 token 限 60 次/小时；配置后 5000 次/小时 |
 | `GITHUB_PROXY` | 国内服务器 | 直连 github.com 失败时的镜像前缀（如 `https://gh-proxy.com`），采集请求自动重试（5xx/429/网络错误，最多 3 次） |
 | `HTTPS_PROXY` | 国内服务器 | 系统代理；采集与 LLM 请求均遵循 |
-| `IP_GUARD_ENABLED` | | 三层 IP 防护总开关（默认开启，`0` 关闭）。违规计分走多证据模型（见 `docs/ip-guard-scoring.md`）：有效分 ≥60 → `/api/v1` 软封锁 429（管理端/有效会话/APP 签名豁免）；≥100 且 ≥2 类 → 封禁；`githubhot risk replay --sweep` 可对历史数据回放调参 |
+| `IP_GUARD_ENABLED` | | 三层 IP 防护总开关（默认开启，`0` 关闭）。违规计分走多证据模型（见 `docs/ip-guard-scoring.md`）：速率三档线只统计价值请求（导航/API/视频流），静态资源与管理端轮询分流独立窗口；有效分 ≥60 → `/api/v1` 软封锁 429（管理端/有效会话/APP 签名豁免）；≥100 且 ≥2 类 → 封禁；`githubhot risk replay --sweep` 可对历史数据回放调参 |
 | `TRUSTED_PROXY` | 反代部署 | 受信代理 CIDR（逗号分隔）。为空 = 不信任任何代理头（用 TCP 对端地址）；配了才采信 `X-Forwarded-For`/`X-Real-IP` 并取最右非受信地址。直连部署留空 |
 | `IP_GUARD_LOCAL` | | 回环/内网白名单（默认开启便于本机调试；公网部署务必设为 `0`） |
 | `IP_GUARD_SECRET` | | 防护身份令牌 HMAC 密钥；不设置则每次启动随机生成（重启后旧令牌失效） |

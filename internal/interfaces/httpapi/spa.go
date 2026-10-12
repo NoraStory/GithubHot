@@ -53,10 +53,15 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 	}
 	if data, err := fs.ReadFile(dist, p); err == nil {
 		w.Header().Set("Content-Type", contentType(p))
-		// 带哈希的资源可长缓存；其余静态资源与页面禁用缓存（embed 无 Last-Modified，
-		// no-cache 无法真正回源校验，必须 no-store），避免部署后浏览器拿到旧版入口页
+		// 三档缓存：带哈希产物长缓存；主题静态文件（/anzhiyu/** 含 161 个 CJK 字体
+		// 子集、/img/**）1 小时——此前 no-store 使每次刷新全量重打上百请求，既是
+		// 带宽浪费也是刷新误封的直接放大器，1h 窗口保证部署后最迟 1 小时收敛；
+		// 其余（index.html / SPA 回退）保持 no-store——入口页引用 hash 产物与
+		// 主题文件，绝不能缓存旧版。
 		if strings.HasPrefix(p, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else if classifyRate("/"+p) == rateClassStatic {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
 		} else {
 			w.Header().Set("Cache-Control", "no-store")
 		}
