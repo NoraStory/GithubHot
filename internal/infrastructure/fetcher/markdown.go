@@ -148,12 +148,17 @@ func inlineMD(s *goquery.Selection) string {
 }
 
 // imageMD 图片 → ![alt](src)；懒加载站点 src 缺失时回退 data-src。
+// CDN 的 UI 装饰资源（点赞/收藏/阅读数小图标，如 csdnimg.cn/release/）不属于
+// 文章内容，跳过——正文容器会带上文章头部元信息条，渲染成一排无意义小图。
 func imageMD(s *goquery.Selection) string {
 	src := attrOr(s, "src")
 	if src == "" {
 		src = attrOr(s, "data-src")
 	}
 	if src == "" {
+		return ""
+	}
+	if strings.Contains(src, "csdnimg.cn/release/") {
 		return ""
 	}
 	alt := attrOr(s, "alt")

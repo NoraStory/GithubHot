@@ -97,6 +97,20 @@ func TestHTMLToMarkdownEscapesBlockStart(t *testing.T) {
 	}
 }
 
+// CDN 的 UI 装饰图标（点赞/收藏/阅读数，csdnimg.cn/release/ 路径）不属于文章内容。
+func TestHTMLToMarkdownSkipsCDNUIIcons(t *testing.T) {
+	html := `<div id="content_views"><p>正文段落
+		<img src="https://csdnimg.cn/release/blogv2/dist/pc/img/newHeart2023Active.png">
+		<img src="https://i-blog.csdnimg.cn/blog_migrate/real-article-shot.png" alt="截图"></p></div>`
+	out := htmlToMarkdown(parseSel(t, html, "#content_views"))
+	if strings.Contains(out, "csdnimg.cn/release") {
+		t.Errorf("UI 装饰图标未过滤:\n%s", out)
+	}
+	if !strings.Contains(out, "i-blog.csdnimg.cn/blog_migrate/real-article-shot.png") {
+		t.Errorf("文章截图被误伤:\n%s", out)
+	}
+}
+
 // extractMarkdown：页面里仅正文容器参与转换，页头页脚杂讯不进 Markdown。
 func TestExtractMarkdown(t *testing.T) {
 	page := []byte(`<html><head><title>t</title><style>body{}</style></head><body>
