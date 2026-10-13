@@ -86,8 +86,9 @@ func CollectSources(ctx context.Context, d Deps, workers int) (CollectStats, err
 	return stats, nil
 }
 
-// blogFulltextTimeout 单篇博客正文抓取超时。
-const blogFulltextTimeout = 20 * time.Second
+// blogFulltextTimeout 单篇博客正文抓取超时。预算须覆盖实现内的节流等待
+//（15s 基线 + 抖动，第 2 篇起都要等）加请求本身，20s 会在等待中超时。
+const blogFulltextTimeout = 60 * time.Second
 
 // blogFulltextMaxConsecutiveEmpty 连续空结果上限：达到即认为目标站 WAF 已进入
 // 挑战窗口，本轮剩余文章全部跳过（继续撞只会加重封锁）。
