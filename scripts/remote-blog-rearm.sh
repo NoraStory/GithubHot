@@ -12,7 +12,7 @@ con = sqlite3.connect('$DB')
 total, missing = con.execute(\"SELECT COUNT(*), SUM(LENGTH(content)=0) FROM items WHERE state='blog'\").fetchone()
 print(f'blog 条目 {total} 篇，缺正文 {missing} 篇')
 if missing:
-    con.execute("UPDATE sources SET last_fetched_at='', interval_minutes=10 WHERE id='csdn-blog'")
+    con.execute(\"UPDATE sources SET last_fetched_at='', interval_minutes=10 WHERE id='csdn-blog'\")
     print('csdn-blog 已重置为到期（间隔临时 10 分钟）')
 else:
     con.execute(\"UPDATE sources SET interval_minutes=240 WHERE id='csdn-blog'\")
