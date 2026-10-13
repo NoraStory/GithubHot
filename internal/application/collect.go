@@ -89,6 +89,10 @@ func CollectSources(ctx context.Context, d Deps, workers int) (CollectStats, err
 // blogFulltextTimeout 单篇博客正文抓取超时。
 const blogFulltextTimeout = 20 * time.Second
 
+// blogFulltextMaxConsecutiveEmpty 连续空结果上限：达到即认为目标站 WAF 已进入
+// 挑战窗口，本轮剩余文章全部跳过（继续撞只会加重封锁）。
+const blogFulltextMaxConsecutiveEmpty = 3
+
 // blogFulltext 抓单篇博客正文（经 Fulltext 端口，实现内含全进程请求节流）；
 // 端口未装配或抓取失败返回空串（条目保持无正文，详情页兜底展示摘要）。
 func blogFulltext(ctx context.Context, d Deps, pageURL string) string {
@@ -118,6 +122,8 @@ func collectOne(ctx context.Context, d Deps, s source.Source, now time.Time) (in
 		}
 		return 0, 0, ferr
 	}
+	// 博客 lane 的 WAF 退避状态：连续空结果计数（跨条目累计）与本轮跳过数
+	consecutiveEmpty, skipped := 0, 0
 	for _, r := range raws {
 		key, kerr := shared.DedupeKey(r.URL)
 		if kerr != nil {
@@ -146,6 +152,8 @@ func collectOne(ctx context.Context, d Deps, s source.Source, now time.Time) (in
 		// 博客 lane：正文抓取发生在判重之后——只抓新入库条目与缺正文的旧条目
 		//（稳态零请求；每轮全量重抓会触发目标站 WAF，实测 CSDN 连续第二篇即 JS 挑战）。
 		// 抓到正文即回写：新行补全文，旧行自愈当年抓取失败留下的空正文。
+		// 连续 3 篇拿不到正文说明 WAF 已进入挑战窗口，本轮剩余全部跳过——
+		// 继续撞只会加重封锁，下一轮流水线自然重试（回填自愈通道）。
 		if s.Kind == source.KindBlog {
 			need := ok
 			if !ok {
@@ -155,10 +163,17 @@ func collectOne(ctx context.Context, d Deps, s source.Source, now time.Time) (in
 				}
 			}
 			if need {
+				if consecutiveEmpty >= blogFulltextMaxConsecutiveEmpty {
+					skipped++
+					continue
+				}
 				if md := blogFulltext(ctx, d, r.URL); md != "" {
+					consecutiveEmpty = 0
 					if uerr := d.Items.UpdateContent(ctx, it.ID, md); uerr != nil {
 						log.Printf("[collect] 博客正文回填失败 %s: %v", it.ID, uerr)
 					}
+				} else {
+					consecutiveEmpty++
 				}
 			}
 		}
@@ -167,6 +182,9 @@ func collectOne(ctx context.Context, d Deps, s source.Source, now time.Time) (in
 		} else {
 			dupes++
 		}
+	}
+	if skipped > 0 {
+		log.Printf("[collect] 信源 %s：WAF 挑战窗口，本轮跳过 %d 篇博客正文（下轮重试）", s.ID, skipped)
 	}
 	if merr := d.Sources.MarkFetched(ctx, s.ID, now); merr != nil {
 		log.Printf("[collect] 记录抓取时间失败 %s: %v", s.ID, merr)

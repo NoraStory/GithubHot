@@ -133,9 +133,10 @@ func fetchFulltextMD(ctx context.Context, pageURL, selector string, maxChars int
 	return extractMarkdown(body, selector, maxChars)
 }
 
-// blogThrottleMinInterval 文章页请求最小间隔：CSDN 等站点的 WAF 对连续请求
-// 弹 JS 挑战（实测第二篇即 521），节流是正文抓取成功的前提。
-const blogThrottleMinInterval = 3 * time.Second
+// blogThrottleMinInterval 文章页请求最小间隔：CSDN 等站点的 WAF 按"短时间连续
+// 请求"弹 JS 挑战（实测 ~3s 间隔只放行前几篇、之后连续 521；15s 间隔≈人类浏览
+// 速率可稳定通过），节流是正文抓取成功的前提。
+const blogThrottleMinInterval = 15 * time.Second
 
 var (
 	blogThrottleMu   sync.Mutex
@@ -147,7 +148,7 @@ func blogFulltextThrottle(ctx context.Context) {
 	blogThrottleMu.Lock()
 	wait := time.Duration(0)
 	if !blogThrottleLast.IsZero() {
-		next := blogThrottleLast.Add(blogThrottleMinInterval + time.Duration(rand.Int63n(int64(2*time.Second))))
+		next := blogThrottleLast.Add(blogThrottleMinInterval + time.Duration(rand.Int63n(int64(5*time.Second))))
 		if d := time.Until(next); d > 0 {
 			wait = d
 		}
